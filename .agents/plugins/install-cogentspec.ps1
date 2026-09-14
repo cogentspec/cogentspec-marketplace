@@ -291,7 +291,7 @@ try {
             throw 'The Desktop Bridge launcher contains a prohibited browser or window-arrangement action.'
         }
     }
-    foreach ($requiredMarker in @("browserOpened = `$false", "bridge = 'started'", "bridge = 'already_running'", '-WorkspaceGrant', 'https://cogentspec.app/stack', '#desktop=', 'start-cogentstack-bridge.ps1')) {
+    foreach ($requiredMarker in @("browserOpened = `$false", "bridge = 'started'", "bridge = 'already_running'", '-WorkspaceGrant', '-ContextKey $resolvedContext', 'https://cogentspec.app/stack', '#desktop=', 'start-cogentstack-bridge.ps1')) {
         if (-not ($bridgeScript.Contains($requiredMarker) -or $skillText.Contains($requiredMarker))) {
             throw 'The Desktop Bridge launcher is missing a required web-first connection marker.'
         }

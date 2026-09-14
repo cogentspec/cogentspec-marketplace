@@ -7,6 +7,8 @@ param(
     [ValidateSet('chatgpt', 'claude-desktop')]
     [string]$Surface = 'chatgpt',
 
+    [string]$ContextKey = '',
+
     [switch]$WorkspaceGrant
 )
 
@@ -66,13 +68,13 @@ function Save-CogentSpecCredential($Result) {
     } | ConvertTo-Json | Set-Content -LiteralPath $credentialPath -Encoding UTF8
 }
 
-function New-CogentSpecWorkspaceGrant([string]$Token) {
+function New-CogentSpecWorkspaceGrant([string]$Token, [string]$GrantContextKey, [string]$GrantSurface) {
     return Invoke-RestMethod `
         -Method Post `
         -Uri "$serviceUrl/api/device-authorization/browser-grant" `
         -ContentType 'application/json' `
         -Headers @{ Accept = 'application/json'; Authorization = "Bearer $Token" } `
-        -Body '{}' `
+        -Body (@{ contextKey = $GrantContextKey; surface = $GrantSurface } | ConvertTo-Json -Compress) `
         -TimeoutSec 20
 }
 
@@ -93,7 +95,7 @@ if ($Mode -eq 'status') {
                 connectedAt = $credential.connectedAt
             }
             if ($WorkspaceGrant) {
-                $grant = New-CogentSpecWorkspaceGrant $token
+                $grant = New-CogentSpecWorkspaceGrant $token $ContextKey $Surface
                 $statusResult.workspaceCode = [string]$grant.workspaceCode
                 $statusResult.workspaceCodeExpiresAt = [string]$grant.expiresAt
             }
@@ -122,7 +124,7 @@ if ($Mode -eq 'status') {
                             installationBound = $true
                         }
                         if ($WorkspaceGrant) {
-                            $grant = New-CogentSpecWorkspaceGrant ([string]$renewed.token)
+                            $grant = New-CogentSpecWorkspaceGrant ([string]$renewed.token) $ContextKey $Surface
                             $statusResult.workspaceCode = [string]$grant.workspaceCode
                             $statusResult.workspaceCodeExpiresAt = [string]$grant.expiresAt
                         }

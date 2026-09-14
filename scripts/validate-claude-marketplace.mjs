@@ -92,7 +92,7 @@ for (const name of requiredScripts) {
 }
 
 const bridge = await readFile(join(scriptsRoot, "start-cogentstack-bridge.ps1"), "utf8");
-for (const marker of ["bridge = 'started'", "bridge = 'already_running'", "browserOpened = $false", "bridge-runtime\\$runtimeVersion", "[ValidateSet('chatgpt', 'claude-desktop')]", "surface=$([Uri]::EscapeDataString($Surface))"]) {
+for (const marker of ["bridge = 'started'", "bridge = 'already_running'", "browserOpened = $false", "bridge-runtime\\$runtimeVersion", "[ValidateSet('chatgpt', 'claude-desktop')]", "surface=$([Uri]::EscapeDataString($Surface))", "-ContextKey $resolvedContext", "-WorkspaceGrant", "#desktop="]) {
   if (!bridge.includes(marker)) fail(`Desktop Bridge starter is missing required marker: ${marker}`);
 }
 if (!skill.includes("-Surface claude-desktop")) fail("Claude launcher must identify its desktop surface");
@@ -106,7 +106,7 @@ for (const marker of ["/api/plugin/desktop-actions", "create_project", "delete_p
 }
 
 const connector = await readFile(join(scriptsRoot, "connect-cogentstack.ps1"), "utf8");
-for (const marker of ["desktop-credential.json", "DataProtectionScope]::CurrentUser", "installationBound = $true"]) {
+for (const marker of ["desktop-credential.json", "DataProtectionScope]::CurrentUser", "installationBound = $true", "contextKey = $GrantContextKey", "surface = $GrantSurface", "/api/device-authorization/browser-grant"]) {
   if (!connector.includes(marker)) fail(`shared connector is missing required marker: ${marker}`);
 }
 for (const forbidden of ["claude-desktop-credential.json", "claude-desktop-authorization.json"]) {

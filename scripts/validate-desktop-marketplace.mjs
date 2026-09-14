@@ -9,6 +9,7 @@ const installInstructions = await readFile(join(repositoryRoot, ".agents", "plug
 const versionedInstallInstructions = await readFile(join(repositoryRoot, ".agents", "plugins", "INSTALL.v3.md"), "utf8");
 const boundedInstaller = await readFile(join(repositoryRoot, ".agents", "plugins", "install-cogentspec.ps1"), "utf8");
 const sourcePluginPath = join(repositoryRoot, "plugins", "cogentspec");
+const compatibilityPluginPath = join(repositoryRoot, "plugins", "cogentstack");
 const semver = /^[0-9]+\.[0-9]+\.[0-9]+$/;
 const sha256 = /^[a-f0-9]{64}$/;
 
@@ -111,6 +112,23 @@ const actualPluginFiles = pluginEntries
   .sort();
 if (JSON.stringify(actualPluginFiles) !== JSON.stringify(allowedPluginFiles)) {
   fail("the bounded installer allowlist does not exactly match the public plugin package");
+}
+
+const canonicalStarter = await readFile(join(sourcePluginPath, "skills", "cogentspec", "scripts", "start-cogentstack-bridge.ps1"), "utf8");
+const canonicalConnector = await readFile(join(sourcePluginPath, "skills", "cogentspec", "scripts", "connect-cogentstack.ps1"), "utf8");
+const compatibilityStarter = await readFile(join(compatibilityPluginPath, "skills", "cogentstack", "scripts", "start-cogentstack-bridge.ps1"), "utf8");
+const compatibilityConnector = await readFile(join(compatibilityPluginPath, "skills", "cogentstack", "scripts", "connect-cogentstack.ps1"), "utf8");
+for (const [name, source] of [["starter", canonicalStarter], ["connector", canonicalConnector]]) {
+  for (const marker of name === "starter"
+    ? ["-ContextKey $resolvedContext", "-WorkspaceGrant", "https://cogentspec.app/stack", "#desktop="]
+    : ["contextKey = $GrantContextKey", "surface = $GrantSurface", "/api/device-authorization/browser-grant"]) {
+    if (!source.includes(marker)) fail(`the Desktop Bridge ${name} is missing bound workspace marker: ${marker}`);
+  }
+}
+const normalizedScript = (value) => value.replaceAll("\r\n", "\n");
+if (normalizedScript(canonicalStarter) !== normalizedScript(compatibilityStarter)
+  || normalizedScript(canonicalConnector) !== normalizedScript(compatibilityConnector)) {
+  fail("the canonical and compatibility Desktop Bridge handoffs differ");
 }
 
 const marketplace = JSON.parse(await readFile(join(repositoryRoot, ".agents", "plugins", "marketplace.json"), "utf8"));

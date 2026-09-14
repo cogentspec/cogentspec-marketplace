@@ -43,7 +43,7 @@ if (-not (Test-Path -LiteralPath $connectionScript -PathType Leaf) -or @($source
 
 $powershellCommand = Get-Command powershell.exe, pwsh.exe -ErrorAction SilentlyContinue | Select-Object -First 1
 if (-not $powershellCommand) { throw 'Windows PowerShell is required by Desktop Bridge.' }
-$connectionOutput = @(& ([string]$powershellCommand.Source) -NoProfile -ExecutionPolicy Bypass -File $connectionScript -Mode status -Surface $Surface -WorkspaceGrant 2>&1)
+$connectionOutput = @(& ([string]$powershellCommand.Source) -NoProfile -ExecutionPolicy Bypass -File $connectionScript -Mode status -Surface $Surface -ContextKey $resolvedContext -WorkspaceGrant 2>&1)
 $connectionJson = @($connectionOutput | ForEach-Object { $_.ToString() } | Where-Object { $_.Trim().StartsWith('{') } | Select-Object -Last 1)
 if (-not $connectionJson) { throw 'Desktop Bridge could not verify the account-bound installation.' }
 $connection = $connectionJson | ConvertFrom-Json
