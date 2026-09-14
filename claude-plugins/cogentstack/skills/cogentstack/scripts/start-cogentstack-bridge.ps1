@@ -25,7 +25,8 @@ function Get-TextSha256([string]$Value) {
 
 $projectContext = Get-CogentSpecProjectContext -ExplicitContextKey $ContextKey
 $resolvedContext = [string]$projectContext.ContextKey
-$workspaceUrl = "https://cogentspec.com/stack?surface=$([Uri]::EscapeDataString($Surface))&context=$([Uri]::EscapeDataString($resolvedContext))"
+$connectionUrl = "https://cogentspec.com/stack?surface=$([Uri]::EscapeDataString($Surface))"
+$workspaceUrl = $connectionUrl
 $connectionScript = Join-Path $PSScriptRoot 'connect-cogentstack.ps1'
 $sourceScriptNames = @(
     'connect-cogentstack.ps1',
@@ -42,7 +43,7 @@ if (-not (Test-Path -LiteralPath $connectionScript -PathType Leaf) -or @($source
 
 $powershellCommand = Get-Command powershell.exe, pwsh.exe -ErrorAction SilentlyContinue | Select-Object -First 1
 if (-not $powershellCommand) { throw 'Windows PowerShell is required by Desktop Bridge.' }
-$connectionOutput = @(& ([string]$powershellCommand.Source) -NoProfile -ExecutionPolicy Bypass -File $connectionScript -Mode status -Surface $Surface 2>&1)
+$connectionOutput = @(& ([string]$powershellCommand.Source) -NoProfile -ExecutionPolicy Bypass -File $connectionScript -Mode status -Surface $Surface -WorkspaceGrant 2>&1)
 $connectionJson = @($connectionOutput | ForEach-Object { $_.ToString() } | Where-Object { $_.Trim().StartsWith('{') } | Select-Object -Last 1)
 if (-not $connectionJson) { throw 'Desktop Bridge could not verify the account-bound installation.' }
 $connection = $connectionJson | ConvertFrom-Json
@@ -57,6 +58,10 @@ if ([string]$connection.status -ne 'connected') {
     })
     exit 0
 }
+if ([string]$connection.workspaceCode -notmatch '^cgw_[A-Za-z0-9_-]{32,}$') {
+    throw 'Desktop Bridge could not create a private CogentSpec.app workspace handoff.'
+}
+$workspaceUrl = "https://cogentspec.app/stack?surface=$([Uri]::EscapeDataString($Surface))&context=$([Uri]::EscapeDataString($resolvedContext))#desktop=$([Uri]::EscapeDataString([string]$connection.workspaceCode))"
 
 $localStateRoot = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'CogentSpec'
 $stateRoot = Join-Path $localStateRoot 'bridge'

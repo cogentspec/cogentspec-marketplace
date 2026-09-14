@@ -181,7 +181,7 @@ try {
     if ($finalUrl -ne $workspaceUrl) {
         throw 'The CogentSpec workspace redirected instead of returning the official web workspace.'
     }
-    if ($response.Content -notmatch 'Creating a project' -or $response.Content -notmatch 'Find a project type') {
+    if ($response.Content -notmatch 'What would you like to create\?' -or $response.Content -notmatch 'project-idea') {
         throw 'The CogentSpec workspace is missing a required project-creation marker.'
     }
     Complete-InstallStage
@@ -271,7 +271,9 @@ try {
         'Run `scripts/start-cogentstack-bridge.ps1 -ContextKey <resolved context> -Surface chatgpt` exactly once.',
         'This helper performs the one account-status check itself.',
         '`browserOpened: false`',
-        'Do not open it, call a browser-control tool, create or select a browser tab',
+        'Do not open the workspace link, call a browser-control tool, create or select a browser tab',
+        'https://cogentspec.app',
+        'https://cogentspec.com/stack',
         'Qwen Desktop is an optional CogentSpec-owned integrated application and includes the same Bridge',
         'queues `create_project` for Desktop Bridge',
         'queues `preview_project` for Desktop Bridge',
@@ -289,7 +291,7 @@ try {
             throw 'The Desktop Bridge launcher contains a prohibited browser or window-arrangement action.'
         }
     }
-    foreach ($requiredMarker in @("browserOpened = `$false", "bridge = 'started'", "bridge = 'already_running'", 'start-cogentstack-bridge.ps1')) {
+    foreach ($requiredMarker in @("browserOpened = `$false", "bridge = 'started'", "bridge = 'already_running'", '-WorkspaceGrant', 'https://cogentspec.app/stack', '#desktop=', 'start-cogentstack-bridge.ps1')) {
         if (-not ($bridgeScript.Contains($requiredMarker) -or $skillText.Contains($requiredMarker))) {
             throw 'The Desktop Bridge launcher is missing a required web-first connection marker.'
         }

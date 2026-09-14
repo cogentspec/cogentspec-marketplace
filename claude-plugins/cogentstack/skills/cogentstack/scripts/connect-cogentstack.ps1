@@ -5,7 +5,9 @@ param(
     [string]$InstallationRequest = '',
 
     [ValidateSet('chatgpt', 'claude-desktop')]
-    [string]$Surface = 'chatgpt'
+    [string]$Surface = 'chatgpt',
+
+    [switch]$WorkspaceGrant
 )
 
 Set-StrictMode -Version Latest
@@ -20,6 +22,7 @@ if ($null -eq ('System.Security.Cryptography.ProtectedData' -as [type])) {
 }
 
 $serviceUrl = 'https://cogentspec.com'
+$workspaceOrigin = 'https://cogentspec.app'
 $stateRoot = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'CogentSpec'
 $pendingPath = Join-Path $stateRoot 'desktop-authorization.json'
 $credentialPath = Join-Path $stateRoot 'desktop-credential.json'
@@ -63,6 +66,16 @@ function Save-CogentSpecCredential($Result) {
     } | ConvertTo-Json | Set-Content -LiteralPath $credentialPath -Encoding UTF8
 }
 
+function New-CogentSpecWorkspaceGrant([string]$Token) {
+    return Invoke-RestMethod `
+        -Method Post `
+        -Uri "$serviceUrl/api/device-authorization/browser-grant" `
+        -ContentType 'application/json' `
+        -Headers @{ Accept = 'application/json'; Authorization = "Bearer $Token" } `
+        -Body '{}' `
+        -TimeoutSec 20
+}
+
 if ($Mode -eq 'status') {
     if (Test-Path -LiteralPath $credentialPath) {
         $credential = Get-Content -Raw -LiteralPath $credentialPath | ConvertFrom-Json
@@ -73,12 +86,18 @@ if ($Mode -eq 'status') {
                 -Uri "$serviceUrl/api/device-authorization/token" `
                 -Headers @{ Accept = 'application/json'; Authorization = "Bearer $token" } `
                 -TimeoutSec 20
-            Write-CompactJson ([ordered]@{
+            $statusResult = [ordered]@{
                 status = 'connected'
                 email = $connection.subscriber.email
                 plan = $connection.subscriber.plan
                 connectedAt = $credential.connectedAt
-            })
+            }
+            if ($WorkspaceGrant) {
+                $grant = New-CogentSpecWorkspaceGrant $token
+                $statusResult.workspaceCode = [string]$grant.workspaceCode
+                $statusResult.workspaceCodeExpiresAt = [string]$grant.expiresAt
+            }
+            Write-CompactJson $statusResult
         } catch {
             $statusCode = if ($_.Exception.Response) { [int]$_.Exception.Response.StatusCode } else { 0 }
             if ($statusCode -eq 401) {
@@ -94,14 +113,20 @@ if ($Mode -eq 'status') {
                             -Body (@{ renewalToken = $renewalToken } | ConvertTo-Json -Compress) `
                             -TimeoutSec 20
                         Save-CogentSpecCredential $renewed
-                        Write-CompactJson ([ordered]@{
+                        $statusResult = [ordered]@{
                             status = 'connected'
                             email = $renewed.subscriber.email
                             plan = $renewed.subscriber.plan
                             connectedAt = $renewed.createdAt
                             renewed = $true
                             installationBound = $true
-                        })
+                        }
+                        if ($WorkspaceGrant) {
+                            $grant = New-CogentSpecWorkspaceGrant ([string]$renewed.token)
+                            $statusResult.workspaceCode = [string]$grant.workspaceCode
+                            $statusResult.workspaceCodeExpiresAt = [string]$grant.expiresAt
+                        }
+                        Write-CompactJson $statusResult
                         exit 0
                     } catch {
                         $renewStatus = if ($_.Exception.Response) { [int]$_.Exception.Response.StatusCode } else { 0 }
@@ -258,7 +283,7 @@ if ([string]$result.status -ne 'authorized' -or -not $result.token -or -not $res
 Save-CogentSpecCredential $result
 Remove-Item -LiteralPath $pendingPath -Force
 
-$workspaceUrl = "$serviceUrl/stack?surface=$([Uri]::EscapeDataString($Surface))#desktop=$([Uri]::EscapeDataString([string]$result.browserCode))"
+$workspaceUrl = "$workspaceOrigin/stack?surface=$([Uri]::EscapeDataString($Surface))#desktop=$([Uri]::EscapeDataString([string]$result.browserCode))"
 Write-CompactJson ([ordered]@{
     status = 'authorized'
     email = [string]$result.subscriber.email

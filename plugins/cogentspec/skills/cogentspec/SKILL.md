@@ -17,10 +17,10 @@ Treat `$cogentspec`, `@cogentspec`, a CogentSpec plugin mention, and a natural-l
 
 1. Run `scripts/project-context.ps1` exactly once and require an isolated stable context unless the task is genuinely unscoped.
 2. Run `scripts/start-cogentstack-bridge.ps1 -ContextKey <resolved context> -Surface chatgpt` exactly once. This helper performs the one account-status check itself. Require `status: ready`, the same `contextKey`, `accountState: signed_in`, and `browserOpened: false`. Accept either `bridge: started` or `bridge: already_running`. If it returns `signed_out`, explain that Desktop Bridge is missing, replaced, revoked, or requires updated legal acceptance according to its exact reason. Direct the user to `https://cogentspec.com/install`; never request a login, licence key, activation code, legal confirmation, or Desktop credential in the conversation.
-3. Return the exact `workspaceUrl` as the CogentSpec Web link. Do not open it, call a browser-control tool, create or select a browser tab, inspect unrelated tabs, hide a sidebar, resize a window, arrange a split, or mount an embedded panel.
+3. Return the exact private `workspaceUrl` on `https://cogentspec.app` as the CogentSpec work-area link. The short-lived fragment establishes a separate workspace session and must be returned only in the link, never described or logged separately. Keep `https://cogentspec.com/stack` as the Bridge connection surface. Do not open the workspace link, call a browser-control tool, create or select a browser tab, inspect unrelated tabs, hide a sidebar, resize a window, arrange a split, or mount an embedded panel.
 4. Report only the verified connection state. Readiness without `status: ready` is not a successful connection.
 
-The user decides where to open the returned web link. Switching AI projects changes the context in the URL and starts or reuses that context's Bridge worker; it does not create a permanent CogentSpec browser tab for every project.
+The user decides where to open the returned CogentSpec.app link. Switching AI projects changes the context in the URL, creates a fresh one-use workspace handoff, and starts or reuses that context's Bridge worker; it does not create a permanent CogentSpec browser tab for every project.
 
 ## Account and service boundaries
 
