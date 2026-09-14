@@ -18,7 +18,8 @@ function Invoke-InstallerFixture {
     param(
         [Parameter(Mandatory = $true)][string]$PowerShellPath,
         [Parameter(Mandatory = $true)][string]$InstallerPath,
-        [Parameter(Mandatory = $true)][string]$Reference,
+        [string]$Reference = '',
+        [switch]$UpdateOnly,
         [switch]$ValidateOnly,
         [int]$TimeoutSeconds = 120
     )
@@ -26,10 +27,11 @@ function Invoke-InstallerFixture {
         '-NoProfile',
         '-ExecutionPolicy', 'Bypass',
         '-File', $InstallerPath,
-        '-InstallationRequest', $Reference,
         '-MarketplacePrepared',
         '-InstallerTimeoutSeconds', $TimeoutSeconds
     )
+    if ($Reference) { $arguments += @('-InstallationRequest', $Reference) }
+    if ($UpdateOnly) { $arguments += '-UpdateOnly' }
     if ($ValidateOnly) { $arguments += '-ValidateOnly' }
     $output = @(& $PowerShellPath @arguments 2>&1)
     return [ordered]@{
@@ -140,6 +142,22 @@ exit /b 2
     Assert-InstallerTest ($completedStageNames -contains 'package_integrity_verification') 'The package integrity stage was not evidenced.'
     Assert-InstallerTest ($completedStageNames -contains 'launcher_contract_verification') 'The launcher verification stage was not evidenced.'
 
+    $updateRun = Invoke-InstallerFixture -PowerShellPath $powerShellPath -InstallerPath $installerPath -UpdateOnly
+    $update = $updateRun.result
+    Assert-InstallerTest ($updateRun.exitCode -eq 0) ("The isolated update fixture returned a non-zero exit code: {0}" -f ($update | ConvertTo-Json -Compress -Depth 5))
+    Assert-InstallerTest ([string]$update.protocol -eq 'trusted-marketplace-update-v1') 'The update fixture returned the wrong protocol.'
+    Assert-InstallerTest ([string]$update.status -eq 'updated') 'The update fixture did not complete the update.'
+    Assert-InstallerTest ([bool]$update.credentialPreserved) 'The update fixture did not preserve the existing credential.'
+    Assert-InstallerTest (-not [bool]$update.claimAttempted) 'The update fixture attempted an account claim.'
+    Assert-InstallerTest ($update.accountRequestConsumed -eq $false) 'The update fixture did not prove that no account request was consumed.'
+
+    $unsafeUpdateRun = Invoke-InstallerFixture -PowerShellPath $powerShellPath -InstallerPath $installerPath -Reference $validReference -UpdateOnly
+    $unsafeUpdate = $unsafeUpdateRun.result
+    Assert-InstallerTest ($unsafeUpdateRun.exitCode -ne 0) 'An update carrying an account-bound reference unexpectedly succeeded.'
+    Assert-InstallerTest ([int]$unsafeUpdate.nativeCommandsStarted -eq 0) 'An update carrying an account-bound reference started a native command.'
+    Assert-InstallerTest (-not [bool]$unsafeUpdate.claimAttempted) 'An update carrying an account-bound reference attempted a claim.'
+    Assert-InstallerTest ($unsafeUpdate.accountRequestConsumed -eq $false) 'An update carrying an account-bound reference did not prove non-consumption.'
+
     $claimRun = Invoke-InstallerFixture -PowerShellPath $powerShellPath -InstallerPath $installerPath -Reference $validReference
     $claim = $claimRun.result
     Assert-InstallerTest ($claimRun.exitCode -eq 0) ("The isolated v3 claim fixture returned a non-zero exit code: {0}" -f ($claim | ConvertTo-Json -Compress -Depth 5))
@@ -191,6 +209,8 @@ exit /b 2
         nativeCommandsCompleted = [int]$valid.nativeCommandsCompleted
         completedStages = $completedStageNames
         invalidReferenceRejectedBeforeCommands = $true
+        updateCasePassed = $true
+        updatedVersion = [string]$update.version
         claimPathCasePassed = $true
         timeoutCasePassed = $timeoutCasePassed
         timeoutElapsedMs = $timeoutElapsedMs

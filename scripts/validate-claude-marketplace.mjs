@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 const repositoryRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const marketplacePath = join(repositoryRoot, ".claude-plugin", "marketplace.json");
 const marketplace = JSON.parse(await readFile(marketplacePath, "utf8"));
+const updateInstructions = await readFile(join(repositoryRoot, ".agents", "plugins", "UPDATE.CLAUDE.v1.md"), "utf8");
 const pluginEntry = marketplace.plugins?.find((candidate) => candidate.name === "cogentspec");
 const compatibilityEntry = marketplace.plugins?.find((candidate) => candidate.name === "cogentstack");
 
@@ -13,6 +14,17 @@ const fail = (message) => {
   throw new Error(`Claude marketplace validation failed: ${message}`);
 };
 const normalized = (value) => value.replaceAll("\r\n", "\n").trimEnd();
+
+for (const marker of [
+  "CogentSpec Claude update protocol v1",
+  "claude plugin marketplace update cogentstack",
+  "claude plugin update <the installed plugin id> --scope <its current scope>",
+  "claude plugin list --json",
+  "Do not remove and reinstall the plugin",
+  "start a new Claude Code conversation",
+]) {
+  if (!updateInstructions.includes(marker)) fail(`Claude update protocol is missing required marker: ${marker}`);
+}
 
 if (marketplace.name !== "cogentstack") fail("marketplace name must be cogentstack");
 if (!pluginEntry) fail("canonical cogentspec plugin entry is missing");
@@ -101,7 +113,7 @@ for (const forbidden of ["--app", "--new-window", "SetWindowPos", "SW_MAXIMIZE"]
 }
 
 const watcher = await readFile(join(scriptsRoot, "watch-cogentstack-bridge.ps1"), "utf8");
-for (const marker of ["/api/plugin/desktop-actions", "create_project", "delete_project", "preview_project"]) {
+for (const marker of ["/api/plugin/desktop-actions", "create_project", "delete_project", "preview_project", "[string]$PluginVersion", "pluginVersion=$([Uri]::EscapeDataString($PluginVersion))"]) {
   if (!watcher.includes(marker)) fail(`Desktop Bridge watcher is missing required action marker: ${marker}`);
 }
 

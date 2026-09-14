@@ -1,6 +1,8 @@
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory = $true)][string]$ContextKey
+    [Parameter(Mandatory = $true)][string]$ContextKey,
+    [Parameter(Mandatory = $true)][ValidateSet('cogentspec', 'cogentstack')][string]$PluginId,
+    [Parameter(Mandatory = $true)][ValidatePattern('^\d+\.\d+\.\d+$')][string]$PluginVersion
 )
 
 Set-StrictMode -Version Latest
@@ -14,7 +16,7 @@ if ($null -eq ('System.Security.Cryptography.ProtectedData' -as [type])) {
 $serviceUrl = 'https://cogentspec.com'
 $stateRoot = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'CogentSpec'
 $credentialPath = Join-Path $stateRoot 'desktop-credential.json'
-$contextQuery = "context=$([Uri]::EscapeDataString($ContextKey))"
+$contextQuery = "context=$([Uri]::EscapeDataString($ContextKey))&pluginId=$([Uri]::EscapeDataString($PluginId))&pluginVersion=$([Uri]::EscapeDataString($PluginVersion))"
 $contextHashAlgorithm = [Security.Cryptography.SHA256]::Create()
 try {
     $contextHashBytes = $contextHashAlgorithm.ComputeHash([Text.Encoding]::UTF8.GetBytes($ContextKey))

@@ -7,6 +7,7 @@ const manifestPath = join(repositoryRoot, "desktop", "marketplace.json");
 const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
 const installInstructions = await readFile(join(repositoryRoot, ".agents", "plugins", "INSTALL.md"), "utf8");
 const versionedInstallInstructions = await readFile(join(repositoryRoot, ".agents", "plugins", "INSTALL.v3.md"), "utf8");
+const updateInstructions = await readFile(join(repositoryRoot, ".agents", "plugins", "UPDATE.v1.md"), "utf8");
 const boundedInstaller = await readFile(join(repositoryRoot, ".agents", "plugins", "install-cogentspec.ps1"), "utf8");
 const sourcePluginPath = join(repositoryRoot, "plugins", "cogentspec");
 const compatibilityPluginPath = join(repositoryRoot, "plugins", "cogentstack");
@@ -92,6 +93,9 @@ for (const requiredInstallerMarker of [
   "exactReason = [string]$_.Exception.Message",
   "installerElapsedMs = [int]$timer.ElapsedMilliseconds",
   "The installer is not running from the prepared CogentSpec marketplace.",
+  "[switch]$UpdateOnly",
+  "trusted-marketplace-update-v1",
+  "credentialPreserved = $true",
 ]) {
   if (!boundedInstaller.includes(requiredInstallerMarker)) fail(`the bounded installer is missing ${requiredInstallerMarker}`);
 }
@@ -113,6 +117,18 @@ const actualPluginFiles = pluginEntries
 if (JSON.stringify(actualPluginFiles) !== JSON.stringify(allowedPluginFiles)) {
   fail("the bounded installer allowlist does not exactly match the public plugin package");
 }
+for (const requiredUpdateInstruction of [
+  "CogentSpec update protocol v1",
+  "codex plugin marketplace upgrade cogentstack --json",
+  "install-cogentspec.ps1",
+  "-UpdateOnly",
+  "credentialPreserved: true",
+  "claimAttempted: false",
+  "accountRequestConsumed: false",
+  "start a new ChatGPT or Codex task",
+]) {
+  if (!updateInstructions.includes(requiredUpdateInstruction)) fail(`UPDATE.v1.md is missing ${requiredUpdateInstruction}`);
+}
 
 const canonicalStarter = await readFile(join(sourcePluginPath, "skills", "cogentspec", "scripts", "start-cogentstack-bridge.ps1"), "utf8");
 const canonicalConnector = await readFile(join(sourcePluginPath, "skills", "cogentspec", "scripts", "connect-cogentstack.ps1"), "utf8");
@@ -120,10 +136,14 @@ const compatibilityStarter = await readFile(join(compatibilityPluginPath, "skill
 const compatibilityConnector = await readFile(join(compatibilityPluginPath, "skills", "cogentstack", "scripts", "connect-cogentstack.ps1"), "utf8");
 for (const [name, source] of [["starter", canonicalStarter], ["connector", canonicalConnector]]) {
   for (const marker of name === "starter"
-    ? ["-ContextKey $resolvedContext", "-WorkspaceGrant", "https://cogentspec.app/stack", "#desktop="]
+    ? ["-ContextKey $resolvedContext", "-WorkspaceGrant", "https://cogentspec.app/stack", "#desktop=", "pluginVersion = $pluginVersion"]
     : ["contextKey = $GrantContextKey", "surface = $GrantSurface", "/api/device-authorization/browser-grant"]) {
     if (!source.includes(marker)) fail(`the Desktop Bridge ${name} is missing bound workspace marker: ${marker}`);
   }
+}
+const canonicalWatcher = await readFile(join(sourcePluginPath, "skills", "cogentspec", "scripts", "watch-cogentstack-bridge.ps1"), "utf8");
+for (const marker of ["[string]$PluginId", "[string]$PluginVersion", "pluginVersion=$([Uri]::EscapeDataString($PluginVersion))"]) {
+  if (!canonicalWatcher.includes(marker)) fail(`the Desktop Bridge watcher is missing version marker: ${marker}`);
 }
 const normalizedScript = (value) => value.replaceAll("\r\n", "\n");
 if (normalizedScript(canonicalStarter) !== normalizedScript(compatibilityStarter)

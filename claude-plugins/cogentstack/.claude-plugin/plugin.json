@@ -1,6 +1,6 @@
 {
   "name": "cogentstack",
-  "version": "0.3.4",
+  "version": "0.3.5",
   "description": "Connect each Claude Code Desktop project to its isolated CogentSpec Web context through the shared Desktop Bridge without manipulating browser or application windows.",
   "author": {
     "name": "CogentSpec"

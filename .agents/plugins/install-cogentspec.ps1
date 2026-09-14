@@ -1,12 +1,13 @@
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory = $true)]
-    [string]$InstallationRequest,
+    [string]$InstallationRequest = '',
 
     [ValidateRange(30, 150)]
     [int]$InstallerTimeoutSeconds = 120,
 
     [switch]$MarketplacePrepared,
+
+    [switch]$UpdateOnly,
 
     [switch]$ValidateOnly
 )
@@ -144,7 +145,9 @@ function Test-StringSetEqual {
 }
 
 try {
-    if ($privateInstallationRequest -notmatch '^cgb_[A-Za-z0-9_-]{40,}$') {
+    if ($UpdateOnly) {
+        if ($privateInstallationRequest) { throw 'Routine updates must not receive an account-bound installation request.' }
+    } elseif ($privateInstallationRequest -notmatch '^cgb_[A-Za-z0-9_-]{40,}$') {
         throw 'The current installation invocation is missing a valid account-bound request.'
     }
     if (-not $MarketplacePrepared) {
@@ -298,6 +301,28 @@ try {
     }
     Complete-InstallStage
 
+    if ($UpdateOnly) {
+        [ordered]@{
+            protocol = 'trusted-marketplace-update-v1'
+            status = 'updated'
+            failureStage = $null
+            installerStarted = $true
+            installerTimedOut = $false
+            marketplacePrepared = $true
+            nativeCommandsStarted = $nativeCommandsStarted
+            nativeCommandsCompleted = $nativeCommandsCompleted
+            lastNativeOperation = $lastNativeOperation
+            completedStages = @($completedStages)
+            claimAttempted = $false
+            accountRequestConsumed = $false
+            credentialPreserved = $true
+            installed = $true
+            enabled = $true
+            version = [string]$installedManifest.version
+            installerElapsedMs = [int]$timer.ElapsedMilliseconds
+        } | ConvertTo-Json -Compress -Depth 5 | Write-Output
+        exit 0
+    }
     if ($ValidateOnly) {
         [ordered]@{
             protocol = $protocol

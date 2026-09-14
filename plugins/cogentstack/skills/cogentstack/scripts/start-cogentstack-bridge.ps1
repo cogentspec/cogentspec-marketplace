@@ -25,6 +25,18 @@ function Get-TextSha256([string]$Value) {
 
 $projectContext = Get-CogentSpecProjectContext -ExplicitContextKey $ContextKey
 $resolvedContext = [string]$projectContext.ContextKey
+$pluginRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..\..') -ErrorAction Stop).Path
+$manifestPath = @(
+    (Join-Path $pluginRoot '.codex-plugin\plugin.json'),
+    (Join-Path $pluginRoot '.claude-plugin\plugin.json')
+) | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
+if (-not $manifestPath) { throw 'CogentSpec package identity is missing. Repair the installation.' }
+$pluginManifest = Get-Content -Raw -LiteralPath $manifestPath | ConvertFrom-Json
+$pluginId = [string]$pluginManifest.name
+$pluginVersion = [string]$pluginManifest.version
+if ($pluginId -notin @('cogentspec', 'cogentstack') -or $pluginVersion -notmatch '^\d+\.\d+\.\d+$') {
+    throw 'CogentSpec package identity is invalid. Repair the installation.'
+}
 $connectionUrl = "https://cogentspec.com/stack?surface=$([Uri]::EscapeDataString($Surface))"
 $workspaceUrl = $connectionUrl
 $connectionScript = Join-Path $PSScriptRoot 'connect-cogentstack.ps1'
@@ -99,6 +111,8 @@ if (Test-Path -LiteralPath $statePath -PathType Leaf) {
                 workspaceUrl = $workspaceUrl
                 browserOpened = $false
                 accountState = 'signed_in'
+                pluginId = $pluginId
+                pluginVersion = $pluginVersion
             })
             exit 0
         }
@@ -109,7 +123,8 @@ if (Test-Path -LiteralPath $statePath -PathType Leaf) {
 }
 
 $watcher = Start-Process -FilePath ([string]$powershellCommand.Source) -ArgumentList @(
-    '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $watcherScript, '-ContextKey', $resolvedContext
+    '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $watcherScript, '-ContextKey', $resolvedContext,
+    '-PluginId', $pluginId, '-PluginVersion', $pluginVersion
 ) -WindowStyle Hidden -PassThru
 Start-Sleep -Milliseconds 350
 if ($watcher.HasExited) { throw 'Desktop Bridge stopped before it became ready.' }
@@ -121,6 +136,8 @@ if ($watcher.HasExited) { throw 'Desktop Bridge stopped before it became ready.'
     contextKey = $resolvedContext
     workspaceUrl = $workspaceUrl
     startedAt = [DateTime]::UtcNow.ToString('o')
+    pluginId = $pluginId
+    pluginVersion = $pluginVersion
 } | ConvertTo-Json | Set-Content -LiteralPath $statePath -Encoding UTF8
 
 Write-CompactJson ([ordered]@{
@@ -132,4 +149,6 @@ Write-CompactJson ([ordered]@{
     workspaceUrl = $workspaceUrl
     browserOpened = $false
     accountState = 'signed_in'
+    pluginId = $pluginId
+    pluginVersion = $pluginVersion
 })
