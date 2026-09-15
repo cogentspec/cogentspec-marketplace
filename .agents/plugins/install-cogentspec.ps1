@@ -60,6 +60,46 @@ function Get-RemainingMilliseconds {
     return $remaining
 }
 
+function ConvertTo-WindowsProcessArgument {
+    param([AllowEmptyString()][string]$Value)
+
+    if ($Value.Length -eq 0) { return '""' }
+    if ($Value -notmatch '[\s"]') { return $Value }
+
+    $builder = [Text.StringBuilder]::new()
+    [void]$builder.Append('"')
+    $backslashCount = 0
+    foreach ($character in $Value.ToCharArray()) {
+        if ($character -eq [char]'\') {
+            $backslashCount++
+            continue
+        }
+        if ($character -eq [char]'"') {
+            if ($backslashCount -gt 0) {
+                [void]$builder.Append([string]::new([char]'\', $backslashCount * 2))
+            }
+            [void]$builder.Append('\"')
+            $backslashCount = 0
+            continue
+        }
+        if ($backslashCount -gt 0) {
+            [void]$builder.Append([string]::new([char]'\', $backslashCount))
+            $backslashCount = 0
+        }
+        [void]$builder.Append($character)
+    }
+    if ($backslashCount -gt 0) {
+        [void]$builder.Append([string]::new([char]'\', $backslashCount * 2))
+    }
+    [void]$builder.Append('"')
+    return $builder.ToString()
+}
+
+function ConvertTo-WindowsProcessArgumentLine {
+    param([string[]]$Values)
+    return (@($Values | ForEach-Object { ConvertTo-WindowsProcessArgument -Value ([string]$_) }) -join ' ')
+}
+
 function Invoke-BoundedNative {
     param(
         [Parameter(Mandatory = $true)]
@@ -83,10 +123,12 @@ function Invoke-BoundedNative {
     if ($isCommandScript) {
         $quotedArguments = @($Arguments | ForEach-Object { '"' + ([string]$_).Replace('"', '""') + '"' })
         $startInfo.Arguments = '/d /s /c ""' + $FilePath + '" ' + ($quotedArguments -join ' ') + '"'
-    } else {
+    } elseif ($startInfo.PSObject.Properties.Name -contains 'ArgumentList') {
         foreach ($argument in $Arguments) {
             [void]$startInfo.ArgumentList.Add($argument)
         }
+    } else {
+        $startInfo.Arguments = ConvertTo-WindowsProcessArgumentLine -Values $Arguments
     }
 
     $process = [Diagnostics.Process]::new()
@@ -155,9 +197,9 @@ try {
     }
 
     $codexCommand = @(Get-Command codex.cmd -CommandType Application -ErrorAction Stop) | Select-Object -First 1
-    $gitCommand = @(Get-Command git.cmd -CommandType Application -ErrorAction SilentlyContinue) | Select-Object -First 1
+    $gitCommand = @(Get-Command git.exe -CommandType Application -ErrorAction SilentlyContinue) | Select-Object -First 1
     if (-not $gitCommand) {
-        $gitCommand = @(Get-Command git.exe -CommandType Application -ErrorAction Stop) | Select-Object -First 1
+        $gitCommand = @(Get-Command git.cmd -CommandType Application -ErrorAction Stop) | Select-Object -First 1
     }
     $script:codexPath = [string]$codexCommand.Source
     $gitPath = [string]$gitCommand.Source

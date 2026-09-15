@@ -103,22 +103,31 @@ exit 2
     Set-Content -LiteralPath (Join-Path $fixtureBin 'codex-stub.ps1') -Value $codexStub -Encoding UTF8
     Set-Content -LiteralPath (Join-Path $fixtureBin 'codex.cmd') -Value "@echo off`r`npowershell.exe -NoProfile -ExecutionPolicy Bypass -File `"%~dp0codex-stub.ps1`" %*`r`n" -Encoding ASCII
 
-    $gitStub = @"
-@echo off
-if "%~3"=="remote" (
-  echo https://github.com/cogentspec/cogentspec-marketplace.git
-  exit /b 0
-)
-if "%~3"=="sparse-checkout" (
-  echo .agents/plugins
-  echo plugins/cogentspec
-  echo plugins/cogentstack
-  exit /b 0
-)
-echo Unexpected Git fixture arguments 1>&2
-exit /b 2
-"@
-    Set-Content -LiteralPath (Join-Path $fixtureBin 'git.cmd') -Value $gitStub -Encoding ASCII
+    $gitStub = @'
+using System;
+
+public static class GitFixture
+{
+    public static int Main(string[] args)
+    {
+        if (args.Length >= 4 && args[2] == "remote" && args[3] == "get-url")
+        {
+            Console.WriteLine("https://github.com/cogentspec/cogentspec-marketplace.git");
+            return 0;
+        }
+        if (args.Length >= 4 && args[2] == "sparse-checkout" && args[3] == "list")
+        {
+            Console.WriteLine(".agents/plugins");
+            Console.WriteLine("plugins/cogentspec");
+            Console.WriteLine("plugins/cogentstack");
+            return 0;
+        }
+        Console.Error.WriteLine("Unexpected Git fixture arguments: " + string.Join(" ", args));
+        return 2;
+    }
+}
+'@
+    Add-Type -TypeDefinition $gitStub -Language CSharp -OutputAssembly (Join-Path $fixtureBin 'git.exe') -OutputType ConsoleApplication
     $env:Path = "$fixtureBin$([IO.Path]::PathSeparator)$originalPath"
 
     $powerShellPath = (Get-Process -Id $PID).Path
@@ -211,6 +220,7 @@ exit /b 2
         invalidReferenceRejectedBeforeCommands = $true
         updateCasePassed = $true
         updatedVersion = [string]$update.version
+        windowsPowerShellExecutablePathPassed = $true
         claimPathCasePassed = $true
         timeoutCasePassed = $timeoutCasePassed
         timeoutElapsedMs = $timeoutElapsedMs
