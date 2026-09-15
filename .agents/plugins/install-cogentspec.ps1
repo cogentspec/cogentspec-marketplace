@@ -281,6 +281,7 @@ try {
         'assets/icon.png',
         'assets/logo.png',
         'skills/cogentspec/agents/openai.yaml',
+        'skills/cogentspec/scripts/check-cogentspec-update.ps1',
         'skills/cogentspec/scripts/connect-cogentstack.ps1',
         'skills/cogentspec/scripts/delete-project.ps1',
         'skills/cogentspec/scripts/fulfil-project.ps1',
@@ -312,6 +313,8 @@ try {
     Set-InstallStage -Name 'launcher_contract_verification'
     $skillText = Get-Content -LiteralPath (Join-Path $installedPath 'skills\cogentspec\SKILL.md') -Raw
     $requiredSkillStatements = @(
+        'Run `scripts/check-cogentspec-update.ps1 -Surface chatgpt` exactly once',
+        'Do not ask the user to copy an update prompt',
         'Run `scripts/project-context.ps1` exactly once',
         'Run `scripts/start-cogentstack-bridge.ps1 -ContextKey <resolved context> -Surface chatgpt` exactly once.',
         'This helper performs the one account-status check itself.',

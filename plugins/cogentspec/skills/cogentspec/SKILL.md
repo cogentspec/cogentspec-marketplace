@@ -15,6 +15,18 @@ Run helpers from the invoking task's workspace directory, never from the plugin 
 
 Treat `$cogentspec`, `@cogentspec`, a CogentSpec plugin mention, and a natural-language request to connect or open CogentSpec as the same request.
 
+Before connecting, keep the installed Bridge package current:
+
+1. Run `scripts/check-cogentspec-update.ps1 -Surface chatgpt` exactly once from the invoking workspace.
+2. If it returns `status: update_available`, tell the user that the verified Bridge update is being installed. Do not ask the user to copy an update prompt, approve the routine update, sign in, provide a licence or activation code, or supply an installation reference.
+3. Inspect `codex plugin marketplace list --json` and require the `cogentstack` marketplace source to be exactly `https://github.com/cogentspec/cogentspec-marketplace.git`. Run `codex plugin marketplace upgrade cogentstack --json` once, inspect the refreshed marketplace once more, and require the checked-in installer beneath that exact root: `.agents/plugins/install-cogentspec.ps1` for `pluginId: cogentspec` or `.agents/plugins/install-cogentstack.ps1` for `pluginId: cogentstack`.
+4. Run that installer exactly once with `-UpdateOnly -MarketplacePrepared -InstallerTimeoutSeconds 120`. Pass no account-bound request or Desktop credential. Require `protocol: trusted-marketplace-update-v1`, `status: updated`, `credentialPreserved: true`, `claimAttempted: false`, and `accountRequestConsumed: false`.
+5. After a verified update, stop before resolving the project or starting the Bridge. Report the installed version and tell the user to start a new task before invoking `$cogentspec`, because this task still has the earlier skill instructions loaded.
+6. If the marketplace or installer fails, report its exact failed stage and reason. Do not use the first-install flow, reuse an account-bound request, or silently claim success.
+7. If the check returns `status: current`, continue normally. If it returns `status: check_unavailable`, do not block an otherwise working Bridge connection; continue and mention that the update check could not be completed.
+
+Then connect the current project:
+
 1. Run `scripts/project-context.ps1` exactly once and require an isolated stable context unless the task is genuinely unscoped.
 2. Run `scripts/start-cogentstack-bridge.ps1 -ContextKey <resolved context> -Surface chatgpt` exactly once. This helper performs the one account-status check itself. Require `status: ready`, the same `contextKey`, `accountState: signed_in`, and `browserOpened: false`. Accept either `bridge: started` or `bridge: already_running`. If it returns `signed_out`, explain that Desktop Bridge is missing, replaced, revoked, or requires updated legal acceptance according to its exact reason. Direct the user to `https://cogentspec.com/install`; never request a login, licence key, activation code, legal confirmation, or Desktop credential in the conversation.
 3. Return the exact private `workspaceUrl` on `https://cogentspec.app` as the CogentSpec work-area link. The short-lived fragment establishes a separate workspace session and must be returned only in the link, never described or logged separately. Keep `https://cogentspec.com/stack` as the Bridge connection surface. Do not open the workspace link, call a browser-control tool, create or select a browser tab, inspect unrelated tabs, hide a sidebar, resize a window, arrange a split, or mount an embedded panel.

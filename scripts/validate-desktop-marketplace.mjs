@@ -131,9 +131,14 @@ for (const requiredUpdateInstruction of [
 }
 
 const canonicalStarter = await readFile(join(sourcePluginPath, "skills", "cogentspec", "scripts", "start-cogentstack-bridge.ps1"), "utf8");
+const canonicalUpdateCheck = await readFile(join(sourcePluginPath, "skills", "cogentspec", "scripts", "check-cogentspec-update.ps1"), "utf8");
 const canonicalConnector = await readFile(join(sourcePluginPath, "skills", "cogentspec", "scripts", "connect-cogentstack.ps1"), "utf8");
 const compatibilityStarter = await readFile(join(compatibilityPluginPath, "skills", "cogentstack", "scripts", "start-cogentstack-bridge.ps1"), "utf8");
+const compatibilityUpdateCheck = await readFile(join(compatibilityPluginPath, "skills", "cogentstack", "scripts", "check-cogentspec-update.ps1"), "utf8");
 const compatibilityConnector = await readFile(join(compatibilityPluginPath, "skills", "cogentstack", "scripts", "connect-cogentstack.ps1"), "utf8");
+for (const marker of ["cogentspec-update-check-v1", "/api/plugin-version", "update_available", "check_unavailable", "UPDATE.v1.md"]) {
+  if (!canonicalUpdateCheck.includes(marker)) fail(`the automatic update check is missing marker: ${marker}`);
+}
 for (const [name, source] of [["starter", canonicalStarter], ["connector", canonicalConnector]]) {
   for (const marker of name === "starter"
     ? ["-ContextKey $resolvedContext", "-WorkspaceGrant", "https://cogentspec.app/stack", "#desktop=", "pluginVersion = $pluginVersion"]
@@ -147,6 +152,7 @@ for (const marker of ["[string]$PluginId", "[string]$PluginVersion", "pluginVers
 }
 const normalizedScript = (value) => value.replaceAll("\r\n", "\n");
 if (normalizedScript(canonicalStarter) !== normalizedScript(compatibilityStarter)
+  || normalizedScript(canonicalUpdateCheck) !== normalizedScript(compatibilityUpdateCheck)
   || normalizedScript(canonicalConnector) !== normalizedScript(compatibilityConnector)) {
   fail("the canonical and compatibility Desktop Bridge handoffs differ");
 }
