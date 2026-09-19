@@ -319,7 +319,7 @@ try {
         'Run `scripts/start-cogentstack-bridge.ps1 -ContextKey <resolved context> -Surface chatgpt` exactly once.',
         'This helper performs the one account-status check itself.',
         '`browserOpened: false`',
-        'Do not open the workspace link, call a browser-control tool, create or select a browser tab',
+        'Do not open either workspace link, call a browser-control tool, create or select a browser tab',
         'https://cogentspec.app',
         'https://cogentspec.com/stack',
         'Qwen Desktop is an optional CogentSpec-owned integrated application and includes the same Bridge',
@@ -339,7 +339,7 @@ try {
             throw 'The Desktop Bridge launcher contains a prohibited browser or window-arrangement action.'
         }
     }
-    foreach ($requiredMarker in @("browserOpened = `$false", "bridge = 'started'", "bridge = 'already_running'", '-WorkspaceGrant', '-ContextKey $resolvedContext', 'https://cogentspec.app/stack', '#desktop=', 'start-cogentstack-bridge.ps1')) {
+    foreach ($requiredMarker in @("browserOpened = `$false", "bridge = 'started'", "bridge = 'already_running'", '-WorkspaceGrant', '-ContextKey $resolvedContext', 'https://cogentspec.app/stack', '#desktop-web=', '#desktop-chatgpt=', 'webWorkspaceUrl', 'chatgptWorkspaceUrl', 'start-cogentstack-bridge.ps1')) {
         if (-not ($bridgeScript.Contains($requiredMarker) -or $skillText.Contains($requiredMarker))) {
             throw 'The Desktop Bridge launcher is missing a required web-first connection marker.'
         }
