@@ -290,6 +290,7 @@ try {
         'skills/cogentstack/scripts/prepare-deployment.ps1',
         'skills/cogentstack/scripts/project-context.ps1',
         'skills/cogentstack/scripts/project-knowledge.ps1',
+        'skills/cogentstack/scripts/reset-cogentspec-update.ps1',
         'skills/cogentstack/scripts/start-cogentstack-bridge.ps1',
         'skills/cogentstack/scripts/watch-cogentstack-bridge.ps1',
         'skills/cogentstack/SKILL.md'
@@ -315,6 +316,7 @@ try {
     $requiredSkillStatements = @(
         'Run `scripts/check-cogentspec-update.ps1 -Surface chatgpt` exactly once',
         'Do not ask the user to copy an update prompt',
+        'Continue this same task with the refreshed installed package',
         'Run `scripts/project-context.ps1` exactly once',
         'Run `scripts/start-cogentstack-bridge.ps1 -ContextKey <resolved context> -Surface chatgpt` exactly once.',
         'This helper performs the one account-status check itself.',
@@ -347,6 +349,15 @@ try {
     Complete-InstallStage
 
     if ($UpdateOnly) {
+        Set-InstallStage -Name 'superseded_bridge_cleanup'
+        $resetScript = Join-Path $installedPath 'skills\cogentstack\scripts\reset-cogentspec-update.ps1'
+        $resetOutput = @(& $resetScript 2>&1)
+        $resetResult = Read-JsonResult -Text (($resetOutput | ForEach-Object { [string]$_ }) -join "`n") -Operation 'Superseded Bridge cleanup'
+        if ([string]$resetResult.status -ne 'reset' -or -not [bool]$resetResult.packageRuntimeCleared -or -not [bool]$resetResult.workerStateCleared -or -not [bool]$resetResult.credentialPreserved) {
+            throw 'The superseded Bridge runtime was not cleared safely.'
+        }
+        Complete-InstallStage
+
         [ordered]@{
             protocol = 'trusted-marketplace-update-v1'
             status = 'updated'
@@ -361,6 +372,12 @@ try {
             claimAttempted = $false
             accountRequestConsumed = $false
             credentialPreserved = $true
+            previousPackageReplaced = $true
+            packageRuntimeCleared = $true
+            workerStateCleared = $true
+            workersStopped = [int]$resetResult.workersStopped
+            continueCurrentTask = $true
+            refreshedPluginPath = $installedPath
             installed = $true
             enabled = $true
             version = [string]$installedManifest.version

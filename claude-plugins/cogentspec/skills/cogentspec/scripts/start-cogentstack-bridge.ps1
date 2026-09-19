@@ -39,6 +39,8 @@ if ($pluginId -notin @('cogentspec', 'cogentstack') -or $pluginVersion -notmatch
 }
 $connectionUrl = "https://cogentspec.com/stack?surface=$([Uri]::EscapeDataString($Surface))"
 $workspaceUrl = $connectionUrl
+$webWorkspaceUrl = $connectionUrl
+$chatgptWorkspaceUrl = $connectionUrl
 $connectionScript = Join-Path $PSScriptRoot 'connect-cogentstack.ps1'
 $sourceScriptNames = @(
     'connect-cogentstack.ps1',
@@ -65,15 +67,21 @@ if ([string]$connection.status -ne 'connected') {
         contextKey = $resolvedContext
         contextIsolated = [bool]$projectContext.Isolated
         workspaceUrl = $workspaceUrl
+        webWorkspaceUrl = $webWorkspaceUrl
+        chatgptWorkspaceUrl = $chatgptWorkspaceUrl
         browserOpened = $false
         reason = if ($connection.reason) { [string]$connection.reason } else { 'desktop_bridge_not_installed' }
     })
     exit 0
 }
-if ([string]$connection.workspaceCode -notmatch '^cgw_[A-Za-z0-9_-]{32,}$') {
-    throw 'Desktop Bridge could not create a private CogentSpec.app workspace handoff.'
+if ([string]$connection.webWorkspaceCode -notmatch '^cgw_[A-Za-z0-9_-]{32,}$' -or
+    [string]$connection.chatgptWorkspaceCode -notmatch '^cgw_[A-Za-z0-9_-]{32,}$') {
+    throw 'Desktop Bridge could not create the two private CogentSpec.app workspace handoffs.'
 }
-$workspaceUrl = "https://cogentspec.app/stack?surface=$([Uri]::EscapeDataString($Surface))&context=$([Uri]::EscapeDataString($resolvedContext))#desktop=$([Uri]::EscapeDataString([string]$connection.workspaceCode))"
+$workspaceBaseUrl = "https://cogentspec.app/stack?surface=$([Uri]::EscapeDataString($Surface))&context=$([Uri]::EscapeDataString($resolvedContext))"
+$webWorkspaceUrl = "$workspaceBaseUrl#desktop-web=$([Uri]::EscapeDataString([string]$connection.webWorkspaceCode))"
+$chatgptWorkspaceUrl = "$workspaceBaseUrl#desktop-chatgpt=$([Uri]::EscapeDataString([string]$connection.chatgptWorkspaceCode))"
+$workspaceUrl = $chatgptWorkspaceUrl
 
 $localStateRoot = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'CogentSpec'
 $stateRoot = Join-Path $localStateRoot 'bridge'
@@ -109,6 +117,8 @@ if (Test-Path -LiteralPath $statePath -PathType Leaf) {
                 contextKey = $resolvedContext
                 contextIsolated = [bool]$projectContext.Isolated
                 workspaceUrl = $workspaceUrl
+                webWorkspaceUrl = $webWorkspaceUrl
+                chatgptWorkspaceUrl = $chatgptWorkspaceUrl
                 browserOpened = $false
                 accountState = 'signed_in'
                 pluginId = $pluginId
@@ -135,6 +145,8 @@ if ($watcher.HasExited) { throw 'Desktop Bridge stopped before it became ready.'
     watcherScript = $watcherScript
     contextKey = $resolvedContext
     workspaceUrl = $workspaceUrl
+    webWorkspaceUrl = $webWorkspaceUrl
+    chatgptWorkspaceUrl = $chatgptWorkspaceUrl
     startedAt = [DateTime]::UtcNow.ToString('o')
     pluginId = $pluginId
     pluginVersion = $pluginVersion
@@ -147,6 +159,8 @@ Write-CompactJson ([ordered]@{
     contextKey = $resolvedContext
     contextIsolated = [bool]$projectContext.Isolated
     workspaceUrl = $workspaceUrl
+    webWorkspaceUrl = $webWorkspaceUrl
+    chatgptWorkspaceUrl = $chatgptWorkspaceUrl
     browserOpened = $false
     accountState = 'signed_in'
     pluginId = $pluginId

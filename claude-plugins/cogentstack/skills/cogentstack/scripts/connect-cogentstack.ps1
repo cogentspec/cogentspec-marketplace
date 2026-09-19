@@ -96,8 +96,12 @@ if ($Mode -eq 'status') {
             }
             if ($WorkspaceGrant) {
                 $grant = New-CogentSpecWorkspaceGrant $token $ContextKey $Surface
-                $statusResult.workspaceCode = [string]$grant.workspaceCode
-                $statusResult.workspaceCodeExpiresAt = [string]$grant.expiresAt
+                $statusResult.workspaceCode = [string]$grant.chatgptWorkspaceCode
+                $statusResult.workspaceCodeExpiresAt = [string]$grant.chatgptExpiresAt
+                $statusResult.webWorkspaceCode = [string]$grant.webWorkspaceCode
+                $statusResult.webWorkspaceCodeExpiresAt = [string]$grant.webExpiresAt
+                $statusResult.chatgptWorkspaceCode = [string]$grant.chatgptWorkspaceCode
+                $statusResult.chatgptWorkspaceCodeExpiresAt = [string]$grant.chatgptExpiresAt
             }
             Write-CompactJson $statusResult
         } catch {
@@ -125,8 +129,12 @@ if ($Mode -eq 'status') {
                         }
                         if ($WorkspaceGrant) {
                             $grant = New-CogentSpecWorkspaceGrant ([string]$renewed.token) $ContextKey $Surface
-                            $statusResult.workspaceCode = [string]$grant.workspaceCode
-                            $statusResult.workspaceCodeExpiresAt = [string]$grant.expiresAt
+                            $statusResult.workspaceCode = [string]$grant.chatgptWorkspaceCode
+                            $statusResult.workspaceCodeExpiresAt = [string]$grant.chatgptExpiresAt
+                            $statusResult.webWorkspaceCode = [string]$grant.webWorkspaceCode
+                            $statusResult.webWorkspaceCodeExpiresAt = [string]$grant.webExpiresAt
+                            $statusResult.chatgptWorkspaceCode = [string]$grant.chatgptWorkspaceCode
+                            $statusResult.chatgptWorkspaceCodeExpiresAt = [string]$grant.chatgptExpiresAt
                         }
                         Write-CompactJson $statusResult
                         exit 0

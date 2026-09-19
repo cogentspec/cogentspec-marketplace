@@ -72,6 +72,17 @@ if ($Mode -ne 'claim' -or $InstallationRequest -notmatch '^cgb_[A-Za-z0-9_-]{40,
 '@
     Set-Content -LiteralPath (Join-Path $fixturePlugin 'skills\cogentspec\scripts\connect-cogentstack.ps1') -Value $claimFixture -Encoding UTF8
 
+    $resetFixture = @'
+[ordered]@{
+    status = 'reset'
+    packageRuntimeCleared = $true
+    workerStateCleared = $true
+    workersStopped = 1
+    credentialPreserved = $true
+} | ConvertTo-Json -Compress
+'@
+    Set-Content -LiteralPath (Join-Path $fixturePlugin 'skills\cogentspec\scripts\reset-cogentspec-update.ps1') -Value $resetFixture -Encoding UTF8
+
     $pluginManifest = Get-Content -LiteralPath (Join-Path $fixturePlugin '.codex-plugin\plugin.json') -Raw | ConvertFrom-Json
     $escapedMarketplace = $fixtureMarketplace.Replace("'", "''")
     $escapedSourcePlugin = $fixturePlugin.Replace("'", "''")
@@ -157,8 +168,16 @@ public static class GitFixture
     Assert-InstallerTest ([string]$update.protocol -eq 'trusted-marketplace-update-v1') 'The update fixture returned the wrong protocol.'
     Assert-InstallerTest ([string]$update.status -eq 'updated') 'The update fixture did not complete the update.'
     Assert-InstallerTest ([bool]$update.credentialPreserved) 'The update fixture did not preserve the existing credential.'
+    Assert-InstallerTest ([bool]$update.previousPackageReplaced) 'The update fixture did not report replacement of the previous package.'
+    Assert-InstallerTest ([bool]$update.packageRuntimeCleared) 'The update fixture did not clear the superseded Bridge runtime.'
+    Assert-InstallerTest ([bool]$update.workerStateCleared) 'The update fixture did not clear the superseded worker state.'
+    Assert-InstallerTest ([int]$update.workersStopped -eq 1) 'The update fixture did not report the stopped verified worker.'
+    Assert-InstallerTest ([bool]$update.continueCurrentTask) 'The update fixture did not permit the current task to continue.'
+    Assert-InstallerTest ([string]$update.refreshedPluginPath -eq $fixtureInstalledPlugin) 'The update fixture did not return the refreshed plugin path.'
     Assert-InstallerTest (-not [bool]$update.claimAttempted) 'The update fixture attempted an account claim.'
     Assert-InstallerTest ($update.accountRequestConsumed -eq $false) 'The update fixture did not prove that no account request was consumed.'
+    $updateStageNames = @($update.completedStages | ForEach-Object { [string]$_.stage })
+    Assert-InstallerTest ($updateStageNames -contains 'superseded_bridge_cleanup') 'The update fixture did not evidence superseded Bridge cleanup.'
 
     $unsafeUpdateRun = Invoke-InstallerFixture -PowerShellPath $powerShellPath -InstallerPath $installerPath -Reference $validReference -UpdateOnly
     $unsafeUpdate = $unsafeUpdateRun.result

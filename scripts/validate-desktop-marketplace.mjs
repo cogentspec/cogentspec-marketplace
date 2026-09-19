@@ -96,6 +96,11 @@ for (const requiredInstallerMarker of [
   "[switch]$UpdateOnly",
   "trusted-marketplace-update-v1",
   "credentialPreserved = $true",
+  "previousPackageReplaced = $true",
+  "packageRuntimeCleared = $true",
+  "workerStateCleared = $true",
+  "continueCurrentTask = $true",
+  "refreshedPluginPath = $installedPath",
 ]) {
   if (!boundedInstaller.includes(requiredInstallerMarker)) fail(`the bounded installer is missing ${requiredInstallerMarker}`);
 }
@@ -123,9 +128,15 @@ for (const requiredUpdateInstruction of [
   "install-cogentspec.ps1",
   "-UpdateOnly",
   "credentialPreserved: true",
+  "previousPackageReplaced: true",
+  "packageRuntimeCleared: true",
+  "workerStateCleared: true",
+  "continueCurrentTask: true",
+  "refreshedPluginPath",
   "claimAttempted: false",
   "accountRequestConsumed: false",
-  "start a new ChatGPT or Codex task",
+  "Continue in the current ChatGPT or Codex task",
+  "never ask the user to start a new task",
 ]) {
   if (!updateInstructions.includes(requiredUpdateInstruction)) fail(`UPDATE.v1.md is missing ${requiredUpdateInstruction}`);
 }
@@ -133,15 +144,17 @@ for (const requiredUpdateInstruction of [
 const canonicalStarter = await readFile(join(sourcePluginPath, "skills", "cogentspec", "scripts", "start-cogentstack-bridge.ps1"), "utf8");
 const canonicalUpdateCheck = await readFile(join(sourcePluginPath, "skills", "cogentspec", "scripts", "check-cogentspec-update.ps1"), "utf8");
 const canonicalConnector = await readFile(join(sourcePluginPath, "skills", "cogentspec", "scripts", "connect-cogentstack.ps1"), "utf8");
+const canonicalReset = await readFile(join(sourcePluginPath, "skills", "cogentspec", "scripts", "reset-cogentspec-update.ps1"), "utf8");
 const compatibilityStarter = await readFile(join(compatibilityPluginPath, "skills", "cogentstack", "scripts", "start-cogentstack-bridge.ps1"), "utf8");
 const compatibilityUpdateCheck = await readFile(join(compatibilityPluginPath, "skills", "cogentstack", "scripts", "check-cogentspec-update.ps1"), "utf8");
 const compatibilityConnector = await readFile(join(compatibilityPluginPath, "skills", "cogentstack", "scripts", "connect-cogentstack.ps1"), "utf8");
+const compatibilityReset = await readFile(join(compatibilityPluginPath, "skills", "cogentstack", "scripts", "reset-cogentspec-update.ps1"), "utf8");
 for (const marker of ["cogentspec-update-check-v1", "/api/plugin-version", "update_available", "check_unavailable", "UPDATE.v1.md"]) {
   if (!canonicalUpdateCheck.includes(marker)) fail(`the automatic update check is missing marker: ${marker}`);
 }
 for (const [name, source] of [["starter", canonicalStarter], ["connector", canonicalConnector]]) {
   for (const marker of name === "starter"
-    ? ["-ContextKey $resolvedContext", "-WorkspaceGrant", "https://cogentspec.app/stack", "#desktop=", "pluginVersion = $pluginVersion"]
+    ? ["-ContextKey $resolvedContext", "-WorkspaceGrant", "https://cogentspec.app/stack", "#desktop-web=", "#desktop-chatgpt=", "pluginVersion = $pluginVersion"]
     : ["contextKey = $GrantContextKey", "surface = $GrantSurface", "/api/device-authorization/browser-grant"]) {
     if (!source.includes(marker)) fail(`the Desktop Bridge ${name} is missing bound workspace marker: ${marker}`);
   }
@@ -150,10 +163,14 @@ const canonicalWatcher = await readFile(join(sourcePluginPath, "skills", "cogent
 for (const marker of ["[string]$PluginId", "[string]$PluginVersion", "pluginVersion=$([Uri]::EscapeDataString($PluginVersion))"]) {
   if (!canonicalWatcher.includes(marker)) fail(`the Desktop Bridge watcher is missing version marker: ${marker}`);
 }
+for (const marker of ["bridge-runtime", "Stop-Process", "packageRuntimeCleared = $true", "workerStateCleared = $true", "credentialPreserved = $true"]) {
+  if (!canonicalReset.includes(marker)) fail(`the update reset helper is missing marker: ${marker}`);
+}
 const normalizedScript = (value) => value.replaceAll("\r\n", "\n");
 if (normalizedScript(canonicalStarter) !== normalizedScript(compatibilityStarter)
   || normalizedScript(canonicalUpdateCheck) !== normalizedScript(compatibilityUpdateCheck)
-  || normalizedScript(canonicalConnector) !== normalizedScript(compatibilityConnector)) {
+  || normalizedScript(canonicalConnector) !== normalizedScript(compatibilityConnector)
+  || normalizedScript(canonicalReset) !== normalizedScript(compatibilityReset)) {
   fail("the canonical and compatibility Desktop Bridge handoffs differ");
 }
 

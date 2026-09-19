@@ -21,7 +21,9 @@ for (const marker of [
   "claude plugin update <the installed plugin id> --scope <its current scope>",
   "claude plugin list --json",
   "Do not remove and reinstall the plugin",
-  "start a new Claude Code conversation",
+  "reset-cogentspec-update.ps1",
+  "Continue in the current Claude Code conversation",
+  "never ask the user to start a new conversation",
 ]) {
   if (!updateInstructions.includes(marker)) fail(`Claude update protocol is missing required marker: ${marker}`);
 }
@@ -80,6 +82,7 @@ const requiredScripts = [
   "prepare-deployment.ps1",
   "project-context.ps1",
   "project-knowledge.ps1",
+  "reset-cogentspec-update.ps1",
   "start-cogentstack-bridge.ps1",
   "watch-cogentstack-bridge.ps1",
 ];
@@ -94,17 +97,19 @@ for (const name of requiredScripts) {
   if (normalized(claudeSource) !== normalized(codexSource)) {
     fail(`${name} must remain identical to the shared Desktop Bridge implementation`);
   }
-  const escapedPath = join(scriptsRoot, name).replaceAll("'", "''");
-  const syntaxCheck = spawnSync("powershell.exe", [
-    "-NoProfile",
-    "-Command",
-    `& { $tokens = $null; $errors = $null; [void][System.Management.Automation.Language.Parser]::ParseFile('${escapedPath}', [ref]$tokens, [ref]$errors); if ($errors.Count -gt 0) { $errors | ForEach-Object { [Console]::Error.WriteLine($_.Message) }; exit 1 } }`,
-  ], { encoding: "utf8" });
-  if (syntaxCheck.status !== 0) fail(`${name} has invalid PowerShell syntax: ${syntaxCheck.stderr.trim()}`);
 }
 
+const syntaxPaths = requiredScripts.map((name) => `'${join(scriptsRoot, name).replaceAll("'", "''")}'`).join(", ");
+const syntaxCommand = `& { $failed = $false; foreach ($path in @(${syntaxPaths})) { $tokens = $null; $errors = $null; [void][System.Management.Automation.Language.Parser]::ParseFile($path, [ref]$tokens, [ref]$errors); if ($errors.Count -gt 0) { $failed = $true; $errors | ForEach-Object { [Console]::Error.WriteLine(\"$($path): $($_.Message)\") } } }; if ($failed) { exit 1 } }`;
+const encodedSyntaxCommand = Buffer.from(syntaxCommand, "utf16le").toString("base64");
+const syntaxCheck = spawnSync("cmd.exe", [
+  "/d", "/s", "/c", `powershell.exe -NoProfile -EncodedCommand ${encodedSyntaxCommand}`,
+], { encoding: "utf8", timeout: 30000 });
+if (syntaxCheck.error) fail(`PowerShell syntax validation could not complete: ${syntaxCheck.error.message}`);
+if (syntaxCheck.status !== 0) fail(`one or more plugin scripts have invalid PowerShell syntax: ${syntaxCheck.stderr.trim()}`);
+
 const bridge = await readFile(join(scriptsRoot, "start-cogentstack-bridge.ps1"), "utf8");
-for (const marker of ["bridge = 'started'", "bridge = 'already_running'", "browserOpened = $false", "bridge-runtime\\$runtimeVersion", "[ValidateSet('chatgpt', 'claude-desktop')]", "surface=$([Uri]::EscapeDataString($Surface))", "-ContextKey $resolvedContext", "-WorkspaceGrant", "#desktop="]) {
+for (const marker of ["bridge = 'started'", "bridge = 'already_running'", "browserOpened = $false", "bridge-runtime\\$runtimeVersion", "[ValidateSet('chatgpt', 'claude-desktop')]", "surface=$([Uri]::EscapeDataString($Surface))", "-ContextKey $resolvedContext", "-WorkspaceGrant", "#desktop-web=", "#desktop-chatgpt="]) {
   if (!bridge.includes(marker)) fail(`Desktop Bridge starter is missing required marker: ${marker}`);
 }
 if (!skill.includes("-Surface claude-desktop")) fail("Claude launcher must identify its desktop surface");
