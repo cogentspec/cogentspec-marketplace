@@ -109,7 +109,7 @@ if (syntaxCheck.error) fail(`PowerShell syntax validation could not complete: ${
 if (syntaxCheck.status !== 0) fail(`one or more plugin scripts have invalid PowerShell syntax: ${syntaxCheck.stderr.trim()}`);
 
 const bridge = await readFile(join(scriptsRoot, "start-cogentstack-bridge.ps1"), "utf8");
-for (const marker of ["bridge = 'started'", "bridge = 'already_running'", "browserOpened = $false", "bridge-runtime\\$runtimeVersion", "[ValidateSet('chatgpt', 'claude-desktop')]", "surface=$([Uri]::EscapeDataString($Surface))", "-ContextKey $resolvedContext", "-WorkspaceGrant", "#desktop-web=", "#desktop-chatgpt="]) {
+for (const marker of ["bridge = 'started'", "bridge = 'already_running'", "browserOpened = $false", "bridge-runtime\\$runtimeVersion", "[ValidateSet('chatgpt', 'claude-desktop')]", "surface=$([Uri]::EscapeDataString($Surface))", "-ContextKey $resolvedContext", "-WorkspaceGrant", "-RequestTimeoutSeconds 8", "Get-HostPowerShellExecutable", "launcherElapsedMs", "#desktop-web=", "#desktop-chatgpt="]) {
   if (!bridge.includes(marker)) fail(`Desktop Bridge starter is missing required marker: ${marker}`);
 }
 if (!skill.includes("-Surface claude-desktop")) fail("Claude launcher must identify its desktop surface");
@@ -123,9 +123,11 @@ for (const marker of ["/api/plugin/desktop-actions", "create_project", "delete_p
 }
 
 const connector = await readFile(join(scriptsRoot, "connect-cogentstack.ps1"), "utf8");
-for (const marker of ["desktop-credential.json", "DataProtectionScope]::CurrentUser", "installationBound = $true", "contextKey = $GrantContextKey", "surface = $GrantSurface", "/api/device-authorization/browser-grant"]) {
+for (const marker of ["desktop-credential.json", "DataProtectionScope]::CurrentUser", "installationBound = $true", "[int]$RequestTimeoutSeconds = 20", "-TimeoutSec $RequestTimeoutSeconds", "contextKey = $GrantContextKey", "surface = $GrantSurface", "/api/device-authorization/browser-grant"]) {
   if (!connector.includes(marker)) fail(`shared connector is missing required marker: ${marker}`);
 }
+if (bridge.includes("-File $connectionScript")) fail("Desktop Bridge starter still launches a nested account-check process");
+if (connector.includes("exit 0")) fail("shared connector can still terminate its calling launcher process");
 for (const forbidden of ["claude-desktop-credential.json", "claude-desktop-authorization.json"]) {
   if (connector.includes(forbidden)) fail(`Claude plugin must use the shared Bridge credential: ${forbidden}`);
 }

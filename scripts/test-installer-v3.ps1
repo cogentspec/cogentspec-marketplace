@@ -173,11 +173,16 @@ public static class GitFixture
     Assert-InstallerTest ([bool]$update.workerStateCleared) 'The update fixture did not clear the superseded worker state.'
     Assert-InstallerTest ([int]$update.workersStopped -eq 1) 'The update fixture did not report the stopped verified worker.'
     Assert-InstallerTest ([bool]$update.continueCurrentTask) 'The update fixture did not permit the current task to continue.'
+    Assert-InstallerTest ([bool]$update.fastUpdatePath) 'The update fixture did not use the fast update-only path.'
+    Assert-InstallerTest ([bool]$update.workspaceReadinessSkipped) 'The update fixture repeated the first-install web readiness check.'
+    Assert-InstallerTest ([int]$update.installerElapsedMs -gt 0 -and [int]$update.installerElapsedMs -lt 10000) 'The update-only installer exceeded the ten-second regression limit.'
     Assert-InstallerTest ([string]$update.refreshedPluginPath -eq $fixtureInstalledPlugin) 'The update fixture did not return the refreshed plugin path.'
     Assert-InstallerTest (-not [bool]$update.claimAttempted) 'The update fixture attempted an account claim.'
     Assert-InstallerTest ($update.accountRequestConsumed -eq $false) 'The update fixture did not prove that no account request was consumed.'
     $updateStageNames = @($update.completedStages | ForEach-Object { [string]$_.stage })
     Assert-InstallerTest ($updateStageNames -contains 'superseded_bridge_cleanup') 'The update fixture did not evidence superseded Bridge cleanup.'
+    Assert-InstallerTest ($updateStageNames -contains 'workspace_readiness_skipped_for_update') 'The update fixture did not evidence the skipped first-install web check.'
+    Assert-InstallerTest ($updateStageNames -notcontains 'workspace_readiness') 'The update fixture repeated the first-install web readiness stage.'
 
     $unsafeUpdateRun = Invoke-InstallerFixture -PowerShellPath $powerShellPath -InstallerPath $installerPath -Reference $validReference -UpdateOnly
     $unsafeUpdate = $unsafeUpdateRun.result
@@ -239,6 +244,8 @@ public static class GitFixture
         invalidReferenceRejectedBeforeCommands = $true
         updateCasePassed = $true
         updatedVersion = [string]$update.version
+        updateElapsedMs = [int]$update.installerElapsedMs
+        fastUpdatePath = [bool]$update.fastUpdatePath
         windowsPowerShellExecutablePathPassed = $true
         claimPathCasePassed = $true
         timeoutCasePassed = $timeoutCasePassed

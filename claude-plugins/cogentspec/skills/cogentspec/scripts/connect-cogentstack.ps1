@@ -9,7 +9,10 @@ param(
 
     [string]$ContextKey = '',
 
-    [switch]$WorkspaceGrant
+    [switch]$WorkspaceGrant,
+
+    [ValidateRange(3, 20)]
+    [int]$RequestTimeoutSeconds = 20
 )
 
 Set-StrictMode -Version Latest
@@ -75,7 +78,7 @@ function New-CogentSpecWorkspaceGrant([string]$Token, [string]$GrantContextKey, 
         -ContentType 'application/json' `
         -Headers @{ Accept = 'application/json'; Authorization = "Bearer $Token" } `
         -Body (@{ contextKey = $GrantContextKey; surface = $GrantSurface } | ConvertTo-Json -Compress) `
-        -TimeoutSec 20
+        -TimeoutSec $RequestTimeoutSeconds
 }
 
 if ($Mode -eq 'status') {
@@ -87,7 +90,7 @@ if ($Mode -eq 'status') {
                 -Method Get `
                 -Uri "$serviceUrl/api/device-authorization/token" `
                 -Headers @{ Accept = 'application/json'; Authorization = "Bearer $token" } `
-                -TimeoutSec 20
+                -TimeoutSec $RequestTimeoutSeconds
             $statusResult = [ordered]@{
                 status = 'connected'
                 email = $connection.subscriber.email
@@ -117,7 +120,7 @@ if ($Mode -eq 'status') {
                             -ContentType 'application/json' `
                             -Headers @{ Accept = 'application/json' } `
                             -Body (@{ renewalToken = $renewalToken } | ConvertTo-Json -Compress) `
-                            -TimeoutSec 20
+                            -TimeoutSec $RequestTimeoutSeconds
                         Save-CogentSpecCredential $renewed
                         $statusResult = [ordered]@{
                             status = 'connected'
@@ -137,18 +140,18 @@ if ($Mode -eq 'status') {
                             $statusResult.chatgptWorkspaceCodeExpiresAt = [string]$grant.chatgptExpiresAt
                         }
                         Write-CompactJson $statusResult
-                        exit 0
+                        return
                     } catch {
                         $renewStatus = if ($_.Exception.Response) { [int]$_.Exception.Response.StatusCode } else { 0 }
                         if ($renewStatus -eq 428) {
                             Remove-Item -LiteralPath $credentialPath -Force
                             Write-CompactJson ([ordered]@{ status = 'signed_out'; reason = 'legal_update_required' })
-                            exit 0
+                            return
                         }
                         if ($renewStatus -eq 401 -or $renewStatus -eq 403) {
                             Remove-Item -LiteralPath $credentialPath -Force
                             Write-CompactJson ([ordered]@{ status = 'signed_out'; reason = 'installation_replaced_revoked_or_inactive' })
-                            exit 0
+                            return
                         }
                         throw
                     } finally {
@@ -157,20 +160,20 @@ if ($Mode -eq 'status') {
                 }
                 Remove-Item -LiteralPath $credentialPath -Force
                 Write-CompactJson ([ordered]@{ status = 'signed_out'; reason = 'legacy_connection_not_bound_to_installation' })
-                exit 0
+                return
             }
             throw
         }
     } else {
         Write-CompactJson ([ordered]@{ status = 'signed_out' })
     }
-    exit 0
+    return
 }
 
 if ($Mode -eq 'disconnect') {
     if (-not (Test-Path -LiteralPath $credentialPath)) {
         Write-CompactJson ([ordered]@{ status = 'signed_out' })
-        exit 0
+        return
     }
     $credential = Get-Content -Raw -LiteralPath $credentialPath | ConvertFrom-Json
     $token = Unprotect-CogentSpecValue ([string]$credential.token)
@@ -179,7 +182,7 @@ if ($Mode -eq 'disconnect') {
             -Method Delete `
             -Uri "$serviceUrl/api/device-authorization/token" `
             -Headers @{ Accept = 'application/json'; Authorization = "Bearer $token" } `
-            -TimeoutSec 20 | Out-Null
+            -TimeoutSec $RequestTimeoutSeconds | Out-Null
     } catch {
         $statusCode = if ($_.Exception.Response) { [int]$_.Exception.Response.StatusCode } else { 0 }
         if ($statusCode -ne 401) { throw }
@@ -187,7 +190,7 @@ if ($Mode -eq 'disconnect') {
         Remove-Item -LiteralPath $credentialPath -Force
     }
     Write-CompactJson ([ordered]@{ status = 'signed_out' })
-    exit 0
+    return
 }
 
 New-Item -ItemType Directory -Path $stateRoot -Force | Out-Null
@@ -203,7 +206,7 @@ if ($Mode -eq 'claim') {
             -ContentType 'application/json' `
             -Headers @{ Accept = 'application/json' } `
             -Body (@{ code = $InstallationRequest; deviceName = 'ChatGPT Desktop on Windows' } | ConvertTo-Json -Compress) `
-            -TimeoutSec 20
+            -TimeoutSec $RequestTimeoutSeconds
     } finally {
         $InstallationRequest = ''
     }
@@ -216,7 +219,7 @@ if ($Mode -eq 'claim') {
         plan = [string]$result.subscriber.plan
         replacedExistingDevice = [bool]$result.replacedExistingDevice
     })
-    exit 0
+    return
 }
 
 if ($Mode -eq 'start') {
@@ -227,7 +230,7 @@ if ($Mode -eq 'start') {
         -ContentType 'application/json' `
         -Headers @{ Accept = 'application/json' } `
         -Body $requestBody `
-        -TimeoutSec 20
+        -TimeoutSec $RequestTimeoutSeconds
 
     [ordered]@{
         deviceCode = Protect-CogentSpecValue ([string]$authorization.deviceCode)
@@ -242,19 +245,19 @@ if ($Mode -eq 'start') {
         expiresAt = [string]$authorization.expiresAt
         pollAfterSeconds = [int]$authorization.intervalSeconds
     })
-    exit 0
+    return
 }
 
 if (-not (Test-Path -LiteralPath $pendingPath)) {
     Write-CompactJson ([ordered]@{ status = 'not_started' })
-    exit 0
+    return
 }
 
 $pending = Get-Content -Raw -LiteralPath $pendingPath | ConvertFrom-Json
 if ([DateTimeOffset]::Parse([string]$pending.expiresAt) -le [DateTimeOffset]::UtcNow) {
     Remove-Item -LiteralPath $pendingPath -Force
     Write-CompactJson ([ordered]@{ status = 'expired' })
-    exit 0
+    return
 }
 
 $deviceCode = Unprotect-CogentSpecValue ([string]$pending.deviceCode)
@@ -266,13 +269,13 @@ try {
         -ContentType 'application/json' `
         -Headers @{ Accept = 'application/json' } `
         -Body $tokenBody `
-        -TimeoutSec 20
+        -TimeoutSec $RequestTimeoutSeconds
 } catch {
     $statusCode = [int]$_.Exception.Response.StatusCode
     if ($statusCode -eq 410) {
         Remove-Item -LiteralPath $pendingPath -Force
         Write-CompactJson ([ordered]@{ status = 'expired' })
-        exit 0
+        return
     }
     throw
 }
@@ -283,7 +286,7 @@ if ([string]$result.status -eq 'authorization_pending') {
         expiresAt = [string]$pending.expiresAt
         pollAfterSeconds = [int]$pending.intervalSeconds
     })
-    exit 0
+    return
 }
 
 if ([string]$result.status -ne 'authorized' -or -not $result.token -or -not $result.browserCode) {

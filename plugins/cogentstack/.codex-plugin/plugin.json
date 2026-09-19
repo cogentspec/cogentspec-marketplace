@@ -1,6 +1,6 @@
 {
   "name": "cogentstack",
-  "version": "0.5.7",
+  "version": "0.5.8",
   "description": "Connect isolated AI project contexts to CogentSpec Web through one account-bound Desktop Bridge, restore portable Git-backed knowledge, and execute approved local actions.",
   "homepage": "https://cogentspec.com/install",
   "repository": "https://github.com/cogentspec/cogentspec-marketplace",

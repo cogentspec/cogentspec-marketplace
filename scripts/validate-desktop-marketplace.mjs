@@ -100,6 +100,9 @@ for (const requiredInstallerMarker of [
   "packageRuntimeCleared = $true",
   "workerStateCleared = $true",
   "continueCurrentTask = $true",
+  "fastUpdatePath = $true",
+  "workspaceReadinessSkipped = $true",
+  "workspace_readiness_skipped_for_update",
   "refreshedPluginPath = $installedPath",
 ]) {
   if (!boundedInstaller.includes(requiredInstallerMarker)) fail(`the bounded installer is missing ${requiredInstallerMarker}`);
@@ -132,6 +135,9 @@ for (const requiredUpdateInstruction of [
   "packageRuntimeCleared: true",
   "workerStateCleared: true",
   "continueCurrentTask: true",
+  "fastUpdatePath: true",
+  "workspaceReadinessSkipped: true",
+  "installerElapsedMs",
   "refreshedPluginPath",
   "claimAttempted: false",
   "accountRequestConsumed: false",
@@ -154,11 +160,13 @@ for (const marker of ["cogentspec-update-check-v1", "/api/plugin-version", "upda
 }
 for (const [name, source] of [["starter", canonicalStarter], ["connector", canonicalConnector]]) {
   for (const marker of name === "starter"
-    ? ["-ContextKey $resolvedContext", "-WorkspaceGrant", "https://cogentspec.app/stack", "#desktop-web=", "#desktop-chatgpt=", "pluginVersion = $pluginVersion"]
-    : ["contextKey = $GrantContextKey", "surface = $GrantSurface", "/api/device-authorization/browser-grant"]) {
+    ? ["-ContextKey $resolvedContext", "-WorkspaceGrant", "-RequestTimeoutSeconds 8", "Get-HostPowerShellExecutable", "launcherElapsedMs", "https://cogentspec.app/stack", "#desktop-web=", "#desktop-chatgpt=", "pluginVersion = $pluginVersion"]
+    : ["[int]$RequestTimeoutSeconds = 20", "-TimeoutSec $RequestTimeoutSeconds", "contextKey = $GrantContextKey", "surface = $GrantSurface", "/api/device-authorization/browser-grant"]) {
     if (!source.includes(marker)) fail(`the Desktop Bridge ${name} is missing bound workspace marker: ${marker}`);
   }
 }
+if (canonicalStarter.includes("-File $connectionScript")) fail("the Desktop Bridge starter still launches a nested account-check process");
+if (canonicalConnector.includes("exit 0")) fail("the Desktop Bridge connector can still terminate its calling launcher process");
 const canonicalWatcher = await readFile(join(sourcePluginPath, "skills", "cogentspec", "scripts", "watch-cogentstack-bridge.ps1"), "utf8");
 for (const marker of ["[string]$PluginId", "[string]$PluginVersion", "pluginVersion=$([Uri]::EscapeDataString($PluginVersion))"]) {
   if (!canonicalWatcher.includes(marker)) fail(`the Desktop Bridge watcher is missing version marker: ${marker}`);

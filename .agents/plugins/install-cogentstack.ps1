@@ -205,31 +205,36 @@ try {
     $gitPath = [string]$gitCommand.Source
     Complete-InstallStage
 
-    Set-InstallStage -Name 'workspace_readiness'
-    $webTimeout = [Math]::Max(1, [Math]::Min(10, [Math]::Floor((Get-RemainingMilliseconds) / 1000)))
-    $response = Invoke-WebRequest `
-        -Uri $workspaceUrl `
-        -UseBasicParsing `
-        -MaximumRedirection 0 `
-        -TimeoutSec $webTimeout
-    if ([int]$response.StatusCode -ne 200) {
-        throw 'The CogentSpec workspace did not return HTTP 200.'
-    }
-    $baseResponseProperties = @($response.BaseResponse.PSObject.Properties.Name)
-    $finalUrl = if ($baseResponseProperties -contains 'RequestMessage' -and $response.BaseResponse.RequestMessage.RequestUri) {
-        $response.BaseResponse.RequestMessage.RequestUri.AbsoluteUri
-    } elseif ($baseResponseProperties -contains 'ResponseUri' -and $response.BaseResponse.ResponseUri) {
-        $response.BaseResponse.ResponseUri.AbsoluteUri
+    if ($UpdateOnly) {
+        Set-InstallStage -Name 'workspace_readiness_skipped_for_update'
+        Complete-InstallStage
     } else {
-        $workspaceUrl
+        Set-InstallStage -Name 'workspace_readiness'
+        $webTimeout = [Math]::Max(1, [Math]::Min(10, [Math]::Floor((Get-RemainingMilliseconds) / 1000)))
+        $response = Invoke-WebRequest `
+            -Uri $workspaceUrl `
+            -UseBasicParsing `
+            -MaximumRedirection 0 `
+            -TimeoutSec $webTimeout
+        if ([int]$response.StatusCode -ne 200) {
+            throw 'The CogentSpec workspace did not return HTTP 200.'
+        }
+        $baseResponseProperties = @($response.BaseResponse.PSObject.Properties.Name)
+        $finalUrl = if ($baseResponseProperties -contains 'RequestMessage' -and $response.BaseResponse.RequestMessage.RequestUri) {
+            $response.BaseResponse.RequestMessage.RequestUri.AbsoluteUri
+        } elseif ($baseResponseProperties -contains 'ResponseUri' -and $response.BaseResponse.ResponseUri) {
+            $response.BaseResponse.ResponseUri.AbsoluteUri
+        } else {
+            $workspaceUrl
+        }
+        if ($finalUrl -ne $workspaceUrl) {
+            throw 'The CogentSpec workspace redirected instead of returning the official web workspace.'
+        }
+        if ($response.Content -notmatch 'What would you like to create\?' -or $response.Content -notmatch 'project-idea') {
+            throw 'The CogentSpec workspace is missing a required project-creation marker.'
+        }
+        Complete-InstallStage
     }
-    if ($finalUrl -ne $workspaceUrl) {
-        throw 'The CogentSpec workspace redirected instead of returning the official web workspace.'
-    }
-    if ($response.Content -notmatch 'What would you like to create\?' -or $response.Content -notmatch 'project-idea') {
-        throw 'The CogentSpec workspace is missing a required project-creation marker.'
-    }
-    Complete-InstallStage
 
     Set-InstallStage -Name 'prepared_marketplace_verification'
     $marketplace = Get-MarketplaceState
@@ -317,6 +322,8 @@ try {
         'Run `scripts/check-cogentspec-update.ps1 -Surface chatgpt` exactly once',
         'Do not ask the user to copy an update prompt',
         'Continue this same task with the refreshed installed package',
+        'fastUpdatePath: true',
+        'workspaceReadinessSkipped: true',
         'Run `scripts/project-context.ps1` exactly once',
         'Run `scripts/start-cogentstack-bridge.ps1 -ContextKey <resolved context> -Surface chatgpt` exactly once.',
         'This helper performs the one account-status check itself.',
@@ -377,6 +384,8 @@ try {
             workerStateCleared = $true
             workersStopped = [int]$resetResult.workersStopped
             continueCurrentTask = $true
+            fastUpdatePath = $true
+            workspaceReadinessSkipped = $true
             refreshedPluginPath = $installedPath
             installed = $true
             enabled = $true

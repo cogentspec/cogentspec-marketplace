@@ -8,6 +8,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+$launcherTimer = [Diagnostics.Stopwatch]::StartNew()
 . (Join-Path $PSScriptRoot 'project-context.ps1')
 
 function Write-CompactJson($Value) {
@@ -37,6 +38,48 @@ $pluginVersion = [string]$pluginManifest.version
 if ($pluginId -notin @('cogentspec', 'cogentstack') -or $pluginVersion -notmatch '^\d+\.\d+\.\d+$') {
     throw 'CogentSpec package identity is invalid. Repair the installation.'
 }
+
+function Get-HostPowerShellExecutable {
+    $runtimeProcessPath = ''
+    $processPathProperty = [Environment].GetProperty('ProcessPath', [Reflection.BindingFlags]'Public,Static')
+    if ($processPathProperty) { $runtimeProcessPath = [string]$processPathProperty.GetValue($null) }
+    $candidates = @(
+        $runtimeProcessPath,
+        (Get-Process -Id $PID -ErrorAction SilentlyContinue).Path
+    ) | Where-Object { $_ }
+    foreach ($candidate in $candidates) {
+        $leaf = [IO.Path]::GetFileName([string]$candidate)
+        if ($leaf -match '^(pwsh|powershell)(\.exe)?$' -and (Test-Path -LiteralPath ([string]$candidate) -PathType Leaf)) {
+            return [string]$candidate
+        }
+    }
+    $command = @(Get-Command pwsh.exe, powershell.exe -CommandType Application -ErrorAction SilentlyContinue) | Select-Object -First 1
+    if ($command) { return [string]$command.Source }
+    throw 'Windows PowerShell is required by Desktop Bridge.'
+}
+
+function Start-DetachedBridgeWatcher(
+    [string]$PowerShellExecutable,
+    [string]$WatcherScript,
+    [string]$WatcherContextKey,
+    [string]$WatcherPluginId,
+    [string]$WatcherPluginVersion
+) {
+    $escape = {
+        param([string]$Value)
+        return $Value.Replace("'", "''")
+    }
+    $command = "& '$(& $escape $WatcherScript)' -ContextKey '$(& $escape $WatcherContextKey)' -PluginId '$(& $escape $WatcherPluginId)' -PluginVersion '$(& $escape $WatcherPluginVersion)'"
+    $encodedCommand = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
+    $commandLine = '"' + $PowerShellExecutable + '" -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -EncodedCommand ' + $encodedCommand
+    $creation = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $commandLine }
+    if ([int]$creation.ReturnValue -ne 0 -or [int]$creation.ProcessId -le 0) {
+        throw "Desktop Bridge worker could not be started (Windows result $([int]$creation.ReturnValue))."
+    }
+    $process = Get-Process -Id ([int]$creation.ProcessId) -ErrorAction SilentlyContinue
+    if (-not $process) { throw 'Desktop Bridge worker stopped during startup.' }
+    return $process
+}
 $connectionUrl = "https://cogentspec.com/stack?surface=$([Uri]::EscapeDataString($Surface))"
 $workspaceUrl = $connectionUrl
 $webWorkspaceUrl = $connectionUrl
@@ -55,9 +98,8 @@ if (-not (Test-Path -LiteralPath $connectionScript -PathType Leaf) -or @($source
     throw 'Desktop Bridge is incomplete. Repair the CogentSpec installation.'
 }
 
-$powershellCommand = Get-Command powershell.exe, pwsh.exe -ErrorAction SilentlyContinue | Select-Object -First 1
-if (-not $powershellCommand) { throw 'Windows PowerShell is required by Desktop Bridge.' }
-$connectionOutput = @(& ([string]$powershellCommand.Source) -NoProfile -ExecutionPolicy Bypass -File $connectionScript -Mode status -Surface $Surface -ContextKey $resolvedContext -WorkspaceGrant 2>&1)
+$powershellExecutable = Get-HostPowerShellExecutable
+$connectionOutput = @(& $connectionScript -Mode status -Surface $Surface -ContextKey $resolvedContext -WorkspaceGrant -RequestTimeoutSeconds 8 2>&1)
 $connectionJson = @($connectionOutput | ForEach-Object { $_.ToString() } | Where-Object { $_.Trim().StartsWith('{') } | Select-Object -Last 1)
 if (-not $connectionJson) { throw 'Desktop Bridge could not verify the account-bound installation.' }
 $connection = $connectionJson | ConvertFrom-Json
@@ -71,8 +113,9 @@ if ([string]$connection.status -ne 'connected') {
         chatgptWorkspaceUrl = $chatgptWorkspaceUrl
         browserOpened = $false
         reason = if ($connection.reason) { [string]$connection.reason } else { 'desktop_bridge_not_installed' }
+        launcherElapsedMs = [int]$launcherTimer.ElapsedMilliseconds
     })
-    exit 0
+    return
 }
 if ([string]$connection.webWorkspaceCode -notmatch '^cgw_[A-Za-z0-9_-]{32,}$' -or
     [string]$connection.chatgptWorkspaceCode -notmatch '^cgw_[A-Za-z0-9_-]{32,}$') {
@@ -123,8 +166,9 @@ if (Test-Path -LiteralPath $statePath -PathType Leaf) {
                 accountState = 'signed_in'
                 pluginId = $pluginId
                 pluginVersion = $pluginVersion
+                launcherElapsedMs = [int]$launcherTimer.ElapsedMilliseconds
             })
-            exit 0
+            return
         }
         if ($verifiedBridgeProcess -and -not $sameRuntime) {
             Stop-Process -Id $existingProcessId -Force
@@ -132,10 +176,12 @@ if (Test-Path -LiteralPath $statePath -PathType Leaf) {
     } catch { }
 }
 
-$watcher = Start-Process -FilePath ([string]$powershellCommand.Source) -ArgumentList @(
-    '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $watcherScript, '-ContextKey', $resolvedContext,
-    '-PluginId', $pluginId, '-PluginVersion', $pluginVersion
-) -WindowStyle Hidden -PassThru
+$watcher = Start-DetachedBridgeWatcher `
+    -PowerShellExecutable $powershellExecutable `
+    -WatcherScript $watcherScript `
+    -WatcherContextKey $resolvedContext `
+    -WatcherPluginId $pluginId `
+    -WatcherPluginVersion $pluginVersion
 Start-Sleep -Milliseconds 350
 if ($watcher.HasExited) { throw 'Desktop Bridge stopped before it became ready.' }
 
@@ -165,4 +211,5 @@ Write-CompactJson ([ordered]@{
     accountState = 'signed_in'
     pluginId = $pluginId
     pluginVersion = $pluginVersion
+    launcherElapsedMs = [int]$launcherTimer.ElapsedMilliseconds
 })
