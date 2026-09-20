@@ -16,6 +16,7 @@ $runtimeRoot = Join-Path $fixtureRoot 'bridge-runtime\old-runtime'
 $credentialPath = Join-Path $fixtureRoot 'desktop-credential.json'
 $watcherPath = Join-Path $runtimeRoot 'watch-cogentstack-bridge.ps1'
 $worker = $null
+$orphanWorker = $null
 
 try {
     [void](New-Item -ItemType Directory -Path $stateRoot -Force)
@@ -24,6 +25,9 @@ try {
     Set-Content -LiteralPath $watcherPath -Value 'Start-Sleep -Seconds 120' -Encoding UTF8
 
     $worker = Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $watcherPath) -WindowStyle Hidden -RedirectStandardOutput (Join-Path $fixtureRoot 'worker.stdout.log') -RedirectStandardError (Join-Path $fixtureRoot 'worker.stderr.log') -PassThru
+    $orphanCommand = "& '$($watcherPath.Replace("'", "''"))'"
+    $orphanEncodedCommand = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($orphanCommand))
+    $orphanWorker = Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', $orphanEncodedCommand) -WindowStyle Hidden -PassThru
     [ordered]@{
         processId = $worker.Id
         runtimeVersion = 'old-runtime'
@@ -35,7 +39,7 @@ try {
     Assert-ResetTest ([bool]$result.packageRuntimeCleared) 'The reset helper did not report runtime cleanup.'
     Assert-ResetTest ([bool]$result.workerStateCleared) 'The reset helper did not report worker-state cleanup.'
     Assert-ResetTest ([bool]$result.credentialPreserved) 'The reset helper did not preserve the credential fixture.'
-    Assert-ResetTest ([int]$result.workersStopped -eq 1) 'The reset helper did not stop the verified Bridge worker.'
+    Assert-ResetTest ([int]$result.workersStopped -eq 2) 'The reset helper did not stop both the registered and orphaned Bridge workers.'
     Assert-ResetTest (-not (Test-Path -LiteralPath $stateRoot)) 'The Bridge state directory remains after reset.'
     Assert-ResetTest (-not (Test-Path -LiteralPath (Join-Path $fixtureRoot 'bridge-runtime'))) 'The Bridge runtime directory remains after reset.'
     Assert-ResetTest (Test-Path -LiteralPath $credentialPath -PathType Leaf) 'The credential fixture was removed.'
@@ -49,5 +53,6 @@ try {
     } | ConvertTo-Json -Compress
 } finally {
     if ($worker -and -not $worker.HasExited) { Stop-Process -Id $worker.Id -Force -ErrorAction SilentlyContinue }
+    if ($orphanWorker -and -not $orphanWorker.HasExited) { Stop-Process -Id $orphanWorker.Id -Force -ErrorAction SilentlyContinue }
     if (Test-Path -LiteralPath $fixtureRoot) { Remove-Item -LiteralPath $fixtureRoot -Recurse -Force }
 }
