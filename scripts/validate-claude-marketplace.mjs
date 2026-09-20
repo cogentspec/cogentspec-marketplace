@@ -109,7 +109,7 @@ if (syntaxCheck.error) fail(`PowerShell syntax validation could not complete: ${
 if (syntaxCheck.status !== 0) fail(`one or more plugin scripts have invalid PowerShell syntax: ${syntaxCheck.stderr.trim()}`);
 
 const bridge = await readFile(join(scriptsRoot, "start-cogentstack-bridge.ps1"), "utf8");
-for (const marker of ["bridge = 'started'", "bridge = 'already_running'", "browserOpened = $false", "bridge-runtime\\$runtimeVersion", "[ValidateSet('chatgpt', 'claude-desktop')]", "surface=$([Uri]::EscapeDataString($Surface))", "-ContextKey $resolvedContext", "-WorkspaceGrant", "-RequestTimeoutSeconds 8", "Get-HostPowerShellExecutable", "launcherElapsedMs", "#desktop-web=", "#desktop-chatgpt="]) {
+for (const marker of ["bridge = 'started'", "bridge = 'already_running'", "browserOpened = $false", "bridge-runtime\\$runtimeVersion", "[ValidateSet('chatgpt', 'claude-desktop')]", "surface=$([Uri]::EscapeDataString($Surface))", "-ContextKey $resolvedContext", "-WorkspaceGrant", "-RequestTimeoutSeconds 8", "Get-HostPowerShellExecutable", "launcherElapsedMs", "&open=web&nav=$navigationKey#desktop-web=", "&open=chatgpt&nav=$navigationKey#desktop-chatgpt="]) {
   if (!bridge.includes(marker)) fail(`Desktop Bridge starter is missing required marker: ${marker}`);
 }
 if (!skill.includes("-Surface claude-desktop")) fail("Claude launcher must identify its desktop surface");

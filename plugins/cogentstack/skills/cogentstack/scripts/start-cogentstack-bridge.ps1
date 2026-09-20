@@ -122,8 +122,9 @@ if ([string]$connection.webWorkspaceCode -notmatch '^cgw_[A-Za-z0-9_-]{32,}$' -o
     throw 'Desktop Bridge could not create the two private CogentSpec.app workspace handoffs.'
 }
 $workspaceBaseUrl = "https://cogentspec.app/stack?surface=$([Uri]::EscapeDataString($Surface))&context=$([Uri]::EscapeDataString($resolvedContext))"
-$webWorkspaceUrl = "$workspaceBaseUrl#desktop-web=$([Uri]::EscapeDataString([string]$connection.webWorkspaceCode))"
-$chatgptWorkspaceUrl = "$workspaceBaseUrl#desktop-chatgpt=$([Uri]::EscapeDataString([string]$connection.chatgptWorkspaceCode))"
+$navigationKey = [Guid]::NewGuid().ToString('N')
+$webWorkspaceUrl = "$workspaceBaseUrl&open=web&nav=$navigationKey#desktop-web=$([Uri]::EscapeDataString([string]$connection.webWorkspaceCode))"
+$chatgptWorkspaceUrl = "$workspaceBaseUrl&open=chatgpt&nav=$navigationKey#desktop-chatgpt=$([Uri]::EscapeDataString([string]$connection.chatgptWorkspaceCode))"
 $workspaceUrl = $chatgptWorkspaceUrl
 
 $localStateRoot = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'CogentSpec'

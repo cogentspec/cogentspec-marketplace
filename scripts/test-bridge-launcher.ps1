@@ -105,6 +105,8 @@ Start-Sleep -Seconds 30
     Assert-BridgeLauncherTest ($timer.ElapsedMilliseconds -lt 10000) 'The Bridge launcher exceeded the ten-second cold-process fixture limit.'
     Assert-BridgeLauncherTest ([string]$result.webWorkspaceUrl -match '#desktop-web=') 'The web workspace handoff is missing.'
     Assert-BridgeLauncherTest ([string]$result.chatgptWorkspaceUrl -match '#desktop-chatgpt=') 'The ChatGPT workspace handoff is missing.'
+    Assert-BridgeLauncherTest ([string]$result.webWorkspaceUrl -match '&open=web&nav=[a-f0-9]{32}#desktop-web=') 'The web link does not force a fresh normal-click navigation.'
+    Assert-BridgeLauncherTest ([string]$result.chatgptWorkspaceUrl -match '&open=chatgpt&nav=[a-f0-9]{32}#desktop-chatgpt=') 'The ChatGPT link does not force a fresh normal-click navigation.'
     Assert-BridgeLauncherTest (Test-Path -LiteralPath $connectorProcessPath -PathType Leaf) 'The fixture connector did not record its process.'
     $connectorProcessId = [int](Get-Content -Raw -LiteralPath $connectorProcessPath)
     Assert-BridgeLauncherTest ($connectorProcessId -eq $launcherProcessId) 'The account check was launched in a nested PowerShell process.'
