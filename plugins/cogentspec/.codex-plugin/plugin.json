@@ -1,6 +1,6 @@
 {
   "name": "cogentspec",
-  "version": "0.6.11",
+  "version": "0.6.12",
   "description": "Connect isolated AI project contexts to CogentSpec Web through one account-bound Desktop Bridge, restore portable Git-backed knowledge, and execute approved local actions.",
   "homepage": "https://cogentspec.com/install",
   "repository": "https://github.com/cogentspec/cogentspec-marketplace",
@@ -17,7 +17,7 @@
   "interface": {
     "displayName": "CogentSpec",
     "shortDescription": "CogentSpec Web, one Bridge, isolated AI contexts.",
-    "longDescription": "CogentSpec keeps official ChatGPT, Codex, and Claude desktop applications independent and connects their isolated project contexts to CogentSpec Web through one account-bound Desktop Bridge. Invoking CogentSpec resolves the current stable project context, starts or reuses its quiet Bridge worker, and returns separate web-browser and in-conversation links to the same shared workspace without opening or rearranging browser tabs. Approved project creation, permanent deletion, verified local preview, Git, and deployment-preparation requests are queued by the hosted workspace and executed through narrow server-authoritative helpers. Portable Git-backed project knowledge supports continuity across AI projects and computers while protected contracts, execution grants, licence validation, and subscriber data remain on the CogentSpec service.",
+    "longDescription": "CogentSpec keeps official ChatGPT, Codex, and Claude desktop applications independent and connects their isolated project contexts to CogentSpec Web through one account-bound Desktop Bridge. Invoking CogentSpec resolves the current stable project context, starts or reuses its quiet Bridge worker, returns the independent web-browser link, and opens the in-task workspace through the desktop app’s native browser-tab action. Approved project creation, permanent deletion, verified local preview, Git, and deployment-preparation requests are queued by the hosted workspace and executed through narrow server-authoritative helpers. Portable Git-backed project knowledge supports continuity across AI projects and computers while protected contracts, execution grants, licence validation, and subscriber data remain on the CogentSpec service.",
     "developerName": "CogentSpec",
     "category": "Productivity",
     "capabilities": [
