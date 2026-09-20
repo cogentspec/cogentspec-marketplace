@@ -11,7 +11,6 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-. (Join-Path $PSScriptRoot 'native-command.ps1')
 . (Join-Path $PSScriptRoot 'project-context.ps1')
 $projectContext = Get-CogentSpecProjectContext -ExplicitContextKey $ContextKey
 $contextQuery = "context=$([Uri]::EscapeDataString($projectContext.ContextKey))"
@@ -275,14 +274,23 @@ if (-not $verifiedPreview) {
     }
     $powershellCommand = Get-Command powershell.exe, pwsh.exe -ErrorAction SilentlyContinue | Select-Object -First 1
     if (-not $powershellCommand) { throw 'Windows PowerShell is required to generate the local preview.' }
-    $result = Invoke-CogentSpecNativeCommand -FilePath ([string]$powershellCommand.Source) -ArgumentList @(
-        '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $startScript, '-PreferredPort', [string]$preferredPort
-    )
-    if ($result.ExitCode -ne 0) { throw "Local preview generation failed: $($result.Output)" }
-    $jsonLine = @($result.Output -split '\r?\n' | Where-Object { $_.Trim().StartsWith('{') } | Select-Object -Last 1)
-    if (-not $jsonLine) { throw 'The local preview launcher did not return its verified address.' }
-    $started = $jsonLine | ConvertFrom-Json
-    $verifiedPreview = Get-VerifiedPreview ([string]$started.url) $exactTarget
+    $previewLauncher = Start-Process -FilePath ([string]$powershellCommand.Source) -ArgumentList @(
+        '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', $startScript, '-PreferredPort', [string]$preferredPort
+    ) -WindowStyle Hidden -PassThru
+    $previewDeadline = [DateTime]::UtcNow.AddSeconds(125)
+    while ([DateTime]::UtcNow -lt $previewDeadline -and -not $verifiedPreview) {
+        if (Test-Path -LiteralPath $runtimePath -PathType Leaf) {
+            try {
+                $started = Get-Content -Raw -LiteralPath $runtimePath | ConvertFrom-Json
+                if ($started.url) { $verifiedPreview = Get-VerifiedPreview ([string]$started.url) $exactTarget }
+            } catch { }
+        }
+        if ($verifiedPreview) { break }
+        if ($previewLauncher.HasExited -and $previewLauncher.ExitCode -ne 0) {
+            throw "Local preview generation failed with exit code $($previewLauncher.ExitCode)."
+        }
+        Start-Sleep -Milliseconds 400
+    }
     if (-not $verifiedPreview) { throw 'The generated preview does not belong to the exact active CogentSpec project.' }
     $generated = $true
 }
