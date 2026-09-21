@@ -118,6 +118,7 @@ Start-Sleep -Seconds 30
         $state = Get-Content -Raw -LiteralPath $statePath | ConvertFrom-Json
         $runtimeRoot = Split-Path -Parent ([string]$state.watcherScript)
     }
+    Assert-BridgeLauncherTest ([bool]$runtimeRoot -and (Test-Path -LiteralPath (Join-Path $runtimeRoot 'create-specification-project.ps1') -PathType Leaf)) 'The protected Bridge runtime omitted the specification project helper.'
 
     $connectorText = Get-Content -Raw -LiteralPath (Join-Path $repositoryRoot 'plugins\cogentspec\skills\cogentspec\scripts\connect-cogentstack.ps1')
     Assert-BridgeLauncherTest (-not $connectorText.Contains('exit 0')) 'The account helper can still terminate its calling launcher process.'

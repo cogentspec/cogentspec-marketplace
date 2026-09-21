@@ -87,6 +87,7 @@ $chatgptWorkspaceUrl = $connectionUrl
 $connectionScript = Join-Path $PSScriptRoot 'connect-cogentstack.ps1'
 $sourceScriptNames = @(
     'connect-cogentstack.ps1',
+    'create-specification-project.ps1',
     'delete-project.ps1',
     'fulfil-project.ps1',
     'generate-project-preview.ps1',

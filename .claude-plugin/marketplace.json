@@ -11,7 +11,7 @@
       "name": "cogentspec",
       "source": "./claude-plugins/cogentspec",
       "description": "Connect each Claude Code Desktop project to its isolated CogentSpec Web context through the shared Desktop Bridge without manipulating browser or application windows.",
-      "version": "0.4.12",
+      "version": "0.4.13",
       "author": {
         "name": "CogentSpec"
       },
@@ -30,7 +30,7 @@
       "name": "cogentstack",
       "source": "./claude-plugins/cogentstack",
       "description": "Connect each Claude Code Desktop project to its isolated CogentSpec Web context through the shared Desktop Bridge without manipulating browser or application windows.",
-      "version": "0.3.13",
+      "version": "0.3.14",
       "author": {
         "name": "CogentSpec"
       },
