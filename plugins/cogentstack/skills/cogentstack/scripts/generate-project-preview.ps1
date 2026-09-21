@@ -12,6 +12,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'project-context.ps1')
+. (Join-Path $PSScriptRoot 'project-preview-readiness.ps1')
 $projectContext = Get-CogentSpecProjectContext -ExplicitContextKey $ContextKey
 $contextQuery = "context=$([Uri]::EscapeDataString($projectContext.ContextKey))"
 
@@ -192,6 +193,11 @@ if ($Mode -eq 'watch') {
     if (-not $safeUrl) { exit 0 }
     try {
         while ($true) {
+            $readiness = Get-CogentSpecProjectPreviewReadiness $exactTarget $RequestId $projectContext.ContextKey
+            if (-not $readiness.Ready) {
+                Report-PreviewState $token $RequestId $exactTarget 'unavailable' $safeUrl.AbsoluteUri 0 | Out-Null
+                break
+            }
             $verified = Get-VerifiedPreview $safeUrl.AbsoluteUri $exactTarget
             if (-not $verified) {
                 Report-PreviewState $token $RequestId $exactTarget 'unavailable' $safeUrl.AbsoluteUri 0 | Out-Null
@@ -240,6 +246,25 @@ $activeProject = $listing.activeProject
 $exactRequestId = [string]$activeProject.requestId
 $exactTarget = Resolve-ExactProjectTarget ([string]$activeProject.targetPath)
 if ($exactRequestId -notmatch '^[0-9a-fA-F-]{36}$') { throw 'CogentSpec returned an invalid active project identity.' }
+
+$readiness = Get-CogentSpecProjectPreviewReadiness `
+    $exactTarget `
+    $exactRequestId `
+    $projectContext.ContextKey `
+    ([string]$activeProject.projectName) `
+    ([string]$activeProject.projectType)
+if (-not $readiness.Ready) {
+    Report-PreviewState $token $exactRequestId $exactTarget 'unavailable' '' 0 | Out-Null
+    Write-CompactJson ([ordered]@{
+        status = [string]$readiness.Status
+        reason = [string]$readiness.Reason
+        requestId = $exactRequestId
+        projectName = [string]$activeProject.projectName
+        targetPath = $exactTarget
+        previewOpened = $false
+    })
+    exit 0
+}
 
 $runtimePath = Join-Path $exactTarget '.coge\runtime.json'
 $rememberedUrls = New-Object 'Collections.Generic.List[string]'

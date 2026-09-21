@@ -295,6 +295,7 @@ try {
         'skills/cogentspec/scripts/prepare-deployment.ps1',
         'skills/cogentspec/scripts/project-context.ps1',
         'skills/cogentspec/scripts/project-knowledge.ps1',
+        'skills/cogentspec/scripts/project-preview-readiness.ps1',
         'skills/cogentspec/scripts/reset-cogentspec-update.ps1',
         'skills/cogentspec/scripts/start-cogentstack-bridge.ps1',
         'skills/cogentspec/scripts/watch-cogentstack-bridge.ps1',

@@ -73,7 +73,7 @@ When an existing project is loaded in another AI project:
 
 ## Generate or restart the active preview
 
-The hosted **Open saved preview** or **Start project preview** button queues `preview_project` for Desktop Bridge. The Bridge runs `scripts/generate-project-preview.ps1 -Mode generate -ContextKey <context>`, verifies that the listener and process tree belong to the exact active project, records the healthy loopback URL, and opens that verified URL in the user's normal browser. It never navigates away from the CogentSpec workspace.
+The hosted **Open saved preview** or **Start project preview** button queues `preview_project` for Desktop Bridge. The Bridge runs `scripts/generate-project-preview.ps1 -Mode generate -ContextKey <context>`, verifies the project request and context identity from `.coge/knowledge-manifest.json`, requires at least one real implementation file to differ from the generated Git foundation, then verifies that the listener and process tree belong to that exact project. Only then may it record the healthy loopback URL and open it in the user's normal browser. A generic foundation, identity mismatch, missing identity, or unverifiable Git baseline must fail closed without opening a preview. It never navigates away from the CogentSpec workspace.
 
 The saved port is a preference, not proof of a live process. Accept only `status: generated` or `status: already_running` with `remembered: true`. Routine viewing of an already-running preview uses the hosted **View project** button and does not invoke an agent.
 
