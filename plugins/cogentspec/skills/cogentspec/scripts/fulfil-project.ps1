@@ -83,13 +83,36 @@ function Resolve-ApprovedTarget([string]$TargetPath) {
     if ([string]::IsNullOrWhiteSpace($fullPath) -or $fullPath -eq [IO.Path]::GetPathRoot($fullPath)) {
         throw 'The approved project target cannot be a drive root.'
     }
-    if (Test-Path -LiteralPath $fullPath) {
-        $existing = Get-ChildItem -Force -LiteralPath $fullPath | Select-Object -First 1
-        if ($null -ne $existing) {
-            throw "The approved project target is not empty: $fullPath"
-        }
-    }
     return $fullPath
+}
+
+function Assert-FoundationTarget([string]$TargetPath, $SpecificationDraft) {
+    if (-not (Test-Path -LiteralPath $TargetPath)) { return }
+    $existingFiles = @(Get-ChildItem -Force -File -Recurse -LiteralPath $TargetPath)
+    if ($existingFiles.Count -eq 0) { return }
+    if ($null -eq $SpecificationDraft -or [string]$SpecificationDraft.folderStatus -ne 'ready') {
+        throw "The approved project target contains files that are not a verified CogentSpec specification: $TargetPath"
+    }
+    $markerPath = Join-Path $TargetPath '.coge\specification-draft.json'
+    if (-not (Test-Path -LiteralPath $markerPath -PathType Leaf)) {
+        throw 'The existing specification project marker is missing.'
+    }
+    $marker = Get-Content -Raw -LiteralPath $markerPath | ConvertFrom-Json
+    if ([string]$marker.draftId -ne [string]$SpecificationDraft.id -or [string]$marker.contextKey -ne $projectContext.ContextKey) {
+        throw 'The existing specification project does not belong to this approved AI task.'
+    }
+    $markedTarget = [IO.Path]::GetFullPath([string]$marker.targetPath).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
+    if (-not $markedTarget.Equals($TargetPath, [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'The existing specification project marker names a different target.'
+    }
+    $allowed = @(
+        '.coge/specification-draft.json', 'PROJECT_KNOWLEDGE.md', 'CURRENT_STATE.md',
+        'HANDOFF.md', 'AGENTS.md', 'docs/decisions/README.md'
+    )
+    foreach ($file in $existingFiles) {
+        $relative = $file.FullName.Substring($TargetPath.Length).TrimStart('\', '/').Replace('\', '/')
+        if ($relative -notin $allowed) { throw "The specification project contains an unexpected file: $relative" }
+    }
 }
 
 function Test-ArtifactPath([string]$ArtifactPath) {
@@ -208,6 +231,7 @@ try {
         throw 'The claimed project target does not match the approved request.'
     }
     $targetPath = Resolve-ApprovedTarget $claimedTarget
+    Assert-FoundationTarget $targetPath $claim.specificationDraft
 
     New-Item -ItemType Directory -Path $targetPath -Force | Out-Null
     $targetPrefix = $targetPath.TrimEnd('\') + '\'

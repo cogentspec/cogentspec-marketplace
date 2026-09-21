@@ -288,6 +288,7 @@ try {
         'skills/cogentstack/agents/openai.yaml',
         'skills/cogentstack/scripts/check-cogentspec-update.ps1',
         'skills/cogentstack/scripts/connect-cogentstack.ps1',
+        'skills/cogentstack/scripts/create-specification-project.ps1',
         'skills/cogentstack/scripts/delete-project.ps1',
         'skills/cogentstack/scripts/fulfil-project.ps1',
         'skills/cogentstack/scripts/generate-project-preview.ps1',
