@@ -82,6 +82,7 @@ const requiredScripts = [
   "prepare-deployment.ps1",
   "project-context.ps1",
   "project-knowledge.ps1",
+  "project-preview-readiness.ps1",
   "reset-cogentspec-update.ps1",
   "start-cogentstack-bridge.ps1",
   "watch-cogentstack-bridge.ps1",

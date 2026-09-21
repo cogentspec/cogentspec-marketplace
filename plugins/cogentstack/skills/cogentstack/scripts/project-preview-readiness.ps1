@@ -6,8 +6,18 @@ function Invoke-CogentSpecGitLines(
 ) {
     $gitCommand = Get-Command git.exe, git -ErrorAction SilentlyContinue | Select-Object -First 1
     if (-not $gitCommand) { throw 'Git is required to verify that a project has moved beyond its generated foundation.' }
-    $output = @(& ([string]$gitCommand.Source) -C $ExactTargetPath @GitArguments 2>$null)
-    if ($LASTEXITCODE -ne 0) { throw "Git could not verify preview readiness for the active project." }
+    # Windows PowerShell turns Git's harmless line-ending warnings into terminating
+    # errors when the caller uses ErrorActionPreference=Stop. Keep those warnings
+    # out of the Bridge result while still checking Git's real exit code.
+    $previousErrorActionPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $output = @(& ([string]$gitCommand.Source) -C $ExactTargetPath @GitArguments 2>$null)
+        $gitExitCode = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
+    if ($gitExitCode -ne 0) { throw "Git could not verify preview readiness for the active project." }
     return @($output | ForEach-Object { ([string]$_).Trim() } | Where-Object { $_ })
 }
 

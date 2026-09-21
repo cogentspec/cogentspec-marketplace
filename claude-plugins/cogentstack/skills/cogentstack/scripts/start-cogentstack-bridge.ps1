@@ -92,6 +92,7 @@ $sourceScriptNames = @(
     'generate-project-preview.ps1',
     'native-command.ps1',
     'project-context.ps1',
+    'project-preview-readiness.ps1',
     'watch-cogentstack-bridge.ps1'
 )
 if (-not (Test-Path -LiteralPath $connectionScript -PathType Leaf) -or @($sourceScriptNames | Where-Object { -not (Test-Path -LiteralPath (Join-Path $PSScriptRoot $_) -PathType Leaf) }).Count -gt 0) {

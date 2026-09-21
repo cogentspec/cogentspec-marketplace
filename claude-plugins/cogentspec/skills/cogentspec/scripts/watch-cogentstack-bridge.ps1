@@ -88,6 +88,7 @@ function Invoke-ActionHelper($Request) {
     }
     if ([string]$result.status -notin $acceptedStatuses) {
         $reason = if ($result.reason) { [string]$result.reason } elseif ($result.status) { [string]$result.status } else { 'unknown_failure' }
+        if ([string]$Request.action -eq 'preview_project') { throw $reason }
         throw "Desktop Bridge could not complete $($Request.action): $reason"
     }
     if ([string]$Request.action -eq 'preview_project' -and $result.localUrl) {
