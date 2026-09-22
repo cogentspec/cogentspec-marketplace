@@ -1,6 +1,6 @@
 ---
 name: cogentstack
-description: Connect the current ChatGPT, Codex, or Claude project to its isolated CogentSpec Web context through Desktop Bridge; restore portable repository knowledge; fulfil an approved project; generate its verified local preview; prepare an approved deployment handoff; or execute a deletion approved in CogentSpec Web. Use when the user invokes CogentSpec, $cogentstack, or @cogentstack, asks to connect or open CogentSpec Web, load or edit an existing CogentSpec project, create an approved project, view the active project, prepare an approved Deployment Pack, or delete a project and its folder.
+description: Connect the current ChatGPT, Codex, or Claude project to its isolated CogentSpec Web context through Desktop Bridge; restore portable repository knowledge; fulfil or build an approved project; generate its verified local preview; prepare an approved deployment handoff; or execute a deletion approved in CogentSpec Web. Use when the user invokes CogentSpec, $cogentstack, or @cogentstack, asks to connect or open CogentSpec Web, load or edit an existing CogentSpec project, create an approved project, says Build my project or Start Project Build, views the active project, prepares an approved Deployment Pack, or deletes a project and its folder.
 ---
 
 # Use CogentSpec Web through Desktop Bridge
@@ -58,6 +58,19 @@ Manual recovery is allowed only when the automatic Bridge queue is unavailable:
 3. If authorization is required, run connection status once and retry only when it renews successfully. Preserve the approved request and never make the user repeat the contract, name, target, checkbox, login, licence, or legal confirmation.
 4. On success report the exact target path, tests, and baseline commit. Do not push, deploy, or create another commit without explicit approval.
 
+## Build the active approved project
+
+Treat **Build my project** and **Start Project Build** as authorization to implement the current approved project, run its required checks, update its portable knowledge, and generate its first verified preview. This authorization does not include committing, pushing, or deploying.
+
+1. Resolve the current context with `scripts/project-context.ps1` exactly once unless this task already has its verified context key.
+2. Run `scripts/project-knowledge.ps1 -Mode inspect -ContextKey <context>` exactly once. Require one active created project, a matching `.coge/knowledge-manifest.json`, and the generated foundation at the exact returned target. Stop on an identity mismatch, dirty unrelated work, or an unverifiable foundation.
+3. Call the CogentSpec MCP tool `get_project_build_handoff` exactly once with that exact context key. Require `status: ready`, `command: Build my project`, the same project request identifier, Project Type, Contract Runtime, and Contract Pack as the local manifest. If the tool is unavailable or the handoff is incomplete, explain that the connected CogentSpec MCP build handoff is unavailable; do not reconstruct it or ask the user to repeat the brief.
+4. Use the handoff's original brief, approved direction, refinements, baseline, and build sequence as the build authority. Read the project's `AGENTS.md`, `PROJECT_KNOWLEDGE.md`, `CURRENT_STATE.md`, `HANDOFF.md`, and actual package before editing.
+5. Implement the project-specific experience in the existing foundation. Do not replace the approved Project Type or Contract Pack, and do not carry content, styling, paths, ports, or assumptions from another project.
+6. Run the project tests, production build, and relevant release checks. Update the portable knowledge files with the implemented decisions, current state, validation evidence, risks, and remaining work.
+7. Run `scripts/generate-project-preview.ps1 -Mode generate -ContextKey <context>` exactly once. Accept only `status: generated` or `status: already_running` with `remembered: true`, and require the reported project request identifier and target to match the inspected project.
+8. Report the completed project-specific build, checks, exact preview result, and any remaining limitation. Do not create a Git commit, push, or deploy without separate explicit approval.
+
 ## Restore portable knowledge
 
 New projects contain `AGENTS.md`, `PROJECT_KNOWLEDGE.md`, `CURRENT_STATE.md`, `HANDOFF.md`, `docs/decisions/`, and `.coge/knowledge-manifest.json`. Git carries durable project knowledge; CogentSpec restores protected server state through the safe project request identifier.
@@ -73,7 +86,7 @@ When an existing project is loaded in another AI project:
 
 ## Generate or restart the active preview
 
-The hosted **Open saved preview** or **Start project preview** button queues `preview_project` for Desktop Bridge. The Bridge runs `scripts/generate-project-preview.ps1 -Mode generate -ContextKey <context>`, verifies the project request and context identity from `.coge/knowledge-manifest.json`, requires at least one real implementation file to differ from the generated Git foundation, then verifies that the listener and process tree belong to that exact project. Only then may it record the healthy loopback URL and open it in the user's normal browser. A generic foundation, identity mismatch, missing identity, or unverifiable Git baseline must fail closed without opening a preview. It never navigates away from the CogentSpec workspace.
+The hosted **Open saved preview** button queues `preview_project` for Desktop Bridge after a project-specific preview has already been recorded. The Bridge runs `scripts/generate-project-preview.ps1 -Mode generate -ContextKey <context>`, verifies the project request and context identity from `.coge/knowledge-manifest.json`, requires at least one real implementation file to differ from the generated Git foundation, then verifies that the listener and process tree belong to that exact project. Only then may it record the healthy loopback URL and open it in the user's normal browser. A generic foundation, identity mismatch, missing identity, or unverifiable Git baseline must fail closed without opening a preview. It never navigates away from the CogentSpec workspace.
 
 The saved port is a preference, not proof of a live process. Accept only `status: generated` or `status: already_running` with `remembered: true`. Routine viewing of an already-running preview uses the hosted **View project** button and does not invoke an agent.
 
