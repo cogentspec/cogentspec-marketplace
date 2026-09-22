@@ -88,11 +88,14 @@ $connectionScript = Join-Path $PSScriptRoot 'connect-cogentstack.ps1'
 $sourceScriptNames = @(
     'connect-cogentstack.ps1',
     'create-specification-project.ps1',
+    'delete-specification-project.ps1',
     'delete-project.ps1',
+    'ensure-cogentspec-mcp.ps1',
     'fulfil-project.ps1',
     'generate-project-preview.ps1',
     'native-command.ps1',
     'project-context.ps1',
+    'project-build-handoff.ps1',
     'project-preview-readiness.ps1',
     'watch-cogentstack-bridge.ps1'
 )
@@ -118,6 +121,30 @@ if ([string]$connection.status -ne 'connected') {
         launcherElapsedMs = [int]$launcherTimer.ElapsedMilliseconds
     })
     return
+}
+$mcpState = 'not_required'
+if ($Surface -eq 'chatgpt') {
+    $mcpSetupScript = Join-Path $PSScriptRoot 'ensure-cogentspec-mcp.ps1'
+    $mcpOutput = @(& $mcpSetupScript -Surface $Surface 2>&1)
+    $mcpJson = @($mcpOutput | ForEach-Object { $_.ToString() } | Where-Object { $_.Trim().StartsWith('{') } | Select-Object -Last 1)
+    if (-not $mcpJson) { throw 'CogentSpec could not finish connecting.' }
+    $mcpSetup = $mcpJson | ConvertFrom-Json
+    if ([string]$mcpSetup.status -ne 'ready') {
+        Write-CompactJson ([ordered]@{
+            status = 'connection_required'
+            contextKey = $resolvedContext
+            contextIsolated = [bool]$projectContext.Isolated
+            workspaceUrl = $workspaceUrl
+            webWorkspaceUrl = $webWorkspaceUrl
+            chatgptWorkspaceUrl = $chatgptWorkspaceUrl
+            browserOpened = $false
+            accountState = 'signed_in'
+            userMessage = if ($mcpSetup.userMessage) { [string]$mcpSetup.userMessage } else { 'CogentSpec needs permission to continue. Complete the connection window, then run CogentSpec again.' }
+            launcherElapsedMs = [int]$launcherTimer.ElapsedMilliseconds
+        })
+        return
+    }
+    $mcpState = 'ready'
 }
 if ([string]$connection.webWorkspaceCode -notmatch '^cgw_[A-Za-z0-9_-]{32,}$' -or
     [string]$connection.chatgptWorkspaceCode -notmatch '^cgw_[A-Za-z0-9_-]{32,}$') {
@@ -167,6 +194,7 @@ if (Test-Path -LiteralPath $statePath -PathType Leaf) {
                 chatgptWorkspaceUrl = $chatgptWorkspaceUrl
                 browserOpened = $false
                 accountState = 'signed_in'
+                mcpState = $mcpState
                 pluginId = $pluginId
                 pluginVersion = $pluginVersion
                 launcherElapsedMs = [int]$launcherTimer.ElapsedMilliseconds
@@ -212,6 +240,7 @@ Write-CompactJson ([ordered]@{
     chatgptWorkspaceUrl = $chatgptWorkspaceUrl
     browserOpened = $false
     accountState = 'signed_in'
+    mcpState = $mcpState
     pluginId = $pluginId
     pluginVersion = $pluginVersion
     launcherElapsedMs = [int]$launcherTimer.ElapsedMilliseconds

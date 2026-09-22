@@ -290,6 +290,7 @@ try {
         'skills/cogentstack/scripts/check-cogentspec-update.ps1',
         'skills/cogentstack/scripts/connect-cogentstack.ps1',
         'skills/cogentstack/scripts/create-specification-project.ps1',
+        'skills/cogentstack/scripts/delete-specification-project.ps1',
         'skills/cogentstack/scripts/delete-project.ps1',
         'skills/cogentstack/scripts/ensure-cogentspec-mcp.ps1',
         'skills/cogentstack/scripts/fulfil-project.ps1',

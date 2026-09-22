@@ -94,6 +94,8 @@ Manual `@cogentspec view active project` is recovery only: run the generation he
 
 ## Delete an approved project and folder
 
+Saved specification drafts use the same protected deletion pattern. Typing the exact draft name and selecting **Delete specification and folder** queues `delete_specification`. Desktop Bridge runs `scripts/delete-specification-project.ps1 -Mode delete -RequestId <approved UUID> -ContextKey <context>`, verifies the `.coge/specification-draft.json` identity and exact registered child path, removes the folder, and only then removes the saved draft record.
+
 Typing the exact project name and selecting **Delete project and folder** is the single explicit deletion confirmation. The web request queues `delete_project` immediately; loading that project into the current AI context is not required. Desktop Bridge runs `scripts/delete-project.ps1 -Mode delete -RequestId <approved UUID> -ContextKey <context>`.
 
 The deletion helper accepts only the matching protected deletion and project identities, exact registered child path, approved parent directory, project slug, and short-lived execution grant. It refuses drive roots, files, temporary validation paths, reparse points, mismatched parents, and manually supplied paths.

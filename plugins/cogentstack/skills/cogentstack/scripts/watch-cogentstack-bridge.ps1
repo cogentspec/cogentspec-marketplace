@@ -61,6 +61,7 @@ function Invoke-BridgeApi([string]$Method, [string]$Path, [string]$Token, $Body 
 function Invoke-ActionHelper($Request) {
     $scriptName = switch ([string]$Request.action) {
         'create_specification' { 'create-specification-project.ps1' }
+        'delete_specification' { 'delete-specification-project.ps1' }
         'create_project' { 'fulfil-project.ps1' }
         'delete_project' { 'delete-project.ps1' }
         'preview_project' { 'generate-project-preview.ps1' }
@@ -74,6 +75,7 @@ function Invoke-ActionHelper($Request) {
     $arguments = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $helperPath)
     switch ([string]$Request.action) {
         'create_specification' { $arguments += @('-Mode', 'create', '-RequestId', [string]$Request.targetRequestId, '-ContextKey', $ContextKey) }
+        'delete_specification' { $arguments += @('-Mode', 'delete', '-RequestId', [string]$Request.targetRequestId, '-ContextKey', $ContextKey) }
         'create_project' { $arguments += @('-Mode', 'create', '-RequestId', [string]$Request.targetRequestId, '-ContextKey', $ContextKey) }
         'delete_project' { $arguments += @('-Mode', 'delete', '-RequestId', [string]$Request.targetRequestId, '-ContextKey', $ContextKey) }
         'preview_project' { $arguments += @('-Mode', 'generate', '-ContextKey', $ContextKey) }
@@ -85,6 +87,7 @@ function Invoke-ActionHelper($Request) {
     $result = $jsonLine | ConvertFrom-Json
     $acceptedStatuses = switch ([string]$Request.action) {
         'create_specification' { @('specification_created') }
+        'delete_specification' { @('deleted') }
         'create_project' { @('created') }
         'delete_project' { @('deleted') }
         'preview_project' { @('generated', 'already_running') }
@@ -128,6 +131,7 @@ try {
                 $result = Invoke-ActionHelper $claimed.request
                 $summary = switch ([string]$claimed.request.action) {
                     'create_specification' { 'Specification project folder created and verified.' }
+                    'delete_specification' { 'Specification draft, folder, and saved state deleted.' }
                     'create_project' { 'Project foundation created and verified.' }
                     'delete_project' { 'Project, folder, and linked CogentSpec state deleted.' }
                     'preview_project' { "Verified project preview opened at $([string]$result.localUrl)" }

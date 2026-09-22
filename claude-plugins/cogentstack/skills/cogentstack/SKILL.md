@@ -69,6 +69,8 @@ Manual Claude recovery may run that helper once only when the hosted preview act
 
 Typing the exact project name and selecting **Delete project and folder** in CogentSpec Web is the single permanent-deletion confirmation. Loading that project into the current Claude context is not required. The web request immediately queues `delete_project` for Desktop Bridge.
 
+Saved specification drafts use the same protected deletion pattern through `delete-specification-project.ps1`; the helper verifies the exact registered folder and its `.coge/specification-draft.json` identity before removing the folder and saved draft record.
+
 The Bridge runs `delete-project.ps1 -Mode delete -RequestId <approved UUID> -ContextKey <context>`. It accepts only the server-returned deletion and project identifiers, the registered child path, approved parent, slug, and short-lived execution grant. It refuses roots, files, temporary validation paths, reparse points, mismatched parents, and conversationally supplied substitute paths.
 
 If the Bridge has not claimed the request promptly, the page preserves the approval and offers a retry without requiring the project name again. Manual recovery may inspect and execute only that sole authoritative request. Treat success as proven only by `status: deleted`, and report the exact target plus `folderRemoved` and `registrationFinalized` accurately.
