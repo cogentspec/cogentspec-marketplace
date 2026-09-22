@@ -94,6 +94,7 @@ $sourceScriptNames = @(
     'generate-project-preview.ps1',
     'native-command.ps1',
     'project-context.ps1',
+    'project-build-handoff.ps1',
     'project-preview-readiness.ps1',
     'watch-cogentstack-bridge.ps1'
 )
