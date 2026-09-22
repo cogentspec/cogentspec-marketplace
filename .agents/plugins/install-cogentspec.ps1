@@ -291,6 +291,7 @@ try {
         'skills/cogentspec/scripts/connect-cogentstack.ps1',
         'skills/cogentspec/scripts/create-specification-project.ps1',
         'skills/cogentspec/scripts/delete-project.ps1',
+        'skills/cogentspec/scripts/ensure-cogentspec-mcp.ps1',
         'skills/cogentspec/scripts/fulfil-project.ps1',
         'skills/cogentspec/scripts/generate-project-preview.ps1',
         'skills/cogentspec/scripts/native-command.ps1',
@@ -329,7 +330,8 @@ try {
         'workspaceReadinessSkipped: true',
         'Run `scripts/project-context.ps1` exactly once',
         'Run `scripts/start-cogentstack-bridge.ps1 -ContextKey <resolved context> -Surface chatgpt` exactly once.',
-        'This helper performs the one account-status check itself.',
+        'This helper performs the account check and prepares the secure project-data connection before returning.',
+        'show only its plain `userMessage`',
         '`browserOpened: false`',
         'Do not render `chatgptWorkspaceUrl` as a Markdown or HTML link.',
         'When the `mcp__codex_app__open_in_codex` tool is available',
@@ -354,12 +356,29 @@ try {
             throw 'The Desktop Bridge launcher contains a prohibited browser or window-arrangement action.'
         }
     }
-    foreach ($requiredMarker in @("browserOpened = `$false", "bridge = 'started'", "bridge = 'already_running'", '-WorkspaceGrant', '-ContextKey $resolvedContext', 'https://cogentspec.app/stack', '&open=web&nav=$navigationKey#desktop-web=', '&open=chatgpt&nav=$navigationKey#desktop-chatgpt=', 'webWorkspaceUrl', 'chatgptWorkspaceUrl', 'start-cogentstack-bridge.ps1')) {
+    foreach ($requiredMarker in @("browserOpened = `$false", "bridge = 'started'", "bridge = 'already_running'", "mcpState = 'ready'", 'ensure-cogentspec-mcp.ps1', '-WorkspaceGrant', '-ContextKey $resolvedContext', 'https://cogentspec.app/stack', '&open=web&nav=$navigationKey#desktop-web=', '&open=chatgpt&nav=$navigationKey#desktop-chatgpt=', 'webWorkspaceUrl', 'chatgptWorkspaceUrl', 'start-cogentstack-bridge.ps1')) {
         if (-not ($bridgeScript.Contains($requiredMarker) -or $skillText.Contains($requiredMarker))) {
             throw 'The Desktop Bridge launcher is missing a required web-first connection marker.'
         }
     }
     Complete-InstallStage
+
+    $projectDataConnectionReady = $false
+    if (-not $ValidateOnly) {
+        Set-InstallStage -Name 'secure_project_data_connection'
+        $mcpList = Invoke-BoundedNative -FilePath $script:codexPath -Arguments @('mcp', 'list') -Operation 'secure project-data connection inspection'
+        $mcpLine = @($mcpList -split "`r?`n" | Where-Object { $_ -match '^\s*cogentspec\s+https://cogentspec\.com/mcp\s+' } | Select-Object -Last 1)
+        if ($mcpLine -and $mcpLine -match '\sNot logged in\s*$') {
+            [void](Invoke-BoundedNative -FilePath $script:codexPath -Arguments @('mcp', 'login', 'cogentspec') -Operation 'secure project-data connection authorization')
+            $mcpList = Invoke-BoundedNative -FilePath $script:codexPath -Arguments @('mcp', 'list') -Operation 'secure project-data connection verification'
+            $mcpLine = @($mcpList -split "`r?`n" | Where-Object { $_ -match '^\s*cogentspec\s+https://cogentspec\.com/mcp\s+' } | Select-Object -Last 1)
+        }
+        if (-not $mcpLine -or $mcpLine -notmatch '\sOAuth\s*$') {
+            throw 'CogentSpec could not finish connecting. Restart Codex and run CogentSpec again.'
+        }
+        $projectDataConnectionReady = $true
+        Complete-InstallStage
+    }
 
     if ($UpdateOnly) {
         Set-InstallStage -Name 'superseded_bridge_cleanup'
@@ -392,6 +411,7 @@ try {
             continueCurrentTask = $true
             fastUpdatePath = $true
             workspaceReadinessSkipped = $true
+            projectDataConnectionReady = $projectDataConnectionReady
             refreshedPluginPath = $installedPath
             installed = $true
             enabled = $true
@@ -465,6 +485,7 @@ try {
         connected = $true
         accountBound = $true
         installationBound = $true
+        projectDataConnectionReady = $projectDataConnectionReady
         version = [string]$installedManifest.version
         installerElapsedMs = [int]$timer.ElapsedMilliseconds
     } | ConvertTo-Json -Compress -Depth 5 | Write-Output

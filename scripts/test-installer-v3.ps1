@@ -88,6 +88,7 @@ if ($Mode -ne 'claim' -or $InstallationRequest -notmatch '^cgb_[A-Za-z0-9_-]{40,
     $escapedSourcePlugin = $fixturePlugin.Replace("'", "''")
     $escapedInstalledPlugin = $fixtureInstalledPlugin.Replace("'", "''")
     $escapedVersion = ([string]$pluginManifest.version).Replace("'", "''")
+    $escapedMcpState = (Join-Path $fixtureRoot 'mcp-authorized.txt').Replace("'", "''")
 
     $codexStub = @"
 param([Parameter(ValueFromRemainingArguments = `$true)][string[]]`$CliArgs)
@@ -106,6 +107,16 @@ if (`$CliArgs.Count -ge 3 -and `$CliArgs[0] -eq 'plugin' -and `$CliArgs[1] -eq '
 }
 if (`$CliArgs.Count -ge 3 -and `$CliArgs[0] -eq 'plugin' -and `$CliArgs[1] -eq 'list') {
     [ordered]@{ installed = @([ordered]@{ pluginId = 'cogentspec@cogentstack'; installed = `$true; enabled = `$true; version = '$escapedVersion' }) } | ConvertTo-Json -Compress
+    exit 0
+}
+if (`$CliArgs.Count -eq 2 -and `$CliArgs[0] -eq 'mcp' -and `$CliArgs[1] -eq 'list') {
+    `$auth = if (Test-Path -LiteralPath '$escapedMcpState') { 'OAuth' } else { 'Not logged in' }
+    "cogentspec           https://cogentspec.com/mcp         -                     enabled  `$auth"
+    exit 0
+}
+if (`$CliArgs.Count -eq 3 -and `$CliArgs[0] -eq 'mcp' -and `$CliArgs[1] -eq 'login' -and `$CliArgs[2] -eq 'cogentspec') {
+    'authorized' | Set-Content -LiteralPath '$escapedMcpState' -Encoding ascii
+    'CogentSpec connected.'
     exit 0
 }
 Write-Error ('Unexpected Codex fixture arguments: ' + (`$CliArgs -join ' '))
@@ -175,12 +186,14 @@ public static class GitFixture
     Assert-InstallerTest ([bool]$update.continueCurrentTask) 'The update fixture did not permit the current task to continue.'
     Assert-InstallerTest ([bool]$update.fastUpdatePath) 'The update fixture did not use the fast update-only path.'
     Assert-InstallerTest ([bool]$update.workspaceReadinessSkipped) 'The update fixture repeated the first-install web readiness check.'
+    Assert-InstallerTest ([bool]$update.projectDataConnectionReady) 'The update fixture did not prepare the secure project-data connection.'
     Assert-InstallerTest ([int]$update.installerElapsedMs -gt 0 -and [int]$update.installerElapsedMs -lt 10000) 'The update-only installer exceeded the ten-second regression limit.'
     Assert-InstallerTest ([string]$update.refreshedPluginPath -eq $fixtureInstalledPlugin) 'The update fixture did not return the refreshed plugin path.'
     Assert-InstallerTest (-not [bool]$update.claimAttempted) 'The update fixture attempted an account claim.'
     Assert-InstallerTest ($update.accountRequestConsumed -eq $false) 'The update fixture did not prove that no account request was consumed.'
     $updateStageNames = @($update.completedStages | ForEach-Object { [string]$_.stage })
     Assert-InstallerTest ($updateStageNames -contains 'superseded_bridge_cleanup') 'The update fixture did not evidence superseded Bridge cleanup.'
+    Assert-InstallerTest ($updateStageNames -contains 'secure_project_data_connection') 'The update fixture did not evidence the secure project-data connection.'
     Assert-InstallerTest ($updateStageNames -contains 'workspace_readiness_skipped_for_update') 'The update fixture did not evidence the skipped first-install web check.'
     Assert-InstallerTest ($updateStageNames -notcontains 'workspace_readiness') 'The update fixture repeated the first-install web readiness stage.'
 
@@ -198,6 +211,7 @@ public static class GitFixture
     Assert-InstallerTest ([bool]$claim.claimAttempted) 'The isolated claim fixture did not attempt its local claim helper.'
     Assert-InstallerTest ([bool]$claim.accountRequestConsumed) 'The isolated claim fixture did not report consumption.'
     Assert-InstallerTest ([bool]$claim.connected -and [bool]$claim.accountBound -and [bool]$claim.installationBound) 'The isolated claim fixture did not return all connection guarantees.'
+    Assert-InstallerTest ([bool]$claim.projectDataConnectionReady) 'The isolated claim fixture did not prepare the secure project-data connection.'
     $claimStageNames = @($claim.completedStages | ForEach-Object { [string]$_.stage })
     Assert-InstallerTest ($claimStageNames -contains 'account_bound_claim') 'The isolated claim fixture did not complete the account-bound claim stage.'
 

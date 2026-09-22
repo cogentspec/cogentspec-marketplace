@@ -57,6 +57,16 @@ if ($Mode -ne 'status' -or -not $WorkspaceGrant -or $RequestTimeoutSeconds -ne 8
 '@
     Set-Content -LiteralPath (Join-Path $fixtureScripts 'connect-cogentstack.ps1') -Value $connectionFixture -Encoding UTF8
 
+    $projectDataConnectionFixture = @'
+param([string]$Surface)
+[ordered]@{
+    status = 'ready'
+    connection = 'already_connected'
+    userMessage = 'CogentSpec is ready.'
+} | ConvertTo-Json -Compress
+'@
+    Set-Content -LiteralPath (Join-Path $fixtureScripts 'ensure-cogentspec-mcp.ps1') -Value $projectDataConnectionFixture -Encoding UTF8
+
     $watcherFixture = @'
 param(
     [string]$ContextKey,
@@ -101,7 +111,8 @@ Start-Sleep -Seconds 30
 
     Assert-BridgeLauncherTest ([string]$result.status -eq 'ready') 'The Bridge launcher did not become ready.'
     Assert-BridgeLauncherTest ([string]$result.bridge -eq 'started') 'The Bridge launcher did not start the fixture worker.'
-    Assert-BridgeLauncherTest ([int]$result.launcherElapsedMs -ge 0 -and [int]$result.launcherElapsedMs -lt 3000) 'The Bridge launcher exceeded its three-second in-process limit.'
+    Assert-BridgeLauncherTest ([string]$result.mcpState -eq 'ready') 'The secure project-data connection was not ready.'
+    Assert-BridgeLauncherTest ([int]$result.launcherElapsedMs -ge 0 -and [int]$result.launcherElapsedMs -lt 5000) 'The Bridge launcher exceeded its five-second in-process limit.'
     Assert-BridgeLauncherTest ($timer.ElapsedMilliseconds -lt 10000) 'The Bridge launcher exceeded the ten-second cold-process fixture limit.'
     Assert-BridgeLauncherTest ([string]$result.webWorkspaceUrl -match '#desktop-web=') 'The web workspace handoff is missing.'
     Assert-BridgeLauncherTest ([string]$result.chatgptWorkspaceUrl -match '#desktop-chatgpt=') 'The ChatGPT workspace handoff is missing.'
@@ -119,6 +130,7 @@ Start-Sleep -Seconds 30
         $runtimeRoot = Split-Path -Parent ([string]$state.watcherScript)
     }
     Assert-BridgeLauncherTest ([bool]$runtimeRoot -and (Test-Path -LiteralPath (Join-Path $runtimeRoot 'create-specification-project.ps1') -PathType Leaf)) 'The protected Bridge runtime omitted the specification project helper.'
+    Assert-BridgeLauncherTest (Test-Path -LiteralPath (Join-Path $runtimeRoot 'ensure-cogentspec-mcp.ps1') -PathType Leaf) 'The protected Bridge runtime omitted the project-data connection helper.'
 
     $connectorText = Get-Content -Raw -LiteralPath (Join-Path $repositoryRoot 'plugins\cogentspec\skills\cogentspec\scripts\connect-cogentstack.ps1')
     Assert-BridgeLauncherTest (-not $connectorText.Contains('exit 0')) 'The account helper can still terminate its calling launcher process.'
@@ -130,6 +142,7 @@ Start-Sleep -Seconds 30
         observedElapsedMs = [int]$timer.ElapsedMilliseconds
         directAccountCheck = $true
         boundedAccountCheckSeconds = 8
+        projectDataConnection = 'ready'
         workspaceLinksReturned = 2
     } | ConvertTo-Json -Compress
 } finally {
