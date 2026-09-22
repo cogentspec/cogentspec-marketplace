@@ -283,6 +283,7 @@ try {
 
     $allowedFiles = @(
         '.codex-plugin/plugin.json',
+        '.mcp.json',
         'assets/icon.png',
         'assets/logo.png',
         'skills/cogentstack/agents/openai.yaml',

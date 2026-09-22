@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "cogentspec": {
+      "type": "http",
+      "url": "https://cogentspec.com/mcp",
+      "oauth_resource": "https://cogentspec.com/mcp"
+    }
+  }
+}
