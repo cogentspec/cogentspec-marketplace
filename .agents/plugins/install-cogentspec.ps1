@@ -295,6 +295,7 @@ try {
         'skills/cogentspec/scripts/ensure-cogentspec-mcp.ps1',
         'skills/cogentspec/scripts/fulfil-project.ps1',
         'skills/cogentspec/scripts/generate-project-preview.ps1',
+        'skills/cogentspec/scripts/inspect-project-git.ps1',
         'skills/cogentspec/scripts/native-command.ps1',
         'skills/cogentspec/scripts/prepare-deployment.ps1',
         'skills/cogentspec/scripts/project-build-handoff.ps1',

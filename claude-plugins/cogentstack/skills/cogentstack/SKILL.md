@@ -55,6 +55,8 @@ When an existing project is loaded into a different Claude project:
 4. Do not run `git pull` automatically. Show the branch, revision, dirty state, and intended Git operation; fetch or fast-forward only after explicit authorization and never overwrite dirty work.
 5. Before an approved commit or handoff, update the human knowledge files and run `project-knowledge.ps1 -Mode refresh -ContextKey <context>`.
 
+The hosted **Check project** control is read-only and queues `refresh_project_git` for Desktop Bridge. The Bridge runs `inspect-project-git.ps1` against the exact protected active-project path, verifies the portable project identity, records the bounded Git snapshot, and completes the check automatically. Do not ask the user to send another Claude command for this check.
+
 For a legacy project, initialize missing portable knowledge only after an explicit request by running `project-knowledge.ps1 -Mode initialize -ContextKey <context>`. It must not overwrite existing files or invent undocumented history.
 
 ## Generate or open the active preview

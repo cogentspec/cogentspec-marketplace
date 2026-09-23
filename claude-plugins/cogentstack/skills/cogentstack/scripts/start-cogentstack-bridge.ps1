@@ -93,6 +93,7 @@ $sourceScriptNames = @(
     'ensure-cogentspec-mcp.ps1',
     'fulfil-project.ps1',
     'generate-project-preview.ps1',
+    'inspect-project-git.ps1',
     'native-command.ps1',
     'project-context.ps1',
     'project-build-handoff.ps1',

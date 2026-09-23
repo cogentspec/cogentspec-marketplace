@@ -80,6 +80,7 @@ const requiredScripts = [
   "delete-project.ps1",
   "fulfil-project.ps1",
   "generate-project-preview.ps1",
+  "inspect-project-git.ps1",
   "native-command.ps1",
   "prepare-deployment.ps1",
   "project-context.ps1",

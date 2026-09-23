@@ -84,6 +84,8 @@ When an existing project is loaded in another AI project:
 5. Before an approved handoff or commit, refresh the knowledge state and update the human knowledge files when architecture, decisions, tests, risks, or outstanding work changed.
 6. For a legacy project, initialize missing portable knowledge only after an explicit request and never invent undocumented history.
 
+The hosted **Check project** control is read-only and queues `refresh_project_git` for Desktop Bridge. The Bridge runs `inspect-project-git.ps1` against the exact protected active-project path, verifies the portable project identity, records the bounded Git snapshot, and completes the check automatically. Do not ask the user to send another ChatGPT command for this check.
+
 ## Generate or restart the active preview
 
 The hosted **Open saved preview** button queues `preview_project` for Desktop Bridge after a project-specific preview has already been recorded. The Bridge runs `scripts/generate-project-preview.ps1 -Mode generate -ContextKey <context>`, verifies the project request and context identity from `.coge/knowledge-manifest.json`, requires at least one real implementation file to differ from the generated Git foundation, then verifies that the listener and process tree belong to that exact project. Only then may it record the healthy loopback URL and open it in the user's normal browser. A generic foundation, identity mismatch, missing identity, or unverifiable Git baseline must fail closed without opening a preview. It never navigates away from the CogentSpec workspace.
