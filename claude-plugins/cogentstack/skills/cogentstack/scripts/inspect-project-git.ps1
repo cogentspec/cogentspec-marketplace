@@ -114,7 +114,9 @@ try {
     $repositoryCheck = Invoke-Git $root @('rev-parse', '--is-inside-work-tree')
     if ($repositoryCheck.Output.Trim() -ne 'true') { throw 'The active project is not a Git worktree.' }
     $branch = (Invoke-Git $root @('branch', '--show-current')).Output.Trim()
-    $statusLines = @((Invoke-Git $root @('status', '--porcelain=v1', '--untracked-files=normal')).Output -split "`r?`n" | Where-Object { $_ })
+    # The branch header keeps PowerShell's outer output trim from removing the
+    # first status column when the first file has only a working-tree change.
+    $statusLines = @((Invoke-Git $root @('status', '--porcelain=v1', '--branch', '--untracked-files=normal')).Output -split "`r?`n" | Where-Object { $_ -and -not $_.StartsWith('## ') })
     $files = @($statusLines | Select-Object -First 200 | ForEach-Object {
         $line = [string]$_
         $code = if ($line.Length -ge 2) { $line.Substring(0, 2) } else { $line }
