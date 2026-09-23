@@ -81,6 +81,7 @@ const requiredScripts = [
   "fulfil-project.ps1",
   "generate-project-preview.ps1",
   "inspect-project-git.ps1",
+  "restore-project-version.ps1",
   "save-project-version.ps1",
   "native-command.ps1",
   "prepare-deployment.ps1",
@@ -123,7 +124,7 @@ for (const forbidden of ["--app", "--new-window", "SetWindowPos", "SW_MAXIMIZE"]
 }
 
 const watcher = await readFile(join(scriptsRoot, "watch-cogentstack-bridge.ps1"), "utf8");
-for (const marker of ["/api/plugin/desktop-actions", "create_project", "delete_project", "preview_project", "[string]$PluginVersion", "pluginVersion=$([Uri]::EscapeDataString($PluginVersion))"]) {
+for (const marker of ["/api/plugin/desktop-actions", "create_project", "delete_project", "preview_project", "restore_project_version", "[string]$PluginVersion", "pluginVersion=$([Uri]::EscapeDataString($PluginVersion))"]) {
   if (!watcher.includes(marker)) fail(`Desktop Bridge watcher is missing required action marker: ${marker}`);
 }
 

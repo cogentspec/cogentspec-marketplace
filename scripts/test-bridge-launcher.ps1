@@ -131,6 +131,7 @@ Start-Sleep -Seconds 30
     }
     Assert-BridgeLauncherTest ([bool]$runtimeRoot -and (Test-Path -LiteralPath (Join-Path $runtimeRoot 'create-specification-project.ps1') -PathType Leaf)) 'The protected Bridge runtime omitted the specification project helper.'
     Assert-BridgeLauncherTest (Test-Path -LiteralPath (Join-Path $runtimeRoot 'inspect-project-git.ps1') -PathType Leaf) 'The protected Bridge runtime omitted the automatic project check helper.'
+    Assert-BridgeLauncherTest (Test-Path -LiteralPath (Join-Path $runtimeRoot 'restore-project-version.ps1') -PathType Leaf) 'The protected Bridge runtime omitted the automatic version restore helper.'
     Assert-BridgeLauncherTest (Test-Path -LiteralPath (Join-Path $runtimeRoot 'save-project-version.ps1') -PathType Leaf) 'The protected Bridge runtime omitted the automatic version save helper.'
     Assert-BridgeLauncherTest (Test-Path -LiteralPath (Join-Path $runtimeRoot 'ensure-cogentspec-mcp.ps1') -PathType Leaf) 'The protected Bridge runtime omitted the project-data connection helper.'
 
@@ -143,6 +144,14 @@ Start-Sleep -Seconds 30
     Assert-BridgeLauncherTest ($saveHelperText.Contains("@('commit', '--quiet', '-m', `$message.Trim())")) 'The automatic version save helper does not use the approved version description.'
     Assert-BridgeLauncherTest ($saveHelperText.Contains("status = 'saved'")) 'The automatic version save helper does not report a verified saved result.'
     Assert-BridgeLauncherTest (-not $saveHelperText.Contains('Start-Process')) 'The automatic version save helper must not open another application.'
+    $restoreHelperText = Get-Content -Raw -LiteralPath (Join-Path $repositoryRoot 'plugins\cogentspec\skills\cogentspec\scripts\restore-project-version.ps1')
+    Assert-BridgeLauncherTest ($restoreHelperText.Contains("request.action -ne 'revert'")) 'The automatic version restore helper does not require an exact restore request.'
+    Assert-BridgeLauncherTest ($restoreHelperText.Contains("@('merge-base', '--is-ancestor'")) 'The automatic version restore helper does not constrain the target to current project history.'
+    Assert-BridgeLauncherTest ($restoreHelperText.Contains("@('status', '--porcelain=v1', '--untracked-files=all')")) 'The automatic version restore helper does not require a clean worktree.'
+    Assert-BridgeLauncherTest ($restoreHelperText.Contains("@('read-tree', '--reset', '-u', `$targetHash)")) 'The automatic version restore helper does not restore the exact selected tree.'
+    Assert-BridgeLauncherTest ($restoreHelperText.Contains("'HEAD^{tree}'")) 'The automatic version restore helper does not verify the restored tree.'
+    Assert-BridgeLauncherTest ($restoreHelperText.Contains("status = 'restored'")) 'The automatic version restore helper does not report a verified restored result.'
+    Assert-BridgeLauncherTest (-not $restoreHelperText.Contains('Start-Process')) 'The automatic version restore helper must not open another application.'
 
     [ordered]@{
         status = 'valid'

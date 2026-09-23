@@ -67,6 +67,7 @@ function Invoke-ActionHelper($Request) {
         'preview_project' { 'generate-project-preview.ps1' }
         'refresh_project_git' { 'inspect-project-git.ps1' }
         'save_project_git' { 'save-project-version.ps1' }
+        'restore_project_version' { 'restore-project-version.ps1' }
         default { throw "Unsupported Desktop Bridge action: $($Request.action)" }
     }
     $helperPath = Join-Path $PSScriptRoot $scriptName
@@ -83,6 +84,7 @@ function Invoke-ActionHelper($Request) {
         'preview_project' { $arguments += @('-Mode', 'generate', '-ContextKey', $ContextKey) }
         'refresh_project_git' { $arguments += @('-RequestId', [string]$Request.targetRequestId, '-ContextKey', $ContextKey) }
         'save_project_git' { $arguments += @('-RequestId', [string]$Request.targetRequestId, '-ContextKey', $ContextKey) }
+        'restore_project_version' { $arguments += @('-RequestId', [string]$Request.targetRequestId, '-ContextKey', $ContextKey) }
     }
 
     $output = @(& ([string]$powershellCommand.Source) @arguments 2>&1)
@@ -97,6 +99,7 @@ function Invoke-ActionHelper($Request) {
         'preview_project' { @('generated', 'already_running') }
         'refresh_project_git' { @('refreshed') }
         'save_project_git' { @('saved') }
+        'restore_project_version' { @('restored') }
     }
     if ([string]$result.status -notin $acceptedStatuses) {
         $reason = if ($result.reason) { [string]$result.reason } elseif ($result.status) { [string]$result.status } else { 'unknown_failure' }
@@ -143,6 +146,7 @@ try {
                     'preview_project' { "Verified project preview opened at $([string]$result.localUrl)" }
                     'refresh_project_git' { 'Project check completed.' }
                     'save_project_git' { 'Version saved on this computer.' }
+                    'restore_project_version' { 'Selected version restored and saved as a new version.' }
                 }
                 Invoke-BridgeApi -Method Patch -Path "/api/plugin/desktop-actions?$contextQuery" -Token $token -Body @{
                     action = 'complete'

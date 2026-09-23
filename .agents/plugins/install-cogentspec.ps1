@@ -296,6 +296,7 @@ try {
         'skills/cogentspec/scripts/fulfil-project.ps1',
         'skills/cogentspec/scripts/generate-project-preview.ps1',
         'skills/cogentspec/scripts/inspect-project-git.ps1',
+        'skills/cogentspec/scripts/restore-project-version.ps1',
         'skills/cogentspec/scripts/save-project-version.ps1',
         'skills/cogentspec/scripts/native-command.ps1',
         'skills/cogentspec/scripts/prepare-deployment.ps1',
