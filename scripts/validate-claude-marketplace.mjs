@@ -81,6 +81,7 @@ const requiredScripts = [
   "fulfil-project.ps1",
   "generate-project-preview.ps1",
   "inspect-project-git.ps1",
+  "save-project-version.ps1",
   "native-command.ps1",
   "prepare-deployment.ps1",
   "project-context.ps1",

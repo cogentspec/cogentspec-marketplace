@@ -131,10 +131,18 @@ Start-Sleep -Seconds 30
     }
     Assert-BridgeLauncherTest ([bool]$runtimeRoot -and (Test-Path -LiteralPath (Join-Path $runtimeRoot 'create-specification-project.ps1') -PathType Leaf)) 'The protected Bridge runtime omitted the specification project helper.'
     Assert-BridgeLauncherTest (Test-Path -LiteralPath (Join-Path $runtimeRoot 'inspect-project-git.ps1') -PathType Leaf) 'The protected Bridge runtime omitted the automatic project check helper.'
+    Assert-BridgeLauncherTest (Test-Path -LiteralPath (Join-Path $runtimeRoot 'save-project-version.ps1') -PathType Leaf) 'The protected Bridge runtime omitted the automatic version save helper.'
     Assert-BridgeLauncherTest (Test-Path -LiteralPath (Join-Path $runtimeRoot 'ensure-cogentspec-mcp.ps1') -PathType Leaf) 'The protected Bridge runtime omitted the project-data connection helper.'
 
     $connectorText = Get-Content -Raw -LiteralPath (Join-Path $repositoryRoot 'plugins\cogentspec\skills\cogentspec\scripts\connect-cogentstack.ps1')
     Assert-BridgeLauncherTest (-not $connectorText.Contains('exit 0')) 'The account helper can still terminate its calling launcher process.'
+    $saveHelperText = Get-Content -Raw -LiteralPath (Join-Path $repositoryRoot 'plugins\cogentspec\skills\cogentspec\scripts\save-project-version.ps1')
+    Assert-BridgeLauncherTest ($saveHelperText.Contains("request.action -ne 'commit'")) 'The automatic version save helper does not require an exact commit request.'
+    Assert-BridgeLauncherTest ($saveHelperText.Contains("manifest.project.requestId -ne")) 'The automatic version save helper does not verify the protected project identity.'
+    Assert-BridgeLauncherTest ($saveHelperText.Contains("@('add', '--all', '--', '.')")) 'The automatic version save helper does not stage the complete approved project state.'
+    Assert-BridgeLauncherTest ($saveHelperText.Contains("@('commit', '--quiet', '-m', `$message.Trim())")) 'The automatic version save helper does not use the approved version description.'
+    Assert-BridgeLauncherTest ($saveHelperText.Contains("status = 'saved'")) 'The automatic version save helper does not report a verified saved result.'
+    Assert-BridgeLauncherTest (-not $saveHelperText.Contains('Start-Process')) 'The automatic version save helper must not open another application.'
 
     [ordered]@{
         status = 'valid'

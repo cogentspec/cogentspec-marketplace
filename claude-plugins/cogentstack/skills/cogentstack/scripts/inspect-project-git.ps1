@@ -130,7 +130,8 @@ try {
 
     $name = (Invoke-Git $root @('config', '--get', 'user.name') -AllowFailure).Output.Trim()
     $email = (Invoke-Git $root @('config', '--get', 'user.email') -AllowFailure).Output.Trim()
-    $remoteUrl = (Invoke-Git $root @('remote', 'get-url', 'origin') -AllowFailure).Output.Trim()
+    $remoteResult = Invoke-Git $root @('remote', 'get-url', 'origin') -AllowFailure
+    $remoteUrl = if ($remoteResult.ExitCode -eq 0) { $remoteResult.Output.Trim() } else { '' }
     $commitLines = @((Invoke-Git $root @('log', '-n', '12', '--date=iso-strict', '--pretty=format:%H%x1f%h%x1f%s%x1f%an%x1f%aI') -AllowFailure).Output -split "`r?`n" | Where-Object { $_ })
     $commits = @($commitLines | ForEach-Object {
         $parts = @(([string]$_) -split [char]31)

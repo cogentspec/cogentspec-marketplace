@@ -81,20 +81,20 @@ try {
     $token = Unprotect-CogentSpecValue ([string]$credential.token)
     $requestPath = "/api/plugin/git-requests?$contextQuery&id=$([Uri]::EscapeDataString($RequestId))"
     $listing = Invoke-CogentSpecApi -Method Get -Path $requestPath -Token $token
-    if (-not $listing.activeProject -or -not $listing.request -or [string]$listing.request.action -ne 'refresh') {
-        throw 'The approved project check is unavailable.'
+    if (-not $listing.activeProject -or -not $listing.request -or [string]$listing.request.action -ne 'commit') {
+        throw 'The approved version save is unavailable.'
     }
     if ([string]$listing.request.status -eq 'requested') {
         Invoke-CogentSpecApi -Method Patch -Path "/api/plugin/git-requests?$contextQuery" -Token $token -Body @{
             requestId = $RequestId
             action = 'claim'
-            statusMessage = 'Desktop Bridge is checking the project.'
+            statusMessage = 'Desktop Bridge is saving this version.'
         } | Out-Null
         $claimed = $true
     } elseif ([string]$listing.request.status -eq 'applying') {
         $claimed = $true
     } else {
-        throw 'The approved project check is no longer waiting.'
+        throw 'The approved version save is no longer waiting.'
     }
 
     $activeProject = $listing.activeProject.project
@@ -113,6 +113,29 @@ try {
 
     $repositoryCheck = Invoke-Git $root @('rev-parse', '--is-inside-work-tree')
     if ($repositoryCheck.Output.Trim() -ne 'true') { throw 'The active project is not a Git worktree.' }
+    $message = [string]$listing.request.payload.message
+    if ([string]::IsNullOrWhiteSpace($message) -or $message.Trim().Length -lt 3 -or $message.Trim().Length -gt 120) {
+        throw 'The approved version description is invalid.'
+    }
+    if (@($message.ToCharArray() | Where-Object { [int]$_ -lt 32 -and $_ -ne "`t" }).Count -gt 0) {
+        throw 'The approved version description contains unsupported control characters.'
+    }
+    $nameResult = Invoke-Git $root @('config', '--get', 'user.name') -AllowFailure
+    $emailResult = Invoke-Git $root @('config', '--get', 'user.email') -AllowFailure
+    $name = if ($nameResult.ExitCode -eq 0) { $nameResult.Output.Trim() } else { '' }
+    $email = if ($emailResult.ExitCode -eq 0) { $emailResult.Output.Trim() } else { '' }
+    if ([string]::IsNullOrWhiteSpace($name) -or [string]::IsNullOrWhiteSpace($email)) {
+        throw 'Your Git name and email must be configured before a version can be saved.'
+    }
+    $pendingStatus = Invoke-Git $root @('status', '--porcelain=v1', '--untracked-files=normal')
+    if ([string]::IsNullOrWhiteSpace($pendingStatus.Output)) {
+        throw 'There are no project changes to save.'
+    }
+    Invoke-Git $root @('add', '--all', '--', '.') | Out-Null
+    Invoke-Git $root @('commit', '--quiet', '-m', $message.Trim()) | Out-Null
+    $commitHash = (Invoke-Git $root @('rev-parse', 'HEAD')).Output.Trim()
+    if ($commitHash -notmatch '^[0-9a-f]{40}$') { throw 'The saved version could not be verified.' }
+
     $branch = (Invoke-Git $root @('branch', '--show-current')).Output.Trim()
     # The branch header keeps PowerShell's outer output trim from removing the
     # first status column when the first file has only a working-tree change.
@@ -128,8 +151,6 @@ try {
         }
     })
 
-    $name = (Invoke-Git $root @('config', '--get', 'user.name') -AllowFailure).Output.Trim()
-    $email = (Invoke-Git $root @('config', '--get', 'user.email') -AllowFailure).Output.Trim()
     $remoteResult = Invoke-Git $root @('remote', 'get-url', 'origin') -AllowFailure
     $remoteUrl = if ($remoteResult.ExitCode -eq 0) { $remoteResult.Output.Trim() } else { '' }
     $commitLines = @((Invoke-Git $root @('log', '-n', '12', '--date=iso-strict', '--pretty=format:%H%x1f%h%x1f%s%x1f%an%x1f%aI') -AllowFailure).Output -split "`r?`n" | Where-Object { $_ })
@@ -168,12 +189,13 @@ try {
     Invoke-CogentSpecApi -Method Patch -Path "/api/plugin/git-requests?$contextQuery" -Token $token -Body @{
         requestId = $RequestId
         action = 'complete'
-        statusMessage = 'Project check completed.'
+        statusMessage = 'Version saved on this computer.'
     } | Out-Null
     Write-CompactJson ([ordered]@{
-        status = 'refreshed'
+        status = 'saved'
         projectRequestId = [string]$activeProject.id
         targetPath = $root
+        commit = $commitHash
         changedFiles = $files.Count
         capturedAt = $capturedAt
     })

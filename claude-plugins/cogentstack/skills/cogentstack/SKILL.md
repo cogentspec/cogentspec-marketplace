@@ -57,6 +57,8 @@ When an existing project is loaded into a different Claude project:
 
 The hosted **Check project** control is read-only and queues `refresh_project_git` for Desktop Bridge. The Bridge runs `inspect-project-git.ps1` against the exact protected active-project path, verifies the portable project identity, records the bounded Git snapshot, and completes the check automatically. Do not ask the user to send another Claude command for this check.
 
+Selecting hosted **Save version** with a valid description is explicit authorization for that one local Git commit. It queues `save_project_git` for Desktop Bridge, which runs `save-project-version.ps1` against the exact protected active-project path, verifies the project identity and Git author, commits the current project changes with the approved description, records the resulting snapshot, and completes automatically. It does not push or deploy. Do not ask the user to send another Claude command for this save.
+
 For a legacy project, initialize missing portable knowledge only after an explicit request by running `project-knowledge.ps1 -Mode initialize -ContextKey <context>`. It must not overwrite existing files or invent undocumented history.
 
 ## Generate or open the active preview
