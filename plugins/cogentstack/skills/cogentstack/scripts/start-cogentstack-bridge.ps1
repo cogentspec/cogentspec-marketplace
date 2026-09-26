@@ -97,6 +97,7 @@ $sourceScriptNames = @(
     'restore-project-version.ps1',
     'save-project-version.ps1',
     'native-command.ps1',
+    'prepare-development-handoff.ps1',
     'project-context.ps1',
     'project-build-handoff.ps1',
     'project-preview-readiness.ps1',

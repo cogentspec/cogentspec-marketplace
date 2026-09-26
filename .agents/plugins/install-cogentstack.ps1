@@ -299,6 +299,7 @@ try {
         'skills/cogentstack/scripts/restore-project-version.ps1',
         'skills/cogentstack/scripts/save-project-version.ps1',
         'skills/cogentstack/scripts/native-command.ps1',
+        'skills/cogentstack/scripts/prepare-development-handoff.ps1',
         'skills/cogentstack/scripts/prepare-deployment.ps1',
         'skills/cogentstack/scripts/project-build-handoff.ps1',
         'skills/cogentstack/scripts/project-context.ps1',

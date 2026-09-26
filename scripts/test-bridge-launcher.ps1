@@ -133,6 +133,7 @@ Start-Sleep -Seconds 30
     Assert-BridgeLauncherTest (Test-Path -LiteralPath (Join-Path $runtimeRoot 'inspect-project-git.ps1') -PathType Leaf) 'The protected Bridge runtime omitted the automatic project check helper.'
     Assert-BridgeLauncherTest (Test-Path -LiteralPath (Join-Path $runtimeRoot 'restore-project-version.ps1') -PathType Leaf) 'The protected Bridge runtime omitted the automatic version restore helper.'
     Assert-BridgeLauncherTest (Test-Path -LiteralPath (Join-Path $runtimeRoot 'save-project-version.ps1') -PathType Leaf) 'The protected Bridge runtime omitted the automatic version save helper.'
+    Assert-BridgeLauncherTest (Test-Path -LiteralPath (Join-Path $runtimeRoot 'prepare-development-handoff.ps1') -PathType Leaf) 'The protected Bridge runtime omitted the development handoff helper.'
     Assert-BridgeLauncherTest (Test-Path -LiteralPath (Join-Path $runtimeRoot 'ensure-cogentspec-mcp.ps1') -PathType Leaf) 'The protected Bridge runtime omitted the project-data connection helper.'
 
     $connectorText = Get-Content -Raw -LiteralPath (Join-Path $repositoryRoot 'plugins\cogentspec\skills\cogentspec\scripts\connect-cogentstack.ps1')

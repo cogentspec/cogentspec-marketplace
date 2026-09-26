@@ -68,6 +68,7 @@ function Invoke-ActionHelper($Request) {
         'refresh_project_git' { 'inspect-project-git.ps1' }
         'save_project_git' { 'save-project-version.ps1' }
         'restore_project_version' { 'restore-project-version.ps1' }
+        'prepare_development_handoff' { 'prepare-development-handoff.ps1' }
         default { throw "Unsupported Desktop Bridge action: $($Request.action)" }
     }
     $helperPath = Join-Path $PSScriptRoot $scriptName
@@ -85,6 +86,7 @@ function Invoke-ActionHelper($Request) {
         'refresh_project_git' { $arguments += @('-RequestId', [string]$Request.targetRequestId, '-ContextKey', $ContextKey) }
         'save_project_git' { $arguments += @('-RequestId', [string]$Request.targetRequestId, '-ContextKey', $ContextKey) }
         'restore_project_version' { $arguments += @('-RequestId', [string]$Request.targetRequestId, '-ContextKey', $ContextKey) }
+        'prepare_development_handoff' { $arguments += @('-RequestId', [string]$Request.targetRequestId, '-ContextKey', $ContextKey) }
     }
 
     $output = @(& ([string]$powershellCommand.Source) @arguments 2>&1)
@@ -100,6 +102,7 @@ function Invoke-ActionHelper($Request) {
         'refresh_project_git' { @('refreshed') }
         'save_project_git' { @('saved') }
         'restore_project_version' { @('restored') }
+        'prepare_development_handoff' { @('prepared') }
     }
     if ([string]$result.status -notin $acceptedStatuses) {
         $reason = if ($result.reason) { [string]$result.reason } elseif ($result.status) { [string]$result.status } else { 'unknown_failure' }
@@ -147,6 +150,7 @@ try {
                     'refresh_project_git' { 'Project check completed.' }
                     'save_project_git' { 'Version saved on this computer.' }
                     'restore_project_version' { 'Selected version restored and saved as a new version.' }
+                    'prepare_development_handoff' { 'Spec Kit-compatible development handoff prepared in the registered project folder.' }
                 }
                 Invoke-BridgeApi -Method Patch -Path "/api/plugin/desktop-actions?$contextQuery" -Token $token -Body @{
                     action = 'complete'
