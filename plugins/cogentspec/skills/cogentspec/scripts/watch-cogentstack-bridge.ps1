@@ -104,8 +104,9 @@ function Invoke-ActionHelper($Request) {
         'restore_project_version' { @('restored') }
         'prepare_development_handoff' { @('prepared') }
     }
-    if ([string]$result.status -notin $acceptedStatuses) {
-        $reason = if ($result.reason) { [string]$result.reason } elseif ($result.status) { [string]$result.status } else { 'unknown_failure' }
+    $resultStatus = if ($result.PSObject.Properties['status']) { [string]$result.status } else { '' }
+    if ($resultStatus -notin $acceptedStatuses) {
+        $reason = if ($result.PSObject.Properties['reason'] -and [string]$result.reason) { [string]$result.reason } elseif ($result.PSObject.Properties['error'] -and [string]$result.error) { [string]$result.error } elseif ($resultStatus) { $resultStatus } else { 'unknown_failure' }
         if ([string]$Request.action -eq 'preview_project') { throw $reason }
         throw "Desktop Bridge could not complete $($Request.action): $reason"
     }
