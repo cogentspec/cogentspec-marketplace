@@ -41,6 +41,18 @@ try {
     Write-CompactJson $handoff
 } catch {
     $statusCode = if ($_.Exception.Response) { [int]$_.Exception.Response.StatusCode } else { 0 }
+    $serverResponse = $null
+    if ($_.ErrorDetails.Message) {
+        try { $serverResponse = $_.ErrorDetails.Message | ConvertFrom-Json } catch { $serverResponse = $null }
+    }
+    if ($statusCode -ne 401 -and $serverResponse -and $serverResponse.status) {
+        Write-CompactJson ([ordered]@{
+            status = [string]$serverResponse.status
+            error = [string]$serverResponse.error
+            activeProjectPreserved = $true
+        })
+        exit 0
+    }
     Write-CompactJson ([ordered]@{
         status = if ($statusCode -eq 401) { 'desktop_authorization_required' } else { 'build_handoff_unavailable' }
         activeProjectPreserved = $true
