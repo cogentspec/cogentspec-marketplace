@@ -65,6 +65,7 @@ function Invoke-ActionHelper($Request) {
         'create_project' { 'fulfil-project.ps1' }
         'delete_project' { 'delete-project.ps1' }
         'preview_project' { 'generate-project-preview.ps1' }
+        'open_chatgpt_popup' { 'open-chatgpt-popup.ps1' }
         'refresh_project_git' { 'inspect-project-git.ps1' }
         'save_project_git' { 'save-project-version.ps1' }
         'restore_project_version' { 'restore-project-version.ps1' }
@@ -83,6 +84,7 @@ function Invoke-ActionHelper($Request) {
         'create_project' { $arguments += @('-Mode', 'create', '-RequestId', [string]$Request.targetRequestId, '-ContextKey', $ContextKey) }
         'delete_project' { $arguments += @('-Mode', 'delete', '-RequestId', [string]$Request.targetRequestId, '-ContextKey', $ContextKey) }
         'preview_project' { $arguments += @('-Mode', 'generate', '-ContextKey', $ContextKey) }
+        'open_chatgpt_popup' { $arguments += @('-Mode', 'open') }
         'refresh_project_git' { $arguments += @('-RequestId', [string]$Request.targetRequestId, '-ContextKey', $ContextKey) }
         'save_project_git' { $arguments += @('-RequestId', [string]$Request.targetRequestId, '-ContextKey', $ContextKey) }
         'restore_project_version' { $arguments += @('-RequestId', [string]$Request.targetRequestId, '-ContextKey', $ContextKey) }
@@ -99,6 +101,7 @@ function Invoke-ActionHelper($Request) {
         'create_project' { @('created') }
         'delete_project' { @('deleted') }
         'preview_project' { @('generated', 'already_running') }
+        'open_chatgpt_popup' { @('opened') }
         'refresh_project_git' { @('refreshed') }
         'save_project_git' { @('saved') }
         'restore_project_version' { @('restored') }
@@ -148,6 +151,7 @@ try {
                     'create_project' { 'Project foundation created and verified.' }
                     'delete_project' { 'Project, folder, and linked CogentSpec state deleted.' }
                     'preview_project' { "Verified project preview opened at $([string]$result.localUrl)" }
+                    'open_chatgpt_popup' { 'ChatGPT popup opened with Ctrl+P after verifying the signed ChatGPT Desktop window.' }
                     'refresh_project_git' { 'Project check completed.' }
                     'save_project_git' { 'Version saved on this computer.' }
                     'restore_project_version' { 'Selected version restored and saved as a new version.' }

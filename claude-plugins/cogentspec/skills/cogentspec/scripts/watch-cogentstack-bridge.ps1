@@ -65,9 +65,11 @@ function Invoke-ActionHelper($Request) {
         'create_project' { 'fulfil-project.ps1' }
         'delete_project' { 'delete-project.ps1' }
         'preview_project' { 'generate-project-preview.ps1' }
+        'open_chatgpt_popup' { 'open-chatgpt-popup.ps1' }
         'refresh_project_git' { 'inspect-project-git.ps1' }
         'save_project_git' { 'save-project-version.ps1' }
         'restore_project_version' { 'restore-project-version.ps1' }
+        'prepare_development_handoff' { 'prepare-development-handoff.ps1' }
         default { throw "Unsupported Desktop Bridge action: $($Request.action)" }
     }
     $helperPath = Join-Path $PSScriptRoot $scriptName
@@ -82,9 +84,11 @@ function Invoke-ActionHelper($Request) {
         'create_project' { $arguments += @('-Mode', 'create', '-RequestId', [string]$Request.targetRequestId, '-ContextKey', $ContextKey) }
         'delete_project' { $arguments += @('-Mode', 'delete', '-RequestId', [string]$Request.targetRequestId, '-ContextKey', $ContextKey) }
         'preview_project' { $arguments += @('-Mode', 'generate', '-ContextKey', $ContextKey) }
+        'open_chatgpt_popup' { $arguments += @('-Mode', 'open') }
         'refresh_project_git' { $arguments += @('-RequestId', [string]$Request.targetRequestId, '-ContextKey', $ContextKey) }
         'save_project_git' { $arguments += @('-RequestId', [string]$Request.targetRequestId, '-ContextKey', $ContextKey) }
         'restore_project_version' { $arguments += @('-RequestId', [string]$Request.targetRequestId, '-ContextKey', $ContextKey) }
+        'prepare_development_handoff' { $arguments += @('-RequestId', [string]$Request.targetRequestId, '-ContextKey', $ContextKey) }
     }
 
     $output = @(& ([string]$powershellCommand.Source) @arguments 2>&1)
@@ -97,12 +101,15 @@ function Invoke-ActionHelper($Request) {
         'create_project' { @('created') }
         'delete_project' { @('deleted') }
         'preview_project' { @('generated', 'already_running') }
+        'open_chatgpt_popup' { @('opened') }
         'refresh_project_git' { @('refreshed') }
         'save_project_git' { @('saved') }
         'restore_project_version' { @('restored') }
+        'prepare_development_handoff' { @('prepared') }
     }
-    if ([string]$result.status -notin $acceptedStatuses) {
-        $reason = if ($result.reason) { [string]$result.reason } elseif ($result.status) { [string]$result.status } else { 'unknown_failure' }
+    $resultStatus = if ($result.PSObject.Properties['status']) { [string]$result.status } else { '' }
+    if ($resultStatus -notin $acceptedStatuses) {
+        $reason = if ($result.PSObject.Properties['reason'] -and [string]$result.reason) { [string]$result.reason } elseif ($result.PSObject.Properties['error'] -and [string]$result.error) { [string]$result.error } elseif ($resultStatus) { $resultStatus } else { 'unknown_failure' }
         if ([string]$Request.action -eq 'preview_project') { throw $reason }
         throw "Desktop Bridge could not complete $($Request.action): $reason"
     }
@@ -144,9 +151,11 @@ try {
                     'create_project' { 'Project foundation created and verified.' }
                     'delete_project' { 'Project, folder, and linked CogentSpec state deleted.' }
                     'preview_project' { "Verified project preview opened at $([string]$result.localUrl)" }
+                    'open_chatgpt_popup' { 'ChatGPT popup opened with Ctrl+P after verifying the signed ChatGPT Desktop window.' }
                     'refresh_project_git' { 'Project check completed.' }
                     'save_project_git' { 'Version saved on this computer.' }
                     'restore_project_version' { 'Selected version restored and saved as a new version.' }
+                    'prepare_development_handoff' { 'Spec Kit-compatible development handoff prepared in the registered project folder.' }
                 }
                 Invoke-BridgeApi -Method Patch -Path "/api/plugin/desktop-actions?$contextQuery" -Token $token -Body @{
                     action = 'complete'

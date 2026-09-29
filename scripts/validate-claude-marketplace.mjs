@@ -84,6 +84,7 @@ const requiredScripts = [
   "restore-project-version.ps1",
   "save-project-version.ps1",
   "native-command.ps1",
+  "open-chatgpt-popup.ps1",
   "prepare-deployment.ps1",
   "project-context.ps1",
   "project-knowledge.ps1",
