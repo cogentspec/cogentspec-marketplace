@@ -86,7 +86,7 @@ function Resolve-ApprovedTarget([string]$TargetPath) {
     return $fullPath
 }
 
-function Assert-FoundationTarget([string]$TargetPath, $SpecificationDraft) {
+function Assert-FoundationTarget([string]$TargetPath, $SpecificationDraft, [string]$RequestId, $ArtifactFiles) {
     if (-not (Test-Path -LiteralPath $TargetPath)) { return }
     $existingFiles = @(Get-ChildItem -Force -File -Recurse -LiteralPath $TargetPath)
     if ($existingFiles.Count -eq 0) { return }
@@ -109,9 +109,40 @@ function Assert-FoundationTarget([string]$TargetPath, $SpecificationDraft) {
         '.coge/specification-draft.json', 'PROJECT_KNOWLEDGE.md', 'CURRENT_STATE.md',
         'HANDOFF.md', 'AGENTS.md', 'docs/decisions/README.md'
     )
+    $generatedPrefixes = @(
+        '.next/', '.vinext/', '.wrangler/', 'node_modules/', 'dist/', 'build/',
+        'coverage/', 'out/', 'outputs/', 'work/', '.tmp/', '.expo/', 'web-build/',
+        'src-tauri/gen/', 'src-tauri/target/', 'android/', 'ios/', '.kotlin/'
+    )
+    $generatedFiles = @('expo-env.d.ts')
+    $foundationManifestPath = Join-Path $TargetPath '.coge\knowledge-manifest.json'
+    $isSameFailedFoundation = $false
+    if (Test-Path -LiteralPath $foundationManifestPath -PathType Leaf) {
+        $foundationManifest = Get-Content -Raw -LiteralPath $foundationManifestPath | ConvertFrom-Json
+        if ([string]$foundationManifest.project.requestId -ne $RequestId) {
+            throw 'The existing failed foundation belongs to a different project request.'
+        }
+        if ([string]$foundationManifest.project.contextKey -ne $projectContext.ContextKey) {
+            throw 'The existing failed foundation belongs to a different AI task.'
+        }
+        $isSameFailedFoundation = $true
+        $allowed += @($ArtifactFiles | ForEach-Object { ([string]$_.path).Replace('\', '/') })
+    }
     foreach ($file in $existingFiles) {
         $relative = $file.FullName.Substring($TargetPath.Length).TrimStart('\', '/').Replace('\', '/')
-        if ($relative -notin $allowed) { throw "The specification project contains an unexpected file: $relative" }
+        if ($relative -in $allowed) { continue }
+        if ($isSameFailedFoundation) {
+            if ($relative -in $generatedFiles -or $relative -like '*.tsbuildinfo' -or $relative -like '*.log') { continue }
+            $generated = $false
+            foreach ($prefix in $generatedPrefixes) {
+                if ($relative.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) {
+                    $generated = $true
+                    break
+                }
+            }
+            if ($generated) { continue }
+        }
+        throw "The specification project contains an unexpected file: $relative"
     }
 }
 
@@ -231,7 +262,7 @@ try {
         throw 'The claimed project target does not match the approved request.'
     }
     $targetPath = Resolve-ApprovedTarget $claimedTarget
-    Assert-FoundationTarget $targetPath $claim.specificationDraft
+    Assert-FoundationTarget $targetPath $claim.specificationDraft $RequestId $files
 
     New-Item -ItemType Directory -Path $targetPath -Force | Out-Null
     $targetPrefix = $targetPath.TrimEnd('\') + '\'
