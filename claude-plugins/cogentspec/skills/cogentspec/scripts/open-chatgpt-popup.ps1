@@ -75,7 +75,18 @@ namespace CogentSpec {
 
         [StructLayout(LayoutKind.Explicit)]
         private struct InputUnion {
+            [FieldOffset(0)] public MOUSEINPUT mouse;
             [FieldOffset(0)] public KEYBDINPUT keyboard;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct MOUSEINPUT {
+            public int dx;
+            public int dy;
+            public uint mouseData;
+            public uint flags;
+            public uint time;
+            public UIntPtr extraInfo;
         }
 
         [StructLayout(LayoutKind.Sequential)]
