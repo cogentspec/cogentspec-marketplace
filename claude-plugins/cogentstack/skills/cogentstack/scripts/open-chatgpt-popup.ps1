@@ -16,32 +16,29 @@ function Write-Failure([string]$Status, [string]$Reason) {
         status = $Status
         opened = $false
         reason = $Reason
-        manualShortcut = 'Ctrl+P'
+        manualShortcut = 'Ctrl+Shift+Space'
     })
 }
 
-$windows = @(Get-Process -Name 'ChatGPT' -ErrorAction SilentlyContinue | Where-Object {
-    $_.MainWindowHandle -ne 0 -and $_.MainWindowTitle -match '(?i)ChatGPT|Codex'
+$chatGptProcesses = @(Get-Process -Name 'ChatGPT' -ErrorAction SilentlyContinue | Where-Object {
+    try { [IO.Path]::GetFileName([string]$_.Path) -eq 'ChatGPT.exe' } catch { $false }
 })
-if ($windows.Count -eq 0) {
-    Write-Failure -Status 'chatgpt_not_available' -Reason 'Open ChatGPT Desktop, then press Ctrl+P.'
+if ($chatGptProcesses.Count -eq 0) {
+    Write-Failure -Status 'chatgpt_not_available' -Reason 'Open ChatGPT Desktop, then press Ctrl + Shift + Space.'
     return
 }
-if ($windows.Count -ne 1) {
-    Write-Failure -Status 'chatgpt_window_ambiguous' -Reason 'More than one ChatGPT Desktop window is available. Press Ctrl+P in the window you want to use.'
+$executablePaths = @($chatGptProcesses | ForEach-Object { [string]$_.Path } | Sort-Object -Unique)
+if ($executablePaths.Count -ne 1) {
+    Write-Failure -Status 'chatgpt_identity_unverified' -Reason 'CogentSpec could not identify one ChatGPT Desktop installation. Press Ctrl + Shift + Space.'
     return
 }
 
-$chatGpt = $windows[0]
-$executablePath = [string]$chatGpt.Path
-if (-not $executablePath -or [IO.Path]::GetFileName($executablePath) -ne 'ChatGPT.exe') {
-    Write-Failure -Status 'chatgpt_identity_unverified' -Reason 'CogentSpec could not verify the ChatGPT Desktop application. Press Ctrl+P in ChatGPT Desktop.'
-    return
-}
+$chatGpt = @($chatGptProcesses | Sort-Object Id)[0]
+$executablePath = $executablePaths[0]
 $signature = Get-AuthenticodeSignature -LiteralPath $executablePath
 $signerSubject = if ($signature.SignerCertificate) { [string]$signature.SignerCertificate.Subject } else { '' }
 if ([string]$signature.Status -ne 'Valid' -or $signerSubject -notmatch '(?i)\bO="?OpenAI(?: OpCo)?,? LLC"?\b') {
-    Write-Failure -Status 'chatgpt_identity_unverified' -Reason 'CogentSpec could not verify the ChatGPT Desktop publisher. Press Ctrl+P in ChatGPT Desktop.'
+    Write-Failure -Status 'chatgpt_identity_unverified' -Reason 'CogentSpec could not verify the ChatGPT Desktop publisher. Press Ctrl + Shift + Space.'
     return
 }
 
@@ -52,7 +49,7 @@ if ($Mode -eq 'inspect') {
         processId = [int]$chatGpt.Id
         windowTitle = [string]$chatGpt.MainWindowTitle
         publisherVerified = $true
-        manualShortcut = 'Ctrl+P'
+        manualShortcut = 'Ctrl+Shift+Space'
     })
     return
 }
@@ -67,7 +64,8 @@ namespace CogentSpec {
         private const uint INPUT_KEYBOARD = 1;
         private const uint KEYEVENTF_KEYUP = 0x0002;
         private const ushort VK_CONTROL = 0x11;
-        private const ushort VK_P = 0x50;
+        private const ushort VK_SHIFT = 0x10;
+        private const ushort VK_SPACE = 0x20;
 
         [StructLayout(LayoutKind.Sequential)]
         private struct INPUT {
@@ -89,18 +87,6 @@ namespace CogentSpec {
             public UIntPtr extraInfo;
         }
 
-        [DllImport("user32.dll")]
-        public static extern bool ShowWindowAsync(IntPtr window, int command);
-
-        [DllImport("user32.dll")]
-        public static extern bool SetForegroundWindow(IntPtr window);
-
-        [DllImport("user32.dll")]
-        private static extern IntPtr GetForegroundWindow();
-
-        [DllImport("user32.dll")]
-        private static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);
-
         [DllImport("user32.dll", SetLastError = true)]
         private static extern uint SendInput(uint inputCount, INPUT[] inputs, int inputSize);
 
@@ -119,17 +105,13 @@ namespace CogentSpec {
             };
         }
 
-        public static uint ForegroundProcessId() {
-            uint processId;
-            GetWindowThreadProcessId(GetForegroundWindow(), out processId);
-            return processId;
-        }
-
-        public static bool SendControlP() {
+        public static bool SendControlShiftSpace() {
             var inputs = new[] {
                 Key(VK_CONTROL, 0),
-                Key(VK_P, 0),
-                Key(VK_P, KEYEVENTF_KEYUP),
+                Key(VK_SHIFT, 0),
+                Key(VK_SPACE, 0),
+                Key(VK_SPACE, KEYEVENTF_KEYUP),
+                Key(VK_SHIFT, KEYEVENTF_KEYUP),
                 Key(VK_CONTROL, KEYEVENTF_KEYUP)
             };
             return SendInput((uint)inputs.Length, inputs, Marshal.SizeOf(typeof(INPUT))) == inputs.Length;
@@ -139,31 +121,8 @@ namespace CogentSpec {
 '@
 }
 
-$windowHandle = [IntPtr]$chatGpt.MainWindowHandle
-[void][CogentSpec.ChatGptPopupNative]::ShowWindowAsync($windowHandle, 9)
-$activated = $false
-try {
-    $shell = New-Object -ComObject WScript.Shell
-    $activated = [bool]$shell.AppActivate([int]$chatGpt.Id)
-} catch { }
-if (-not $activated) {
-    $activated = [CogentSpec.ChatGptPopupNative]::SetForegroundWindow($windowHandle)
-}
-
-$focused = $false
-for ($attempt = 0; $attempt -lt 10; $attempt++) {
-    if ([CogentSpec.ChatGptPopupNative]::ForegroundProcessId() -eq [uint32]$chatGpt.Id) {
-        $focused = $true
-        break
-    }
-    Start-Sleep -Milliseconds 50
-}
-if (-not $focused) {
-    Write-Failure -Status 'chatgpt_focus_failed' -Reason 'CogentSpec could not safely focus ChatGPT Desktop. Press Ctrl+P in ChatGPT Desktop.'
-    return
-}
-if (-not [CogentSpec.ChatGptPopupNative]::SendControlP()) {
-    Write-Failure -Status 'shortcut_failed' -Reason 'CogentSpec could not send the popup shortcut. Press Ctrl+P in ChatGPT Desktop.'
+if (-not [CogentSpec.ChatGptPopupNative]::SendControlShiftSpace()) {
+    Write-Failure -Status 'shortcut_failed' -Reason 'CogentSpec could not send the popout shortcut. Press Ctrl + Shift + Space.'
     return
 }
 
@@ -172,5 +131,5 @@ Write-CompactJson ([ordered]@{
     opened = $true
     processId = [int]$chatGpt.Id
     publisherVerified = $true
-    shortcut = 'Ctrl+P'
+    shortcut = 'Ctrl+Shift+Space'
 })
