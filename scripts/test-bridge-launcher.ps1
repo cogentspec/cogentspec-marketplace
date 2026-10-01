@@ -186,6 +186,10 @@ for ($heartbeat = 0; $heartbeat -lt 15; $heartbeat += 1) {
     Assert-BridgeLauncherTest ($popupHelperText.Contains('$placeholderValue -ceq [string]$composer.Current.Name')) 'The ChatGPT popout helper does not bind its empty-composer check to the verified accessible name.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains('function Invoke-PopupActivation')) 'The ChatGPT popout helper does not absorb transient Windows foreground-lock failures within one click.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains('[DateTime]::UtcNow.AddSeconds(1)')) 'The ChatGPT popout activation retry is not bounded.'
+    Assert-BridgeLauncherTest ($popupHelperText.Contains("ValidateSet('inspect', 'open', 'pin', 'unpin')")) 'The ChatGPT popout helper does not expose reversible pin modes.'
+    Assert-BridgeLauncherTest ($popupHelperText.Contains('SetPopupTopmost(IntPtr window, bool enabled)')) 'The ChatGPT popout helper does not use verified native always-on-top control.'
+    Assert-BridgeLauncherTest ($popupHelperText.Contains('SWP_NOACTIVATE')) 'The ChatGPT popout pin can steal keyboard focus.'
+    Assert-BridgeLauncherTest ($popupHelperText.Contains("status = if (`$shouldPin) { 'pinned' } else { 'unpinned' }")) 'The ChatGPT popout helper does not report the verified pin state.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains("ChatGPT already contains text in the composer. CogentSpec left that draft unchanged.")) 'The ChatGPT popout helper can overwrite an existing draft.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains('composerPreloaded = $true')) 'The ChatGPT popout helper does not verify the preloaded composer.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains("composerText = '`$cogentspec'")) 'The ChatGPT popout helper does not report the exact CogentSpec command.'
@@ -201,6 +205,9 @@ for ($heartbeat = 0; $heartbeat -lt 15; $heartbeat += 1) {
     }
     $watcherText = Get-Content -Raw -LiteralPath (Join-Path $repositoryRoot 'plugins\cogentspec\skills\cogentspec\scripts\watch-cogentstack-bridge.ps1')
     Assert-BridgeLauncherTest ($watcherText.Contains("ChatGPT popout shown with `$cogentspec ready in the composer")) 'The Bridge does not report the preloaded ChatGPT composer.'
+    Assert-BridgeLauncherTest ($watcherText.Contains("'set_chatgpt_popup_topmost' { 'open-chatgpt-popup.ps1' }")) 'The Bridge does not route ChatGPT popout pin requests through the verified helper.'
+    Assert-BridgeLauncherTest ($watcherText.Contains("'chatgpt-desktop-popup:pinned' { 'pin' }")) 'The Bridge does not validate the ChatGPT popout pin target.'
+    Assert-BridgeLauncherTest ($watcherText.Contains("'chatgpt-desktop-popup:unpinned' { 'unpin' }")) 'The Bridge does not validate the ChatGPT popout unpin target.'
     Assert-BridgeLauncherTest ($watcherText.IndexOf('Write-BridgePresenceReady', $watcherText.IndexOf('Invoke-BridgeApi -Method Get')) -gt $watcherText.IndexOf('Invoke-BridgeApi -Method Get')) 'The Bridge does not record readiness after the server acknowledges context presence.'
     Assert-BridgeLauncherTest ($watcherText.Contains('serverAcknowledged = $true')) 'The Bridge readiness marker does not record server acknowledgement.'
     $launcherText = Get-Content -Raw -LiteralPath (Join-Path $repositoryRoot 'plugins\cogentspec\skills\cogentspec\scripts\start-cogentstack-bridge.ps1')

@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [ValidateSet('inspect', 'open')]
+    [ValidateSet('inspect', 'open', 'pin', 'unpin')]
     [string]$Mode = 'open'
 )
 
@@ -134,6 +134,7 @@ namespace CogentSpec {
         private static readonly IntPtr HWND_NOTOPMOST = new IntPtr(-2);
         private const uint SWP_NOSIZE = 0x0001;
         private const uint SWP_NOMOVE = 0x0002;
+        private const uint SWP_NOACTIVATE = 0x0010;
         private const uint SWP_SHOWWINDOW = 0x0040;
 
         private delegate bool EnumWindowsProc(IntPtr window, IntPtr parameter);
@@ -268,7 +269,6 @@ namespace CogentSpec {
 
                 long extendedStyle = GetWindowLongPtr(window, GWL_EXSTYLE).ToInt64();
                 bool isPopupToolWindow = (extendedStyle & WS_EX_TOOLWINDOW) != 0
-                    && (extendedStyle & WS_EX_TOPMOST) == 0
                     && (extendedStyle & WS_EX_LAYERED) == 0;
                 if (!isPopupToolWindow) return true;
 
@@ -286,8 +286,20 @@ namespace CogentSpec {
             return window != IntPtr.Zero && GetForegroundWindow() == window;
         }
 
+        public static bool IsTopmost(IntPtr window) {
+            return window != IntPtr.Zero && (GetWindowLongPtr(window, GWL_EXSTYLE).ToInt64() & WS_EX_TOPMOST) != 0;
+        }
+
+        public static bool SetPopupTopmost(IntPtr window, bool enabled) {
+            if (window == IntPtr.Zero || !IsWindowVisible(window)) return false;
+            uint flags = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW;
+            IntPtr position = enabled ? HWND_TOPMOST : HWND_NOTOPMOST;
+            return SetWindowPos(window, position, 0, 0, 0, 0, flags) && IsTopmost(window) == enabled;
+        }
+
         public static bool ActivatePopupWindow(IntPtr window) {
             if (window == IntPtr.Zero || !IsWindowVisible(window)) return false;
+            bool wasTopmost = IsTopmost(window);
             if (IsIconic(window)) {
                 ShowWindowAsync(window, SW_RESTORE);
             }
@@ -319,7 +331,7 @@ namespace CogentSpec {
                 if (GetForegroundWindow() != window) {
                     uint flags = SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW;
                     SetWindowPos(window, HWND_TOPMOST, 0, 0, 0, 0, flags);
-                    SetWindowPos(window, HWND_NOTOPMOST, 0, 0, 0, 0, flags);
+                    if (!wasTopmost) SetWindowPos(window, HWND_NOTOPMOST, 0, 0, 0, 0, flags);
                     SetForegroundWindow(window);
                     SetFocus(window);
                 }
@@ -351,7 +363,29 @@ if ($Mode -eq 'inspect') {
         publisherVerified = $true
         popupDetected = ($popupWindow -ne [IntPtr]::Zero)
         popupVisible = [CogentSpec.ChatGptPopupNative]::IsVisible($popupWindow)
+        popupTopmost = [CogentSpec.ChatGptPopupNative]::IsTopmost($popupWindow)
         manualShortcut = 'Ctrl+Shift+Space'
+    })
+    return
+}
+
+if ($Mode -in @('pin', 'unpin')) {
+    if ($popupWindow -eq [IntPtr]::Zero -or -not [CogentSpec.ChatGptPopupNative]::IsVisible($popupWindow)) {
+        Write-Failure -Status 'popup_not_open' -Reason 'Open the ChatGPT popout, then try the pin again.'
+        return
+    }
+    $shouldPin = $Mode -eq 'pin'
+    if (-not [CogentSpec.ChatGptPopupNative]::SetPopupTopmost($popupWindow, $shouldPin)) {
+        Write-Failure -Status 'popup_pin_failed' -Reason 'Windows did not accept the ChatGPT popout pin change.' -Opened $true
+        return
+    }
+    Write-CompactJson ([ordered]@{
+        status = if ($shouldPin) { 'pinned' } else { 'unpinned' }
+        opened = $true
+        processId = [int]$chatGpt.Id
+        publisherVerified = $true
+        popupVerified = $true
+        pinned = [CogentSpec.ChatGptPopupNative]::IsTopmost($popupWindow)
     })
     return
 }

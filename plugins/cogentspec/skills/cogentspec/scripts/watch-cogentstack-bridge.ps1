@@ -85,6 +85,7 @@ function Invoke-ActionHelper($Request) {
         'delete_project' { 'delete-project.ps1' }
         'preview_project' { 'generate-project-preview.ps1' }
         'open_chatgpt_popup' { 'open-chatgpt-popup.ps1' }
+        'set_chatgpt_popup_topmost' { 'open-chatgpt-popup.ps1' }
         'refresh_project_git' { 'inspect-project-git.ps1' }
         'save_project_git' { 'save-project-version.ps1' }
         'restore_project_version' { 'restore-project-version.ps1' }
@@ -104,6 +105,14 @@ function Invoke-ActionHelper($Request) {
         'delete_project' { $arguments += @('-Mode', 'delete', '-RequestId', [string]$Request.targetRequestId, '-ContextKey', $ContextKey) }
         'preview_project' { $arguments += @('-Mode', 'generate', '-ContextKey', $ContextKey) }
         'open_chatgpt_popup' { $arguments += @('-Mode', 'open') }
+        'set_chatgpt_popup_topmost' {
+            $pinMode = switch ([string]$Request.targetRequestId) {
+                'chatgpt-desktop-popup:pinned' { 'pin' }
+                'chatgpt-desktop-popup:unpinned' { 'unpin' }
+                default { throw 'The ChatGPT popout pin request is invalid.' }
+            }
+            $arguments += @('-Mode', $pinMode)
+        }
         'refresh_project_git' { $arguments += @('-RequestId', [string]$Request.targetRequestId, '-ContextKey', $ContextKey) }
         'save_project_git' { $arguments += @('-RequestId', [string]$Request.targetRequestId, '-ContextKey', $ContextKey) }
         'restore_project_version' { $arguments += @('-RequestId', [string]$Request.targetRequestId, '-ContextKey', $ContextKey) }
@@ -121,6 +130,9 @@ function Invoke-ActionHelper($Request) {
         'delete_project' { @('deleted') }
         'preview_project' { @('generated', 'already_running') }
         'open_chatgpt_popup' { @('opened') }
+        'set_chatgpt_popup_topmost' {
+            if ([string]$Request.targetRequestId -eq 'chatgpt-desktop-popup:pinned') { @('pinned') } else { @('unpinned') }
+        }
         'refresh_project_git' { @('refreshed') }
         'save_project_git' { @('saved') }
         'restore_project_version' { @('restored') }
@@ -172,6 +184,9 @@ try {
                     'delete_project' { 'Project, folder, and linked CogentSpec state deleted.' }
                     'preview_project' { "Verified project preview opened at $([string]$result.localUrl)" }
                     'open_chatgpt_popup' { 'ChatGPT popout shown with $cogentspec ready in the composer after verifying the signed ChatGPT Desktop application.' }
+                    'set_chatgpt_popup_topmost' {
+                        if ([string]$result.status -eq 'pinned') { 'ChatGPT popout pinned above other windows.' } else { 'ChatGPT popout returned to normal window ordering.' }
+                    }
                     'refresh_project_git' { 'Project check completed.' }
                     'save_project_git' { 'Version saved on this computer.' }
                     'restore_project_version' { 'Selected version restored and saved as a new version.' }
