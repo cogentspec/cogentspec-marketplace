@@ -59,8 +59,12 @@ namespace CogentSpec {
         private const long WS_EX_TOPMOST = 0x00000008L;
         private const long WS_EX_TOOLWINDOW = 0x00000080L;
         private const long WS_EX_LAYERED = 0x00080000L;
-        private const int SW_SHOW = 5;
         private const int SW_RESTORE = 9;
+        private static readonly IntPtr HWND_TOPMOST = new IntPtr(-1);
+        private static readonly IntPtr HWND_NOTOPMOST = new IntPtr(-2);
+        private const uint SWP_NOSIZE = 0x0001;
+        private const uint SWP_NOMOVE = 0x0002;
+        private const uint SWP_SHOWWINDOW = 0x0040;
 
         private delegate bool EnumWindowsProc(IntPtr window, IntPtr parameter);
 
@@ -128,6 +132,21 @@ namespace CogentSpec {
         [DllImport("user32.dll")]
         private static extern bool SetForegroundWindow(IntPtr window);
 
+        [DllImport("user32.dll")]
+        private static extern IntPtr GetForegroundWindow();
+
+        [DllImport("kernel32.dll")]
+        private static extern uint GetCurrentThreadId();
+
+        [DllImport("user32.dll")]
+        private static extern bool AttachThreadInput(uint attachThreadId, uint attachToThreadId, bool attach);
+
+        [DllImport("user32.dll")]
+        private static extern IntPtr SetFocus(IntPtr window);
+
+        [DllImport("user32.dll")]
+        private static extern bool SetWindowPos(IntPtr window, IntPtr insertAfter, int x, int y, int width, int height, uint flags);
+
         private static INPUT Key(ushort virtualKey, uint flags) {
             return new INPUT {
                 type = INPUT_KEYBOARD,
@@ -193,16 +212,53 @@ namespace CogentSpec {
             return window != IntPtr.Zero && IsWindowVisible(window);
         }
 
+        public static bool IsForeground(IntPtr window) {
+            return window != IntPtr.Zero && GetForegroundWindow() == window;
+        }
+
         public static bool ActivatePopupWindow(IntPtr window) {
-            if (window == IntPtr.Zero) return false;
+            if (window == IntPtr.Zero || !IsWindowVisible(window)) return false;
             if (IsIconic(window)) {
                 ShowWindowAsync(window, SW_RESTORE);
-            } else if (!IsWindowVisible(window)) {
-                ShowWindowAsync(window, SW_SHOW);
             }
-            BringWindowToTop(window);
-            SetForegroundWindow(window);
-            return IsWindowVisible(window);
+
+            if (GetForegroundWindow() == window) return true;
+
+            IntPtr priorForeground = GetForegroundWindow();
+            uint currentThreadId = GetCurrentThreadId();
+            uint ignoredProcessId;
+            uint foregroundThreadId = priorForeground == IntPtr.Zero
+                ? 0
+                : GetWindowThreadProcessId(priorForeground, out ignoredProcessId);
+            uint popupThreadId = GetWindowThreadProcessId(window, out ignoredProcessId);
+            bool attachedForeground = false;
+            bool attachedPopup = false;
+
+            try {
+                if (foregroundThreadId != 0 && foregroundThreadId != currentThreadId) {
+                    attachedForeground = AttachThreadInput(currentThreadId, foregroundThreadId, true);
+                }
+                if (popupThreadId != 0 && popupThreadId != currentThreadId) {
+                    attachedPopup = AttachThreadInput(currentThreadId, popupThreadId, true);
+                }
+
+                BringWindowToTop(window);
+                SetForegroundWindow(window);
+                SetFocus(window);
+
+                if (GetForegroundWindow() != window) {
+                    uint flags = SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW;
+                    SetWindowPos(window, HWND_TOPMOST, 0, 0, 0, 0, flags);
+                    SetWindowPos(window, HWND_NOTOPMOST, 0, 0, 0, 0, flags);
+                    SetForegroundWindow(window);
+                    SetFocus(window);
+                }
+            } finally {
+                if (attachedPopup) AttachThreadInput(currentThreadId, popupThreadId, false);
+                if (attachedForeground) AttachThreadInput(currentThreadId, foregroundThreadId, false);
+            }
+
+            return IsWindowVisible(window) && GetForegroundWindow() == window;
         }
     }
 }
@@ -211,6 +267,7 @@ namespace CogentSpec {
 
 $chatGptProcessIds = [int[]]@($chatGptProcesses | ForEach-Object { [int]$_.Id })
 $popupWindow = [CogentSpec.ChatGptPopupNative]::FindPopupWindow($chatGptProcessIds)
+$popupWasVisible = $null
 
 if ($Mode -eq 'inspect') {
     Write-CompactJson ([ordered]@{
@@ -228,21 +285,24 @@ if ($Mode -eq 'inspect') {
 
 if ($popupWindow -ne [IntPtr]::Zero) {
     $popupWasVisible = [CogentSpec.ChatGptPopupNative]::IsVisible($popupWindow)
-    if (-not [CogentSpec.ChatGptPopupNative]::ActivatePopupWindow($popupWindow)) {
+    if ($popupWasVisible -and -not [CogentSpec.ChatGptPopupNative]::ActivatePopupWindow($popupWindow)) {
         Write-Failure -Status 'popup_activation_failed' -Reason 'CogentSpec found the ChatGPT popout but could not bring it forward. Press Ctrl + Shift + Space.'
         return
     }
-    Write-CompactJson ([ordered]@{
-        status = 'opened'
-        opened = $true
-        processId = [int]$chatGpt.Id
-        publisherVerified = $true
-        shortcutSent = $false
-        activatedExisting = $true
-        restoredHidden = (-not $popupWasVisible)
-        popupVerified = $true
-    })
-    return
+    if ($popupWasVisible) {
+        Write-CompactJson ([ordered]@{
+            status = 'opened'
+            opened = $true
+            processId = [int]$chatGpt.Id
+            publisherVerified = $true
+            shortcutSent = $false
+            activatedExisting = $true
+            restoredHidden = $false
+            popupVerified = $true
+            foregroundVerified = [CogentSpec.ChatGptPopupNative]::IsForeground($popupWindow)
+        })
+        return
+    }
 }
 
 if (-not [CogentSpec.ChatGptPopupNative]::SendControlShiftSpace()) {
@@ -254,9 +314,10 @@ $popupDeadline = [DateTime]::UtcNow.AddSeconds(3)
 do {
     Start-Sleep -Milliseconds 100
     $popupWindow = [CogentSpec.ChatGptPopupNative]::FindPopupWindow($chatGptProcessIds)
-} while ($popupWindow -eq [IntPtr]::Zero -and [DateTime]::UtcNow -lt $popupDeadline)
+    $popupVisible = [CogentSpec.ChatGptPopupNative]::IsVisible($popupWindow)
+} while (($popupWindow -eq [IntPtr]::Zero -or -not $popupVisible) -and [DateTime]::UtcNow -lt $popupDeadline)
 
-if ($popupWindow -eq [IntPtr]::Zero -or -not [CogentSpec.ChatGptPopupNative]::ActivatePopupWindow($popupWindow)) {
+if ($popupWindow -eq [IntPtr]::Zero -or -not $popupVisible -or -not [CogentSpec.ChatGptPopupNative]::ActivatePopupWindow($popupWindow)) {
     Write-Failure -Status 'popup_not_opened' -Reason 'CogentSpec sent the popout shortcut, but ChatGPT did not expose a popout window. Press Ctrl + Shift + Space.'
     return
 }
@@ -268,7 +329,8 @@ Write-CompactJson ([ordered]@{
     publisherVerified = $true
     shortcutSent = $true
     activatedExisting = $false
-    restoredHidden = $false
+    restoredHidden = ($null -ne $popupWasVisible -and -not $popupWasVisible)
     popupVerified = $true
+    foregroundVerified = [CogentSpec.ChatGptPopupNative]::IsForeground($popupWindow)
     shortcut = 'Ctrl+Shift+Space'
 })
