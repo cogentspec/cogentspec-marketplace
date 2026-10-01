@@ -151,7 +151,7 @@ try {
                     'create_project' { 'Project foundation created and verified.' }
                     'delete_project' { 'Project, folder, and linked CogentSpec state deleted.' }
                     'preview_project' { "Verified project preview opened at $([string]$result.localUrl)" }
-                    'open_chatgpt_popup' { 'ChatGPT popout shortcut Ctrl+Shift+Space sent after verifying the signed ChatGPT Desktop application.' }
+                    'open_chatgpt_popup' { 'ChatGPT popout shown after verifying the signed ChatGPT Desktop application.' }
                     'refresh_project_git' { 'Project check completed.' }
                     'save_project_git' { 'Version saved on this computer.' }
                     'restore_project_version' { 'Selected version restored and saved as a new version.' }
