@@ -187,7 +187,6 @@ namespace CogentSpec {
         private const long WS_EX_TOPMOST = 0x00000008L;
         private const long WS_EX_TOOLWINDOW = 0x00000080L;
         private const long WS_EX_LAYERED = 0x00080000L;
-        private const int SW_SHOW = 5;
         private const int SW_RESTORE = 9;
         private static readonly IntPtr HWND_TOPMOST = new IntPtr(-1);
         private static readonly IntPtr HWND_NOTOPMOST = new IntPtr(-2);
@@ -365,12 +364,6 @@ namespace CogentSpec {
             return window != IntPtr.Zero && (GetWindowLongPtr(window, GWL_EXSTYLE).ToInt64() & WS_EX_TOPMOST) != 0;
         }
 
-        public static bool RevealPopupWindow(IntPtr window) {
-            if (window == IntPtr.Zero) return false;
-            if (IsWindowVisible(window)) return true;
-            return ShowWindowAsync(window, IsIconic(window) ? SW_RESTORE : SW_SHOW);
-        }
-
         public static bool SetPopupTopmost(IntPtr window, bool enabled) {
             if (window == IntPtr.Zero) return false;
             uint flags = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE;
@@ -507,19 +500,11 @@ if ($Mode -in @('pin', 'unpin')) {
 
 if ($popupWindow -ne [IntPtr]::Zero) {
     $popupWasVisible = [CogentSpec.ChatGptPopupNative]::IsVisible($popupWindow)
-    if (-not $popupWasVisible) {
-        [void][CogentSpec.ChatGptPopupNative]::RevealPopupWindow($popupWindow)
-        $revealDeadline = [DateTime]::UtcNow.AddSeconds(2)
-        do {
-            Start-Sleep -Milliseconds 100
-        } while (-not [CogentSpec.ChatGptPopupNative]::IsVisible($popupWindow) -and [DateTime]::UtcNow -lt $revealDeadline)
-        $restoredHidden = [CogentSpec.ChatGptPopupNative]::IsVisible($popupWindow)
-    }
-    if ([CogentSpec.ChatGptPopupNative]::IsVisible($popupWindow) -and -not (Invoke-PopupActivation -PopupWindow $popupWindow)) {
+    if ($popupWasVisible -and -not (Invoke-PopupActivation -PopupWindow $popupWindow)) {
         Write-Failure -Status 'popup_activation_failed' -Reason 'CogentSpec found the ChatGPT popout but could not bring it forward. Press Ctrl + Shift + Space.'
         return
     }
-    if ([CogentSpec.ChatGptPopupNative]::IsVisible($popupWindow)) {
+    if ($popupWasVisible) {
         $activatedExisting = $true
     }
 }
