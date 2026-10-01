@@ -202,6 +202,9 @@ for ($heartbeat = 0; $heartbeat -lt 15; $heartbeat += 1) {
     Assert-BridgeLauncherTest ($popupHelperText.Contains("composerText = '`$cogentspec'")) 'The ChatGPT popout helper does not report the exact CogentSpec command.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains('for ($attempt = 1; $attempt -le 2; $attempt++)')) 'The ChatGPT popout helper does not make one bounded retry when the host only foregrounds itself on the first shortcut.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains('shortcutAttempts = $shortcutAttempts')) 'The ChatGPT popout helper does not report how many shortcut attempts were required.'
+    Assert-BridgeLauncherTest ($popupHelperText.IndexOf('$shortcutAttempts = 0') -lt $popupHelperText.IndexOf("if (`$Mode -eq 'inspect')")) 'The ChatGPT popout helper does not initialize its shortcut-attempt result for an already-open popout.'
+    $composerPreloadIndex = $popupHelperText.IndexOf('$composer = Set-ChatGptComposerText')
+    Assert-BridgeLauncherTest ($composerPreloadIndex -ge 0 -and $popupHelperText.IndexOf('Invoke-PopupActivation -PopupWindow $popupWindow', $composerPreloadIndex) -gt $composerPreloadIndex) 'The ChatGPT popout helper does not restore verified foreground activation after preloading the composer.'
     Assert-BridgeLauncherTest (-not $popupHelperText.Contains('VK_RETURN')) 'The ChatGPT popout helper must not submit the preloaded command.'
     $popupParityPaths = @(
         'plugins\cogentstack\skills\cogentstack\scripts\open-chatgpt-popup.ps1',

@@ -378,6 +378,7 @@ $chatGptProcessIds = [int[]]@($chatGptProcesses | ForEach-Object { [int]$_.Id })
 $popupWindow = Find-VerifiedChatGptPopupWindow -ProcessIds $chatGptProcessIds
 $popupWasVisible = $null
 $shortcutSent = $false
+$shortcutAttempts = 0
 $activatedExisting = $false
 $restoredHidden = $false
 
@@ -437,7 +438,6 @@ if ($popupWindow -ne [IntPtr]::Zero) {
 }
 
 if (-not $activatedExisting) {
-    $shortcutAttempts = 0
     for ($attempt = 1; $attempt -le 2; $attempt++) {
         if (-not [CogentSpec.ChatGptPopupNative]::SendControlShiftSpace()) {
             Write-Failure -Status 'shortcut_failed' -Reason 'CogentSpec could not send the popout shortcut. Press Ctrl + Shift + Space.'
@@ -471,6 +471,11 @@ if (-not $composer.preloaded) {
         [string]$composer.reason
     }
     Write-Failure -Status ([string]$composer.status) -Reason $reason -Opened $true
+    return
+}
+
+if (-not (Invoke-PopupActivation -PopupWindow $popupWindow)) {
+    Write-Failure -Status 'popup_activation_failed' -Reason 'CogentSpec prepared the ChatGPT popout but could not make it ready for keyboard input. Click the composer once to continue.' -Opened $true
     return
 }
 
