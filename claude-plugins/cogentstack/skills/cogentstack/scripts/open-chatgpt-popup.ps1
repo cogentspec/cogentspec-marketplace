@@ -11,13 +11,70 @@ function Write-CompactJson($Value) {
     $Value | ConvertTo-Json -Depth 5 -Compress | Write-Output
 }
 
-function Write-Failure([string]$Status, [string]$Reason) {
+function Write-Failure([string]$Status, [string]$Reason, [bool]$Opened = $false) {
     Write-CompactJson ([ordered]@{
         status = $Status
-        opened = $false
+        opened = $Opened
         reason = $Reason
         manualShortcut = 'Ctrl+Shift+Space'
     })
+}
+
+function Set-ChatGptComposerText([IntPtr]$PopupWindow, [string]$Text) {
+    try {
+        Add-Type -AssemblyName UIAutomationClient -ErrorAction Stop
+        $root = [System.Windows.Automation.AutomationElement]::FromHandle($PopupWindow)
+        if (-not $root) { throw 'The verified popout did not expose an accessible window.' }
+
+        $composer = $null
+        $deadline = [DateTime]::UtcNow.AddSeconds(3)
+        $editCondition = [System.Windows.Automation.PropertyCondition]::new(
+            [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+            [System.Windows.Automation.ControlType]::Edit
+        )
+        do {
+            $matches = @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $editCondition) | Where-Object {
+                [string]$_.Current.Name -eq 'Work with ChatGPT'
+            })
+            if ($matches.Count -eq 1) { $composer = $matches[0]; break }
+            Start-Sleep -Milliseconds 100
+        } while ([DateTime]::UtcNow -lt $deadline)
+
+        if (-not $composer) { throw 'CogentSpec could not identify one ChatGPT composer in the verified popout.' }
+        if (-not $composer.Current.IsEnabled -or -not $composer.Current.IsKeyboardFocusable) {
+            throw 'The ChatGPT composer is not ready for input.'
+        }
+
+        $patternObject = $null
+        if (-not $composer.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$patternObject)) {
+            throw 'The ChatGPT composer does not expose safe text input.'
+        }
+        $valuePattern = [System.Windows.Automation.ValuePattern]$patternObject
+        if ($valuePattern.Current.IsReadOnly) { throw 'The ChatGPT composer is read-only.' }
+
+        $currentValue = [string]$valuePattern.Current.Value
+        if ($currentValue -eq $Text) {
+            return [ordered]@{ status = 'preloaded'; preloaded = $true; alreadyPreloaded = $true }
+        }
+        if (-not [string]::IsNullOrWhiteSpace($currentValue)) {
+            return [ordered]@{ status = 'draft_exists'; preloaded = $false; alreadyPreloaded = $false }
+        }
+
+        $composer.SetFocus()
+        $valuePattern.SetValue($Text)
+        Start-Sleep -Milliseconds 100
+        if ([string]$valuePattern.Current.Value -ne $Text) {
+            throw 'ChatGPT did not retain the preloaded CogentSpec command.'
+        }
+        return [ordered]@{ status = 'preloaded'; preloaded = $true; alreadyPreloaded = $false }
+    } catch {
+        return [ordered]@{
+            status = 'preload_failed'
+            preloaded = $false
+            alreadyPreloaded = $false
+            reason = $_.Exception.Message
+        }
+    }
 }
 
 $chatGptProcesses = @(Get-Process -Name 'ChatGPT' -ErrorAction SilentlyContinue | Where-Object {
@@ -268,6 +325,9 @@ namespace CogentSpec {
 $chatGptProcessIds = [int[]]@($chatGptProcesses | ForEach-Object { [int]$_.Id })
 $popupWindow = [CogentSpec.ChatGptPopupNative]::FindPopupWindow($chatGptProcessIds)
 $popupWasVisible = $null
+$shortcutSent = $false
+$activatedExisting = $false
+$restoredHidden = $false
 
 if ($Mode -eq 'inspect') {
     Write-CompactJson ([ordered]@{
@@ -290,35 +350,39 @@ if ($popupWindow -ne [IntPtr]::Zero) {
         return
     }
     if ($popupWasVisible) {
-        Write-CompactJson ([ordered]@{
-            status = 'opened'
-            opened = $true
-            processId = [int]$chatGpt.Id
-            publisherVerified = $true
-            shortcutSent = $false
-            activatedExisting = $true
-            restoredHidden = $false
-            popupVerified = $true
-            foregroundVerified = [CogentSpec.ChatGptPopupNative]::IsForeground($popupWindow)
-        })
-        return
+        $activatedExisting = $true
     }
 }
 
-if (-not [CogentSpec.ChatGptPopupNative]::SendControlShiftSpace()) {
-    Write-Failure -Status 'shortcut_failed' -Reason 'CogentSpec could not send the popout shortcut. Press Ctrl + Shift + Space.'
-    return
+if (-not $activatedExisting) {
+    if (-not [CogentSpec.ChatGptPopupNative]::SendControlShiftSpace()) {
+        Write-Failure -Status 'shortcut_failed' -Reason 'CogentSpec could not send the popout shortcut. Press Ctrl + Shift + Space.'
+        return
+    }
+    $shortcutSent = $true
+
+    $popupDeadline = [DateTime]::UtcNow.AddSeconds(3)
+    do {
+        Start-Sleep -Milliseconds 100
+        $popupWindow = [CogentSpec.ChatGptPopupNative]::FindPopupWindow($chatGptProcessIds)
+        $popupVisible = [CogentSpec.ChatGptPopupNative]::IsVisible($popupWindow)
+    } while (($popupWindow -eq [IntPtr]::Zero -or -not $popupVisible) -and [DateTime]::UtcNow -lt $popupDeadline)
+
+    if ($popupWindow -eq [IntPtr]::Zero -or -not $popupVisible -or -not [CogentSpec.ChatGptPopupNative]::ActivatePopupWindow($popupWindow)) {
+        Write-Failure -Status 'popup_not_opened' -Reason 'CogentSpec sent the popout shortcut, but ChatGPT did not expose a popout window. Press Ctrl + Shift + Space.'
+        return
+    }
+    $restoredHidden = ($null -ne $popupWasVisible -and -not $popupWasVisible)
 }
 
-$popupDeadline = [DateTime]::UtcNow.AddSeconds(3)
-do {
-    Start-Sleep -Milliseconds 100
-    $popupWindow = [CogentSpec.ChatGptPopupNative]::FindPopupWindow($chatGptProcessIds)
-    $popupVisible = [CogentSpec.ChatGptPopupNative]::IsVisible($popupWindow)
-} while (($popupWindow -eq [IntPtr]::Zero -or -not $popupVisible) -and [DateTime]::UtcNow -lt $popupDeadline)
-
-if ($popupWindow -eq [IntPtr]::Zero -or -not $popupVisible -or -not [CogentSpec.ChatGptPopupNative]::ActivatePopupWindow($popupWindow)) {
-    Write-Failure -Status 'popup_not_opened' -Reason 'CogentSpec sent the popout shortcut, but ChatGPT did not expose a popout window. Press Ctrl + Shift + Space.'
+$composer = Set-ChatGptComposerText -PopupWindow $popupWindow -Text '$cogentspec'
+if (-not $composer.preloaded) {
+    $reason = if ([string]$composer.status -eq 'draft_exists') {
+        'ChatGPT already contains text in the composer. CogentSpec left that draft unchanged.'
+    } else {
+        [string]$composer.reason
+    }
+    Write-Failure -Status ([string]$composer.status) -Reason $reason -Opened $true
     return
 }
 
@@ -327,10 +391,13 @@ Write-CompactJson ([ordered]@{
     opened = $true
     processId = [int]$chatGpt.Id
     publisherVerified = $true
-    shortcutSent = $true
-    activatedExisting = $false
-    restoredHidden = ($null -ne $popupWasVisible -and -not $popupWasVisible)
+    shortcutSent = $shortcutSent
+    activatedExisting = $activatedExisting
+    restoredHidden = $restoredHidden
     popupVerified = $true
     foregroundVerified = [CogentSpec.ChatGptPopupNative]::IsForeground($popupWindow)
+    composerPreloaded = $true
+    composerAlreadyPreloaded = [bool]$composer.alreadyPreloaded
+    composerText = '$cogentspec'
     shortcut = 'Ctrl+Shift+Space'
 })

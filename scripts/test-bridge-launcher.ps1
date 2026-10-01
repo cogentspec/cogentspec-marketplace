@@ -153,6 +153,26 @@ Start-Sleep -Seconds 30
     Assert-BridgeLauncherTest ($restoreHelperText.Contains("'HEAD^{tree}'")) 'The automatic version restore helper does not verify the restored tree.'
     Assert-BridgeLauncherTest ($restoreHelperText.Contains("status = 'restored'")) 'The automatic version restore helper does not report a verified restored result.'
     Assert-BridgeLauncherTest (-not $restoreHelperText.Contains('Start-Process')) 'The automatic version restore helper must not open another application.'
+    $popupHelperText = Get-Content -Raw -LiteralPath (Join-Path $repositoryRoot 'plugins\cogentspec\skills\cogentspec\scripts\open-chatgpt-popup.ps1')
+    Assert-BridgeLauncherTest ($popupHelperText.Contains('Add-Type -AssemblyName UIAutomationClient')) 'The ChatGPT popout helper does not use the accessible composer surface.'
+    Assert-BridgeLauncherTest ($popupHelperText.Contains("[string]`$_.Current.Name -eq 'Work with ChatGPT'")) 'The ChatGPT popout helper does not require the exact composer identity.'
+    Assert-BridgeLauncherTest ($popupHelperText.Contains('[System.Windows.Automation.ValuePattern]::Pattern')) 'The ChatGPT popout helper does not require safe value input.'
+    Assert-BridgeLauncherTest ($popupHelperText.Contains('$valuePattern.SetValue($Text)')) 'The ChatGPT popout helper does not preload the exact requested command.'
+    Assert-BridgeLauncherTest ($popupHelperText.Contains("ChatGPT already contains text in the composer. CogentSpec left that draft unchanged.")) 'The ChatGPT popout helper can overwrite an existing draft.'
+    Assert-BridgeLauncherTest ($popupHelperText.Contains('composerPreloaded = $true')) 'The ChatGPT popout helper does not verify the preloaded composer.'
+    Assert-BridgeLauncherTest ($popupHelperText.Contains("composerText = '`$cogentspec'")) 'The ChatGPT popout helper does not report the exact CogentSpec command.'
+    Assert-BridgeLauncherTest (-not $popupHelperText.Contains('VK_RETURN')) 'The ChatGPT popout helper must not submit the preloaded command.'
+    $popupParityPaths = @(
+        'plugins\cogentstack\skills\cogentstack\scripts\open-chatgpt-popup.ps1',
+        'claude-plugins\cogentspec\skills\cogentspec\scripts\open-chatgpt-popup.ps1',
+        'claude-plugins\cogentstack\skills\cogentstack\scripts\open-chatgpt-popup.ps1'
+    )
+    foreach ($relativePath in $popupParityPaths) {
+        $candidateText = Get-Content -Raw -LiteralPath (Join-Path $repositoryRoot $relativePath)
+        Assert-BridgeLauncherTest ($candidateText -ceq $popupHelperText) "The ChatGPT popout helper is inconsistent at $relativePath."
+    }
+    $watcherText = Get-Content -Raw -LiteralPath (Join-Path $repositoryRoot 'plugins\cogentspec\skills\cogentspec\scripts\watch-cogentstack-bridge.ps1')
+    Assert-BridgeLauncherTest ($watcherText.Contains("ChatGPT popout shown with `$cogentspec ready in the composer")) 'The Bridge does not report the preloaded ChatGPT composer.'
 
     [ordered]@{
         status = 'valid'
