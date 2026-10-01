@@ -63,13 +63,14 @@ function Start-DetachedBridgeWatcher(
     [string]$WatcherScript,
     [string]$WatcherContextKey,
     [string]$WatcherPluginId,
-    [string]$WatcherPluginVersion
+    [string]$WatcherPluginVersion,
+    [string]$WatcherReadyPath
 ) {
     $escape = {
         param([string]$Value)
         return $Value.Replace("'", "''")
     }
-    $command = "& '$(& $escape $WatcherScript)' -ContextKey '$(& $escape $WatcherContextKey)' -PluginId '$(& $escape $WatcherPluginId)' -PluginVersion '$(& $escape $WatcherPluginVersion)'"
+    $command = "& '$(& $escape $WatcherScript)' -ContextKey '$(& $escape $WatcherContextKey)' -PluginId '$(& $escape $WatcherPluginId)' -PluginVersion '$(& $escape $WatcherPluginVersion)' -ReadyPath '$(& $escape $WatcherReadyPath)'"
     $encodedCommand = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
     $commandLine = '"' + $PowerShellExecutable + '" -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -EncodedCommand ' + $encodedCommand
     $creation = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $commandLine }
@@ -79,6 +80,63 @@ function Start-DetachedBridgeWatcher(
     $process = Get-Process -Id ([int]$creation.ProcessId) -ErrorAction SilentlyContinue
     if (-not $process) { throw 'Desktop Bridge worker stopped during startup.' }
     return $process
+}
+
+function Test-BridgePresenceReady(
+    [string]$ReadyPath,
+    [int]$ProcessId,
+    [string]$ExpectedContextKey,
+    [string]$ExpectedPluginId,
+    [string]$ExpectedPluginVersion
+) {
+    if (-not (Test-Path -LiteralPath $ReadyPath -PathType Leaf)) { return $false }
+    try {
+        $marker = Get-Content -Raw -LiteralPath $ReadyPath | ConvertFrom-Json
+        if ([int]$marker.processId -ne $ProcessId -or
+            [string]$marker.contextKey -cne $ExpectedContextKey -or
+            [string]$marker.pluginId -cne $ExpectedPluginId -or
+            [string]$marker.pluginVersion -cne $ExpectedPluginVersion -or
+            -not [bool]$marker.serverAcknowledged) {
+            return $false
+        }
+        $acknowledgedAt = if ($marker.acknowledgedAt -is [DateTime]) {
+            ([DateTime]$marker.acknowledgedAt).ToUniversalTime()
+        } else {
+            [DateTime]::Parse(
+                [string]$marker.acknowledgedAt,
+                [Globalization.CultureInfo]::InvariantCulture,
+                [Globalization.DateTimeStyles]::RoundtripKind
+            ).ToUniversalTime()
+        }
+        $age = [DateTime]::UtcNow - $acknowledgedAt
+        return $age.TotalSeconds -ge -1 -and $age.TotalSeconds -le 12
+    } catch {
+        return $false
+    }
+}
+
+function Wait-BridgePresenceReady(
+    [string]$ReadyPath,
+    [int]$ProcessId,
+    [string]$ExpectedContextKey,
+    [string]$ExpectedPluginId,
+    [string]$ExpectedPluginVersion,
+    [int]$TimeoutMilliseconds
+) {
+    $deadline = [DateTime]::UtcNow.AddMilliseconds($TimeoutMilliseconds)
+    do {
+        if (-not (Get-Process -Id $ProcessId -ErrorAction SilentlyContinue)) { return $false }
+        if (Test-BridgePresenceReady `
+            -ReadyPath $ReadyPath `
+            -ProcessId $ProcessId `
+            -ExpectedContextKey $ExpectedContextKey `
+            -ExpectedPluginId $ExpectedPluginId `
+            -ExpectedPluginVersion $ExpectedPluginVersion) {
+            return $true
+        }
+        Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $deadline)
+    return $false
 }
 $connectionUrl = "https://cogentspec.com/stack?surface=$([Uri]::EscapeDataString($Surface))"
 $workspaceUrl = $connectionUrl
@@ -178,6 +236,7 @@ $watcherScript = Join-Path $runtimeRoot 'watch-cogentstack-bridge.ps1'
 $contextHashBytes = Get-TextSha256 $resolvedContext
 $contextHash = ([BitConverter]::ToString($contextHashBytes)).Replace('-', '').ToLowerInvariant().Substring(0, 24)
 $statePath = Join-Path $stateRoot "$contextHash.json"
+$readyPath = Join-Path $stateRoot "$contextHash.ready.json"
 $existingProcessId = 0
 if (Test-Path -LiteralPath $statePath -PathType Leaf) {
     try {
@@ -186,25 +245,42 @@ if (Test-Path -LiteralPath $statePath -PathType Leaf) {
         $existingProcess = if ($existingProcessId -gt 0) { Get-CimInstance Win32_Process -Filter "ProcessId=$existingProcessId" -ErrorAction SilentlyContinue } else { $null }
         $expectedWatcher = [string]$state.watcherScript
         $sameRuntime = [string]$state.runtimeVersion -eq $runtimeVersion
-        $verifiedBridgeProcess = $existingProcess -and $expectedWatcher -and ([string]$existingProcess.CommandLine).IndexOf($expectedWatcher, [StringComparison]::OrdinalIgnoreCase) -ge 0
+        $verifiedBridgeProcess = $existingProcess -and
+            $expectedWatcher -and
+            [string]$state.contextKey -ceq $resolvedContext -and
+            [string]$existingProcess.ExecutablePath -ieq $powershellExecutable -and
+            ([string]$existingProcess.CommandLine).IndexOf('-EncodedCommand', [StringComparison]::OrdinalIgnoreCase) -ge 0
         if ($verifiedBridgeProcess -and $sameRuntime) {
-            Write-CompactJson ([ordered]@{
-                status = 'ready'
-                bridge = 'already_running'
-                processId = $existingProcessId
-                contextKey = $resolvedContext
-                contextIsolated = [bool]$projectContext.Isolated
-                workspaceUrl = $workspaceUrl
-                webWorkspaceUrl = $webWorkspaceUrl
-                chatgptWorkspaceUrl = $chatgptWorkspaceUrl
-                browserOpened = $false
-                accountState = 'signed_in'
-                mcpState = $mcpState
-                pluginId = $pluginId
-                pluginVersion = $pluginVersion
-                launcherElapsedMs = [int]$launcherTimer.ElapsedMilliseconds
-            })
-            return
+            $presenceReady = Wait-BridgePresenceReady `
+                -ReadyPath $readyPath `
+                -ProcessId $existingProcessId `
+                -ExpectedContextKey $resolvedContext `
+                -ExpectedPluginId $pluginId `
+                -ExpectedPluginVersion $pluginVersion `
+                -TimeoutMilliseconds 3000
+            if ($presenceReady) {
+                Write-CompactJson ([ordered]@{
+                    status = 'ready'
+                    bridge = 'already_running'
+                    presenceVerified = $true
+                    processId = $existingProcessId
+                    contextKey = $resolvedContext
+                    contextIsolated = [bool]$projectContext.Isolated
+                    workspaceUrl = $workspaceUrl
+                    webWorkspaceUrl = $webWorkspaceUrl
+                    chatgptWorkspaceUrl = $chatgptWorkspaceUrl
+                    browserOpened = $false
+                    accountState = 'signed_in'
+                    mcpState = $mcpState
+                    pluginId = $pluginId
+                    pluginVersion = $pluginVersion
+                    launcherElapsedMs = [int]$launcherTimer.ElapsedMilliseconds
+                })
+                return
+            }
+            Stop-Process -Id $existingProcessId -Force -ErrorAction SilentlyContinue
+            Wait-Process -Id $existingProcessId -Timeout 2 -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath $readyPath -Force -ErrorAction SilentlyContinue
         }
         if ($verifiedBridgeProcess -and -not $sameRuntime) {
             Stop-Process -Id $existingProcessId -Force
@@ -212,19 +288,33 @@ if (Test-Path -LiteralPath $statePath -PathType Leaf) {
     } catch { }
 }
 
+Remove-Item -LiteralPath $readyPath -Force -ErrorAction SilentlyContinue
+
 $watcher = Start-DetachedBridgeWatcher `
     -PowerShellExecutable $powershellExecutable `
     -WatcherScript $watcherScript `
     -WatcherContextKey $resolvedContext `
     -WatcherPluginId $pluginId `
-    -WatcherPluginVersion $pluginVersion
-Start-Sleep -Milliseconds 350
-if ($watcher.HasExited) { throw 'Desktop Bridge stopped before it became ready.' }
+    -WatcherPluginVersion $pluginVersion `
+    -WatcherReadyPath $readyPath
+$presenceReady = Wait-BridgePresenceReady `
+    -ReadyPath $readyPath `
+    -ProcessId $watcher.Id `
+    -ExpectedContextKey $resolvedContext `
+    -ExpectedPluginId $pluginId `
+    -ExpectedPluginVersion $pluginVersion `
+    -TimeoutMilliseconds 8000
+if (-not $presenceReady) {
+    Stop-Process -Id $watcher.Id -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $readyPath -Force -ErrorAction SilentlyContinue
+    throw 'Desktop Bridge started, but CogentSpec did not verify this AI task.'
+}
 
 [ordered]@{
     processId = $watcher.Id
     runtimeVersion = $runtimeVersion
     watcherScript = $watcherScript
+    readyPath = $readyPath
     contextKey = $resolvedContext
     workspaceUrl = $workspaceUrl
     webWorkspaceUrl = $webWorkspaceUrl
@@ -237,6 +327,7 @@ if ($watcher.HasExited) { throw 'Desktop Bridge stopped before it became ready.'
 Write-CompactJson ([ordered]@{
     status = 'ready'
     bridge = 'started'
+    presenceVerified = $true
     processId = $watcher.Id
     contextKey = $resolvedContext
     contextIsolated = [bool]$projectContext.Isolated

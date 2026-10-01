@@ -27,6 +27,7 @@ $contextKey = "ctx-$contextDigest"
 $contextHash = ([BitConverter]::ToString((Get-TextSha256 $contextKey))).Replace('-', '').ToLowerInvariant().Substring(0, 24)
 $stateRoot = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'CogentSpec\bridge'
 $statePath = Join-Path $stateRoot "$contextHash.json"
+$readyPath = Join-Path $stateRoot "$contextHash.ready.json"
 $connectorProcessPath = Join-Path $fixtureRoot 'connector-process.txt'
 $runtimeRoot = ''
 $workerProcessId = 0
@@ -67,13 +68,25 @@ param([string]$Surface)
 '@
     Set-Content -LiteralPath (Join-Path $fixtureScripts 'ensure-cogentspec-mcp.ps1') -Value $projectDataConnectionFixture -Encoding UTF8
 
-    $watcherFixture = @'
+$watcherFixture = @'
 param(
     [string]$ContextKey,
     [string]$PluginId,
-    [string]$PluginVersion
+    [string]$PluginVersion,
+    [string]$ReadyPath
 )
-Start-Sleep -Seconds 30
+Start-Sleep -Milliseconds 700
+for ($heartbeat = 0; $heartbeat -lt 15; $heartbeat += 1) {
+    [ordered]@{
+        processId = $PID
+        contextKey = $ContextKey
+        pluginId = $PluginId
+        pluginVersion = $PluginVersion
+        serverAcknowledged = $true
+        acknowledgedAt = [DateTime]::UtcNow.ToString('o')
+    } | ConvertTo-Json -Compress | Set-Content -LiteralPath $ReadyPath -Encoding UTF8
+    Start-Sleep -Seconds 2
+}
 '@
     Set-Content -LiteralPath (Join-Path $fixtureScripts 'watch-cogentstack-bridge.ps1') -Value $watcherFixture -Encoding UTF8
 
@@ -111,8 +124,9 @@ Start-Sleep -Seconds 30
 
     Assert-BridgeLauncherTest ([string]$result.status -eq 'ready') 'The Bridge launcher did not become ready.'
     Assert-BridgeLauncherTest ([string]$result.bridge -eq 'started') 'The Bridge launcher did not start the fixture worker.'
+    Assert-BridgeLauncherTest ([bool]$result.presenceVerified) 'The Bridge launcher reported ready before server presence was verified.'
     Assert-BridgeLauncherTest ([string]$result.mcpState -eq 'ready') 'The secure project-data connection was not ready.'
-    Assert-BridgeLauncherTest ([int]$result.launcherElapsedMs -ge 0 -and [int]$result.launcherElapsedMs -lt 5000) 'The Bridge launcher exceeded its five-second in-process limit.'
+    Assert-BridgeLauncherTest ([int]$result.launcherElapsedMs -ge 500 -and [int]$result.launcherElapsedMs -lt 5000) 'The Bridge launcher did not wait for the delayed server acknowledgement within its five-second in-process limit.'
     Assert-BridgeLauncherTest ($timer.ElapsedMilliseconds -lt 10000) 'The Bridge launcher exceeded the ten-second cold-process fixture limit.'
     Assert-BridgeLauncherTest ([string]$result.webWorkspaceUrl -match '#desktop-web=') 'The web workspace handoff is missing.'
     Assert-BridgeLauncherTest ([string]$result.chatgptWorkspaceUrl -match '#desktop-chatgpt=') 'The ChatGPT workspace handoff is missing.'
@@ -125,6 +139,16 @@ Start-Sleep -Seconds 30
     $workerProcessId = [int]$result.processId
     Assert-BridgeLauncherTest ($workerProcessId -ne $launcherProcessId) 'The fixture worker incorrectly reused the launcher process.'
     Assert-BridgeLauncherTest ($workerProcessId -gt 0 -and [bool](Get-Process -Id $workerProcessId -ErrorAction SilentlyContinue)) 'The fixture worker is not running.'
+    Assert-BridgeLauncherTest (Test-Path -LiteralPath $readyPath -PathType Leaf) 'The server acknowledgement marker was not written.'
+    $readyMarker = Get-Content -Raw -LiteralPath $readyPath | ConvertFrom-Json
+    Assert-BridgeLauncherTest ([int]$readyMarker.processId -eq $workerProcessId -and [bool]$readyMarker.serverAcknowledged) 'The server acknowledgement marker does not identify the verified worker.'
+
+    $reuseOutput = @(& (Join-Path $fixtureScripts 'start-cogentstack-bridge.ps1') -ContextKey $contextKey -Surface chatgpt 2>&1)
+    $reuseJsonLine = @($reuseOutput | ForEach-Object { $_.ToString() } | Where-Object { $_.Trim().StartsWith('{') } | Select-Object -Last 1)
+    Assert-BridgeLauncherTest ([bool]$reuseJsonLine) 'The reused Bridge launcher returned no JSON result.'
+    $reuseResult = $reuseJsonLine | ConvertFrom-Json
+    Assert-BridgeLauncherTest ([string]$reuseResult.status -eq 'ready' -and [string]$reuseResult.bridge -eq 'already_running') 'The Bridge launcher did not reuse the verified worker.'
+    Assert-BridgeLauncherTest ([bool]$reuseResult.presenceVerified -and [int]$reuseResult.processId -eq $workerProcessId) 'The reused Bridge worker was reported ready without verified context presence.'
     if (Test-Path -LiteralPath $statePath -PathType Leaf) {
         $state = Get-Content -Raw -LiteralPath $statePath | ConvertFrom-Json
         $runtimeRoot = Split-Path -Parent ([string]$state.watcherScript)
@@ -177,6 +201,22 @@ Start-Sleep -Seconds 30
     }
     $watcherText = Get-Content -Raw -LiteralPath (Join-Path $repositoryRoot 'plugins\cogentspec\skills\cogentspec\scripts\watch-cogentstack-bridge.ps1')
     Assert-BridgeLauncherTest ($watcherText.Contains("ChatGPT popout shown with `$cogentspec ready in the composer")) 'The Bridge does not report the preloaded ChatGPT composer.'
+    Assert-BridgeLauncherTest ($watcherText.IndexOf('Write-BridgePresenceReady', $watcherText.IndexOf('Invoke-BridgeApi -Method Get')) -gt $watcherText.IndexOf('Invoke-BridgeApi -Method Get')) 'The Bridge does not record readiness after the server acknowledges context presence.'
+    Assert-BridgeLauncherTest ($watcherText.Contains('serverAcknowledged = $true')) 'The Bridge readiness marker does not record server acknowledgement.'
+    $launcherText = Get-Content -Raw -LiteralPath (Join-Path $repositoryRoot 'plugins\cogentspec\skills\cogentspec\scripts\start-cogentstack-bridge.ps1')
+    Assert-BridgeLauncherTest ($launcherText.Contains('function Wait-BridgePresenceReady')) 'The Bridge launcher does not wait for server-acknowledged context presence.'
+    Assert-BridgeLauncherTest ($launcherText.Contains('presenceVerified = $true')) 'The Bridge launcher does not expose verified context presence.'
+    $bridgeParityRoots = @(
+        'plugins\cogentstack\skills\cogentstack\scripts',
+        'claude-plugins\cogentspec\skills\cogentspec\scripts',
+        'claude-plugins\cogentstack\skills\cogentstack\scripts'
+    )
+    foreach ($relativeRoot in $bridgeParityRoots) {
+        $candidateLauncherText = Get-Content -Raw -LiteralPath (Join-Path (Join-Path $repositoryRoot $relativeRoot) 'start-cogentstack-bridge.ps1')
+        $candidateWatcherText = Get-Content -Raw -LiteralPath (Join-Path (Join-Path $repositoryRoot $relativeRoot) 'watch-cogentstack-bridge.ps1')
+        Assert-BridgeLauncherTest ($candidateLauncherText -ceq $launcherText) "The Bridge launcher is inconsistent at $relativeRoot."
+        Assert-BridgeLauncherTest ($candidateWatcherText -ceq $watcherText) "The Bridge watcher is inconsistent at $relativeRoot."
+    }
 
     [ordered]@{
         status = 'valid'
@@ -186,6 +226,8 @@ Start-Sleep -Seconds 30
         directAccountCheck = $true
         boundedAccountCheckSeconds = 8
         projectDataConnection = 'ready'
+        presenceVerified = [bool]$result.presenceVerified
+        reuseVerified = [bool]$reuseResult.presenceVerified
         workspaceLinksReturned = 2
     } | ConvertTo-Json -Compress
 } finally {
@@ -198,6 +240,7 @@ Start-Sleep -Seconds 30
         }
     }
     if (Test-Path -LiteralPath $statePath -PathType Leaf) { Remove-Item -LiteralPath $statePath -Force }
+    if (Test-Path -LiteralPath $readyPath -PathType Leaf) { Remove-Item -LiteralPath $readyPath -Force }
     if ($runtimeRoot -and (Test-Path -LiteralPath $runtimeRoot -PathType Container)) {
         Remove-Item -LiteralPath $runtimeRoot -Recurse -Force
     }

@@ -2,7 +2,8 @@
 param(
     [Parameter(Mandatory = $true)][string]$ContextKey,
     [Parameter(Mandatory = $true)][ValidateSet('cogentspec', 'cogentstack')][string]$PluginId,
-    [Parameter(Mandatory = $true)][ValidatePattern('^\d+\.\d+\.\d+$')][string]$PluginVersion
+    [Parameter(Mandatory = $true)][ValidatePattern('^\d+\.\d+\.\d+$')][string]$PluginVersion,
+    [Parameter(Mandatory = $true)][string]$ReadyPath
 )
 
 Set-StrictMode -Version Latest
@@ -56,6 +57,24 @@ function Invoke-BridgeApi([string]$Method, [string]$Path, [string]$Token, $Body 
         $parameters.Body = $Body | ConvertTo-Json -Depth 6 -Compress
     }
     return Invoke-RestMethod @parameters
+}
+
+function Write-BridgePresenceReady {
+    $parent = Split-Path -Parent $ReadyPath
+    if (-not $parent -or -not (Test-Path -LiteralPath $parent -PathType Container)) {
+        throw 'Desktop Bridge readiness location is unavailable.'
+    }
+    $temporaryPath = "$ReadyPath.$PID.tmp"
+    $marker = [ordered]@{
+        processId = $PID
+        contextKey = $ContextKey
+        pluginId = $PluginId
+        pluginVersion = $PluginVersion
+        serverAcknowledged = $true
+        acknowledgedAt = [DateTime]::UtcNow.ToString('o')
+    } | ConvertTo-Json -Compress
+    [IO.File]::WriteAllText($temporaryPath, $marker, [Text.UTF8Encoding]::new($false))
+    Move-Item -LiteralPath $temporaryPath -Destination $ReadyPath -Force
 }
 
 function Invoke-ActionHelper($Request) {
@@ -127,6 +146,7 @@ try {
         if (-not $token) { break }
         try {
             $listing = Invoke-BridgeApi -Method Get -Path "/api/plugin/desktop-actions?$contextQuery" -Token $token
+            Write-BridgePresenceReady
             if (-not $listing.request) {
                 Start-Sleep -Seconds 2
                 continue
