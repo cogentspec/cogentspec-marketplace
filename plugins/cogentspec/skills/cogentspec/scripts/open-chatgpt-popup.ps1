@@ -20,6 +20,16 @@ function Write-Failure([string]$Status, [string]$Reason, [bool]$Opened = $false)
     })
 }
 
+function Set-ChatGptComposerFocus($Composer) {
+    $Composer.SetFocus()
+    $deadline = [DateTime]::UtcNow.AddSeconds(1)
+    do {
+        if ($Composer.Current.HasKeyboardFocus) { return }
+        Start-Sleep -Milliseconds 50
+    } while ([DateTime]::UtcNow -lt $deadline)
+    throw 'ChatGPT did not give keyboard focus to the popout composer.'
+}
+
 function Set-ChatGptComposerText([IntPtr]$PopupWindow, [string]$Text) {
     try {
         Add-Type -AssemblyName UIAutomationClient -ErrorAction Stop
@@ -58,19 +68,21 @@ function Set-ChatGptComposerText([IntPtr]$PopupWindow, [string]$Text) {
             $currentValue = ''
         }
         if ($currentValue -eq $Text) {
-            return [ordered]@{ status = 'preloaded'; preloaded = $true; alreadyPreloaded = $true }
+            Set-ChatGptComposerFocus -Composer $composer
+            return [ordered]@{ status = 'preloaded'; preloaded = $true; alreadyPreloaded = $true; focused = $true }
         }
         if (-not [string]::IsNullOrWhiteSpace($currentValue)) {
             return [ordered]@{ status = 'draft_exists'; preloaded = $false; alreadyPreloaded = $false }
         }
 
-        $composer.SetFocus()
+        Set-ChatGptComposerFocus -Composer $composer
         $valuePattern.SetValue($Text)
         Start-Sleep -Milliseconds 100
         if ([string]$valuePattern.Current.Value -ne $Text) {
             throw 'ChatGPT did not retain the preloaded CogentSpec command.'
         }
-        return [ordered]@{ status = 'preloaded'; preloaded = $true; alreadyPreloaded = $false }
+        Set-ChatGptComposerFocus -Composer $composer
+        return [ordered]@{ status = 'preloaded'; preloaded = $true; alreadyPreloaded = $false; focused = $true }
     } catch {
         return [ordered]@{
             status = 'preload_failed'
@@ -78,6 +90,51 @@ function Set-ChatGptComposerText([IntPtr]$PopupWindow, [string]$Text) {
             alreadyPreloaded = $false
             reason = $_.Exception.Message
         }
+    }
+}
+
+function Reset-ChatGptPopupInteraction([IntPtr]$PopupWindow) {
+    try {
+        if (-not [CogentSpec.ChatGptPopupNative]::CancelPopupInteraction($PopupWindow)) {
+            throw 'Windows did not release the previous popout interaction state.'
+        }
+
+        Add-Type -AssemblyName UIAutomationClient -ErrorAction Stop
+        $root = [System.Windows.Automation.AutomationElement]::FromHandle($PopupWindow)
+        if (-not $root) { throw 'The verified popout did not expose an accessible window.' }
+
+        $dismissCondition = [System.Windows.Automation.AndCondition]::new(
+            [System.Windows.Automation.PropertyCondition]::new(
+                [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+                [System.Windows.Automation.ControlType]::Button
+            ),
+            [System.Windows.Automation.PropertyCondition]::new(
+                [System.Windows.Automation.AutomationElement]::NameProperty,
+                'Dismiss Popout Window'
+            )
+        )
+        $dismissButton = $root.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $dismissCondition)
+        $hoverCleared = $false
+        if ($dismissButton) {
+            $cursor = [CogentSpec.ChatGptPopupNative]::GetCursorPosition()
+            $buttonBounds = $dismissButton.Current.BoundingRectangle
+            $cursorOnDismiss = $cursor.X -ge $buttonBounds.Left -and $cursor.X -lt $buttonBounds.Right -and
+                $cursor.Y -ge $buttonBounds.Top -and $cursor.Y -lt $buttonBounds.Bottom
+            if ($cursorOnDismiss) {
+                $rootBounds = $root.Current.BoundingRectangle
+                $targetX = [int][Math]::Min($rootBounds.Right - 8, $buttonBounds.Right + 48)
+                $targetY = [int][Math]::Max($rootBounds.Top + 8, [Math]::Min($rootBounds.Bottom - 8, $buttonBounds.Top + ($buttonBounds.Height / 2)))
+                if (-not [CogentSpec.ChatGptPopupNative]::SetCursorPosition($targetX, $targetY)) {
+                    throw 'Windows did not clear the stale popout close-button hover.'
+                }
+                $hoverCleared = $true
+                Start-Sleep -Milliseconds 100
+            }
+        }
+
+        return [ordered]@{ status = 'reset'; reset = $true; dismissHoverCleared = $hoverCleared }
+    } catch {
+        return [ordered]@{ status = 'reset_failed'; reset = $false; dismissHoverCleared = $false; reason = $_.Exception.Message }
     }
 }
 
@@ -138,6 +195,7 @@ namespace CogentSpec {
         private const uint SWP_NOMOVE = 0x0002;
         private const uint SWP_NOACTIVATE = 0x0010;
         private const uint SWP_SHOWWINDOW = 0x0040;
+        private const uint WM_CANCELMODE = 0x001F;
 
         private delegate bool EnumWindowsProc(IntPtr window, IntPtr parameter);
 
@@ -170,6 +228,12 @@ namespace CogentSpec {
             public uint flags;
             public uint time;
             public UIntPtr extraInfo;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct CursorPoint {
+            public int X;
+            public int Y;
         }
 
         [DllImport("user32.dll", SetLastError = true)]
@@ -219,6 +283,15 @@ namespace CogentSpec {
 
         [DllImport("user32.dll")]
         private static extern bool SetWindowPos(IntPtr window, IntPtr insertAfter, int x, int y, int width, int height, uint flags);
+
+        [DllImport("user32.dll")]
+        private static extern bool PostMessage(IntPtr window, uint message, IntPtr wParam, IntPtr lParam);
+
+        [DllImport("user32.dll")]
+        private static extern bool GetCursorPos(out CursorPoint point);
+
+        [DllImport("user32.dll")]
+        private static extern bool SetCursorPos(int x, int y);
 
         private static INPUT Key(ushort virtualKey, uint flags) {
             return new INPUT {
@@ -303,6 +376,20 @@ namespace CogentSpec {
             uint flags = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE;
             IntPtr position = enabled ? HWND_TOPMOST : HWND_NOTOPMOST;
             return SetWindowPos(window, position, 0, 0, 0, 0, flags) && IsTopmost(window) == enabled;
+        }
+
+        public static bool CancelPopupInteraction(IntPtr window) {
+            return window != IntPtr.Zero && PostMessage(window, WM_CANCELMODE, IntPtr.Zero, IntPtr.Zero);
+        }
+
+        public static CursorPoint GetCursorPosition() {
+            CursorPoint point;
+            if (!GetCursorPos(out point)) throw new InvalidOperationException("Windows did not expose the current pointer position.");
+            return point;
+        }
+
+        public static bool SetCursorPosition(int x, int y) {
+            return SetCursorPos(x, y);
         }
 
         public static bool ActivatePopupWindow(IntPtr window) {
@@ -463,7 +550,45 @@ if (-not $activatedExisting) {
     $restoredHidden = ($null -ne $popupWasVisible -and -not $popupWasVisible)
 }
 
+$interaction = Reset-ChatGptPopupInteraction -PopupWindow $popupWindow
+if (-not $interaction.reset) {
+    Write-Failure -Status ([string]$interaction.status) -Reason ([string]$interaction.reason) -Opened $true
+    return
+}
+$dismissHoverCleared = [bool]$interaction.dismissHoverCleared
+$topmostCycleReset = $false
+$topmostRestored = $true
+
 $composer = Set-ChatGptComposerText -PopupWindow $popupWindow -Text '$cogentspec'
+if (-not $composer.preloaded -and [string]$composer.status -eq 'preload_failed' -and
+    [string]$composer.reason -eq 'ChatGPT did not give keyboard focus to the popout composer.' -and
+    [CogentSpec.ChatGptPopupNative]::IsTopmost($popupWindow)) {
+    if (-not [CogentSpec.ChatGptPopupNative]::SetPopupTopmost($popupWindow, $false)) {
+        Write-Failure -Status 'popup_interaction_recovery_failed' -Reason 'Windows did not release the pinned ChatGPT popout for interaction recovery.' -Opened $true
+        return
+    }
+    $topmostCycleReset = $true
+    Start-Sleep -Milliseconds 100
+
+    $recoveryInteraction = Reset-ChatGptPopupInteraction -PopupWindow $popupWindow
+    $dismissHoverCleared = $dismissHoverCleared -or [bool]$recoveryInteraction.dismissHoverCleared
+    if ($recoveryInteraction.reset) {
+        $composer = Set-ChatGptComposerText -PopupWindow $popupWindow -Text '$cogentspec'
+    }
+
+    $topmostRestored = [CogentSpec.ChatGptPopupNative]::SetPopupTopmost($popupWindow, $true)
+    if (-not $topmostRestored) {
+        Write-Failure -Status 'popup_interaction_recovery_failed' -Reason 'CogentSpec recovered the ChatGPT popout but Windows did not restore its pinned state.' -Opened $true
+        return
+    }
+    if (-not $recoveryInteraction.reset) {
+        Write-Failure -Status ([string]$recoveryInteraction.status) -Reason ([string]$recoveryInteraction.reason) -Opened $true
+        return
+    }
+    if ($composer.preloaded) {
+        $composer = Set-ChatGptComposerText -PopupWindow $popupWindow -Text '$cogentspec'
+    }
+}
 if (-not $composer.preloaded) {
     $reason = if ([string]$composer.status -eq 'draft_exists') {
         'ChatGPT already contains text in the composer. CogentSpec left that draft unchanged.'
@@ -490,8 +615,13 @@ Write-CompactJson ([ordered]@{
     restoredHidden = $restoredHidden
     popupVerified = $true
     foregroundVerified = [CogentSpec.ChatGptPopupNative]::IsForeground($popupWindow)
+    interactionReset = [bool]$interaction.reset
+    dismissHoverCleared = $dismissHoverCleared
+    topmostCycleReset = $topmostCycleReset
+    topmostRestored = $topmostRestored
     composerPreloaded = $true
     composerAlreadyPreloaded = [bool]$composer.alreadyPreloaded
+    composerFocused = [bool]$composer.focused
     composerText = '$cogentspec'
     shortcut = 'Ctrl+Shift+Space'
 })
