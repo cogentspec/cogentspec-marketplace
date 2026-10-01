@@ -53,6 +53,10 @@ function Set-ChatGptComposerText([IntPtr]$PopupWindow, [string]$Text) {
         if ($valuePattern.Current.IsReadOnly) { throw 'The ChatGPT composer is read-only.' }
 
         $currentValue = [string]$valuePattern.Current.Value
+        $placeholderValue = $currentValue.TrimEnd("`r", "`n")
+        if ($placeholderValue -ceq [string]$composer.Current.Name) {
+            $currentValue = ''
+        }
         if ($currentValue -eq $Text) {
             return [ordered]@{ status = 'preloaded'; preloaded = $true; alreadyPreloaded = $true }
         }
