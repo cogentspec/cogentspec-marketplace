@@ -160,6 +160,8 @@ Start-Sleep -Seconds 30
     Assert-BridgeLauncherTest ($popupHelperText.Contains('$valuePattern.SetValue($Text)')) 'The ChatGPT popout helper does not preload the exact requested command.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains('$placeholderValue = $currentValue.TrimEnd("`r", "`n")')) "The ChatGPT popout helper does not recognize Chromium's empty-composer placeholder value."
     Assert-BridgeLauncherTest ($popupHelperText.Contains('$placeholderValue -ceq [string]$composer.Current.Name')) 'The ChatGPT popout helper does not bind its empty-composer check to the verified accessible name.'
+    Assert-BridgeLauncherTest ($popupHelperText.Contains('function Invoke-PopupActivation')) 'The ChatGPT popout helper does not absorb transient Windows foreground-lock failures within one click.'
+    Assert-BridgeLauncherTest ($popupHelperText.Contains('[DateTime]::UtcNow.AddSeconds(1)')) 'The ChatGPT popout activation retry is not bounded.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains("ChatGPT already contains text in the composer. CogentSpec left that draft unchanged.")) 'The ChatGPT popout helper can overwrite an existing draft.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains('composerPreloaded = $true')) 'The ChatGPT popout helper does not verify the preloaded composer.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains("composerText = '`$cogentspec'")) 'The ChatGPT popout helper does not report the exact CogentSpec command.'

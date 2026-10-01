@@ -81,6 +81,15 @@ function Set-ChatGptComposerText([IntPtr]$PopupWindow, [string]$Text) {
     }
 }
 
+function Invoke-PopupActivation([IntPtr]$PopupWindow) {
+    $deadline = [DateTime]::UtcNow.AddSeconds(1)
+    do {
+        if ([CogentSpec.ChatGptPopupNative]::ActivatePopupWindow($PopupWindow)) { return $true }
+        Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $deadline)
+    return $false
+}
+
 $chatGptProcesses = @(Get-Process -Name 'ChatGPT' -ErrorAction SilentlyContinue | Where-Object {
     try { [IO.Path]::GetFileName([string]$_.Path) -eq 'ChatGPT.exe' } catch { $false }
 })
@@ -349,7 +358,7 @@ if ($Mode -eq 'inspect') {
 
 if ($popupWindow -ne [IntPtr]::Zero) {
     $popupWasVisible = [CogentSpec.ChatGptPopupNative]::IsVisible($popupWindow)
-    if ($popupWasVisible -and -not [CogentSpec.ChatGptPopupNative]::ActivatePopupWindow($popupWindow)) {
+    if ($popupWasVisible -and -not (Invoke-PopupActivation -PopupWindow $popupWindow)) {
         Write-Failure -Status 'popup_activation_failed' -Reason 'CogentSpec found the ChatGPT popout but could not bring it forward. Press Ctrl + Shift + Space.'
         return
     }
@@ -372,7 +381,7 @@ if (-not $activatedExisting) {
         $popupVisible = [CogentSpec.ChatGptPopupNative]::IsVisible($popupWindow)
     } while (($popupWindow -eq [IntPtr]::Zero -or -not $popupVisible) -and [DateTime]::UtcNow -lt $popupDeadline)
 
-    if ($popupWindow -eq [IntPtr]::Zero -or -not $popupVisible -or -not [CogentSpec.ChatGptPopupNative]::ActivatePopupWindow($popupWindow)) {
+    if ($popupWindow -eq [IntPtr]::Zero -or -not $popupVisible -or -not (Invoke-PopupActivation -PopupWindow $popupWindow)) {
         Write-Failure -Status 'popup_not_opened' -Reason 'CogentSpec sent the popout shortcut, but ChatGPT did not expose a popout window. Press Ctrl + Shift + Space.'
         return
     }
