@@ -115,6 +115,7 @@ if ([string]$signature.Status -ne 'Valid' -or $signerSubject -notmatch '(?i)\bO=
 if ($null -eq ('CogentSpec.ChatGptPopupNative' -as [type])) {
     Add-Type -TypeDefinition @'
 using System;
+using System.Collections.Generic;
 using System.Text;
 using System.Runtime.InteropServices;
 
@@ -129,6 +130,7 @@ namespace CogentSpec {
         private const long WS_EX_TOPMOST = 0x00000008L;
         private const long WS_EX_TOOLWINDOW = 0x00000080L;
         private const long WS_EX_LAYERED = 0x00080000L;
+        private const int SW_SHOW = 5;
         private const int SW_RESTORE = 9;
         private static readonly IntPtr HWND_TOPMOST = new IntPtr(-1);
         private static readonly IntPtr HWND_NOTOPMOST = new IntPtr(-2);
@@ -245,8 +247,8 @@ namespace CogentSpec {
             return SendInput((uint)inputs.Length, inputs, Marshal.SizeOf(typeof(INPUT))) == inputs.Length;
         }
 
-        public static IntPtr FindPopupWindow(int[] processIds) {
-            IntPtr popupWindow = IntPtr.Zero;
+        public static IntPtr[] FindPopupWindows(int[] processIds) {
+            List<IntPtr> popupWindows = new List<IntPtr>();
             EnumWindows(delegate(IntPtr window, IntPtr parameter) {
                 uint processId;
                 GetWindowThreadProcessId(window, out processId);
@@ -272,10 +274,10 @@ namespace CogentSpec {
                     && (extendedStyle & WS_EX_LAYERED) == 0;
                 if (!isPopupToolWindow) return true;
 
-                popupWindow = window;
-                return false;
+                popupWindows.Add(window);
+                return true;
             }, IntPtr.Zero);
-            return popupWindow;
+            return popupWindows.ToArray();
         }
 
         public static bool IsVisible(IntPtr window) {
@@ -290,9 +292,15 @@ namespace CogentSpec {
             return window != IntPtr.Zero && (GetWindowLongPtr(window, GWL_EXSTYLE).ToInt64() & WS_EX_TOPMOST) != 0;
         }
 
+        public static bool RevealPopupWindow(IntPtr window) {
+            if (window == IntPtr.Zero) return false;
+            if (IsWindowVisible(window)) return true;
+            return ShowWindowAsync(window, IsIconic(window) ? SW_RESTORE : SW_SHOW);
+        }
+
         public static bool SetPopupTopmost(IntPtr window, bool enabled) {
-            if (window == IntPtr.Zero || !IsWindowVisible(window)) return false;
-            uint flags = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW;
+            if (window == IntPtr.Zero) return false;
+            uint flags = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE;
             IntPtr position = enabled ? HWND_TOPMOST : HWND_NOTOPMOST;
             return SetWindowPos(window, position, 0, 0, 0, 0, flags) && IsTopmost(window) == enabled;
         }
@@ -347,8 +355,27 @@ namespace CogentSpec {
 '@
 }
 
+function Find-VerifiedChatGptPopupWindow([int[]]$ProcessIds) {
+    Add-Type -AssemblyName UIAutomationClient -ErrorAction Stop
+    $editCondition = [System.Windows.Automation.PropertyCondition]::new(
+        [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+        [System.Windows.Automation.ControlType]::Edit
+    )
+    $verified = @([CogentSpec.ChatGptPopupNative]::FindPopupWindows($ProcessIds) | Where-Object {
+        try {
+            $root = [System.Windows.Automation.AutomationElement]::FromHandle($_)
+            $matches = @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $editCondition) | Where-Object {
+                [string]$_.Current.Name -eq 'Work with ChatGPT'
+            })
+            $matches.Count -eq 1
+        } catch { $false }
+    })
+    if ($verified.Count -eq 1) { return [IntPtr]$verified[0] }
+    return [IntPtr]::Zero
+}
+
 $chatGptProcessIds = [int[]]@($chatGptProcesses | ForEach-Object { [int]$_.Id })
-$popupWindow = [CogentSpec.ChatGptPopupNative]::FindPopupWindow($chatGptProcessIds)
+$popupWindow = Find-VerifiedChatGptPopupWindow -ProcessIds $chatGptProcessIds
 $popupWasVisible = $null
 $shortcutSent = $false
 $activatedExisting = $false
@@ -370,7 +397,7 @@ if ($Mode -eq 'inspect') {
 }
 
 if ($Mode -in @('pin', 'unpin')) {
-    if ($popupWindow -eq [IntPtr]::Zero -or -not [CogentSpec.ChatGptPopupNative]::IsVisible($popupWindow)) {
+    if ($popupWindow -eq [IntPtr]::Zero) {
         Write-Failure -Status 'popup_not_open' -Reason 'Open the ChatGPT popout, then try the pin again.'
         return
     }
@@ -392,11 +419,19 @@ if ($Mode -in @('pin', 'unpin')) {
 
 if ($popupWindow -ne [IntPtr]::Zero) {
     $popupWasVisible = [CogentSpec.ChatGptPopupNative]::IsVisible($popupWindow)
-    if ($popupWasVisible -and -not (Invoke-PopupActivation -PopupWindow $popupWindow)) {
+    if (-not $popupWasVisible) {
+        [void][CogentSpec.ChatGptPopupNative]::RevealPopupWindow($popupWindow)
+        $revealDeadline = [DateTime]::UtcNow.AddSeconds(2)
+        do {
+            Start-Sleep -Milliseconds 100
+        } while (-not [CogentSpec.ChatGptPopupNative]::IsVisible($popupWindow) -and [DateTime]::UtcNow -lt $revealDeadline)
+        $restoredHidden = [CogentSpec.ChatGptPopupNative]::IsVisible($popupWindow)
+    }
+    if ([CogentSpec.ChatGptPopupNative]::IsVisible($popupWindow) -and -not (Invoke-PopupActivation -PopupWindow $popupWindow)) {
         Write-Failure -Status 'popup_activation_failed' -Reason 'CogentSpec found the ChatGPT popout but could not bring it forward. Press Ctrl + Shift + Space.'
         return
     }
-    if ($popupWasVisible) {
+    if ([CogentSpec.ChatGptPopupNative]::IsVisible($popupWindow)) {
         $activatedExisting = $true
     }
 }
@@ -411,7 +446,7 @@ if (-not $activatedExisting) {
     $popupDeadline = [DateTime]::UtcNow.AddSeconds(3)
     do {
         Start-Sleep -Milliseconds 100
-        $popupWindow = [CogentSpec.ChatGptPopupNative]::FindPopupWindow($chatGptProcessIds)
+        $popupWindow = Find-VerifiedChatGptPopupWindow -ProcessIds $chatGptProcessIds
         $popupVisible = [CogentSpec.ChatGptPopupNative]::IsVisible($popupWindow)
     } while (($popupWindow -eq [IntPtr]::Zero -or -not $popupVisible) -and [DateTime]::UtcNow -lt $popupDeadline)
 

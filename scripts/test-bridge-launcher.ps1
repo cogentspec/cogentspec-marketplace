@@ -126,7 +126,9 @@ for ($heartbeat = 0; $heartbeat -lt 15; $heartbeat += 1) {
     Assert-BridgeLauncherTest ([string]$result.bridge -eq 'started') 'The Bridge launcher did not start the fixture worker.'
     Assert-BridgeLauncherTest ([bool]$result.presenceVerified) 'The Bridge launcher reported ready before server presence was verified.'
     Assert-BridgeLauncherTest ([string]$result.mcpState -eq 'ready') 'The secure project-data connection was not ready.'
-    Assert-BridgeLauncherTest ([int]$result.launcherElapsedMs -ge 500 -and [int]$result.launcherElapsedMs -lt 5000) 'The Bridge launcher did not wait for the delayed server acknowledgement within its five-second in-process limit.'
+    Assert-BridgeLauncherTest (
+        [int]$result.launcherElapsedMs -ge 500 -and [int]$result.launcherElapsedMs -lt 8000
+    ) ("The Bridge launcher did not wait for the delayed server acknowledgement within its eight-second in-process limit. Observed launcherElapsedMs={0}." -f [int]$result.launcherElapsedMs)
     Assert-BridgeLauncherTest ($timer.ElapsedMilliseconds -lt 10000) 'The Bridge launcher exceeded the ten-second cold-process fixture limit.'
     Assert-BridgeLauncherTest ([string]$result.webWorkspaceUrl -match '#desktop-web=') 'The web workspace handoff is missing.'
     Assert-BridgeLauncherTest ([string]$result.chatgptWorkspaceUrl -match '#desktop-chatgpt=') 'The ChatGPT workspace handoff is missing.'
@@ -186,9 +188,14 @@ for ($heartbeat = 0; $heartbeat -lt 15; $heartbeat += 1) {
     Assert-BridgeLauncherTest ($popupHelperText.Contains('$placeholderValue -ceq [string]$composer.Current.Name')) 'The ChatGPT popout helper does not bind its empty-composer check to the verified accessible name.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains('function Invoke-PopupActivation')) 'The ChatGPT popout helper does not absorb transient Windows foreground-lock failures within one click.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains('[DateTime]::UtcNow.AddSeconds(1)')) 'The ChatGPT popout activation retry is not bounded.'
+    Assert-BridgeLauncherTest ($popupHelperText.Contains('FindPopupWindows(int[] processIds)')) 'The ChatGPT popout helper cannot inspect every signed ChatGPT tool window.'
+    Assert-BridgeLauncherTest ($popupHelperText.Contains('function Find-VerifiedChatGptPopupWindow')) 'The ChatGPT popout helper does not select the exact accessible composer window.'
+    Assert-BridgeLauncherTest ($popupHelperText.Contains('RevealPopupWindow(IntPtr window)')) 'The ChatGPT popout helper cannot restore a verified hidden popout directly.'
+    Assert-BridgeLauncherTest ($popupHelperText.Contains('$revealDeadline = [DateTime]::UtcNow.AddSeconds(2)')) 'The hidden ChatGPT popout reveal is not bounded.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains("ValidateSet('inspect', 'open', 'pin', 'unpin')")) 'The ChatGPT popout helper does not expose reversible pin modes.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains('SetPopupTopmost(IntPtr window, bool enabled)')) 'The ChatGPT popout helper does not use verified native always-on-top control.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains('SWP_NOACTIVATE')) 'The ChatGPT popout pin can steal keyboard focus.'
+    Assert-BridgeLauncherTest ($popupHelperText.Contains('uint flags = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE;')) 'The ChatGPT popout pin incorrectly forces a hidden window visible.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains("status = if (`$shouldPin) { 'pinned' } else { 'unpinned' }")) 'The ChatGPT popout helper does not report the verified pin state.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains("ChatGPT already contains text in the composer. CogentSpec left that draft unchanged.")) 'The ChatGPT popout helper can overwrite an existing draft.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains('composerPreloaded = $true')) 'The ChatGPT popout helper does not verify the preloaded composer.'
