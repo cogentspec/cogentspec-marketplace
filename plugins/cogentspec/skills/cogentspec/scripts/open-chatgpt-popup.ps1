@@ -437,18 +437,24 @@ if ($popupWindow -ne [IntPtr]::Zero) {
 }
 
 if (-not $activatedExisting) {
-    if (-not [CogentSpec.ChatGptPopupNative]::SendControlShiftSpace()) {
-        Write-Failure -Status 'shortcut_failed' -Reason 'CogentSpec could not send the popout shortcut. Press Ctrl + Shift + Space.'
-        return
-    }
-    $shortcutSent = $true
+    $shortcutAttempts = 0
+    for ($attempt = 1; $attempt -le 2; $attempt++) {
+        if (-not [CogentSpec.ChatGptPopupNative]::SendControlShiftSpace()) {
+            Write-Failure -Status 'shortcut_failed' -Reason 'CogentSpec could not send the popout shortcut. Press Ctrl + Shift + Space.'
+            return
+        }
+        $shortcutSent = $true
+        $shortcutAttempts = $attempt
 
-    $popupDeadline = [DateTime]::UtcNow.AddSeconds(3)
-    do {
-        Start-Sleep -Milliseconds 100
-        $popupWindow = Find-VerifiedChatGptPopupWindow -ProcessIds $chatGptProcessIds
-        $popupVisible = [CogentSpec.ChatGptPopupNative]::IsVisible($popupWindow)
-    } while (($popupWindow -eq [IntPtr]::Zero -or -not $popupVisible) -and [DateTime]::UtcNow -lt $popupDeadline)
+        $popupDeadline = [DateTime]::UtcNow.AddSeconds(3)
+        do {
+            Start-Sleep -Milliseconds 100
+            $popupWindow = Find-VerifiedChatGptPopupWindow -ProcessIds $chatGptProcessIds
+            $popupVisible = [CogentSpec.ChatGptPopupNative]::IsVisible($popupWindow)
+        } while (($popupWindow -eq [IntPtr]::Zero -or -not $popupVisible) -and [DateTime]::UtcNow -lt $popupDeadline)
+
+        if ($popupWindow -ne [IntPtr]::Zero -and $popupVisible) { break }
+    }
 
     if ($popupWindow -eq [IntPtr]::Zero -or -not $popupVisible -or -not (Invoke-PopupActivation -PopupWindow $popupWindow)) {
         Write-Failure -Status 'popup_not_opened' -Reason 'CogentSpec sent the popout shortcut, but ChatGPT did not expose a popout window. Press Ctrl + Shift + Space.'
@@ -474,6 +480,7 @@ Write-CompactJson ([ordered]@{
     processId = [int]$chatGpt.Id
     publisherVerified = $true
     shortcutSent = $shortcutSent
+    shortcutAttempts = $shortcutAttempts
     activatedExisting = $activatedExisting
     restoredHidden = $restoredHidden
     popupVerified = $true

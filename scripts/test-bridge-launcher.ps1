@@ -200,6 +200,8 @@ for ($heartbeat = 0; $heartbeat -lt 15; $heartbeat += 1) {
     Assert-BridgeLauncherTest ($popupHelperText.Contains("ChatGPT already contains text in the composer. CogentSpec left that draft unchanged.")) 'The ChatGPT popout helper can overwrite an existing draft.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains('composerPreloaded = $true')) 'The ChatGPT popout helper does not verify the preloaded composer.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains("composerText = '`$cogentspec'")) 'The ChatGPT popout helper does not report the exact CogentSpec command.'
+    Assert-BridgeLauncherTest ($popupHelperText.Contains('for ($attempt = 1; $attempt -le 2; $attempt++)')) 'The ChatGPT popout helper does not make one bounded retry when the host only foregrounds itself on the first shortcut.'
+    Assert-BridgeLauncherTest ($popupHelperText.Contains('shortcutAttempts = $shortcutAttempts')) 'The ChatGPT popout helper does not report how many shortcut attempts were required.'
     Assert-BridgeLauncherTest (-not $popupHelperText.Contains('VK_RETURN')) 'The ChatGPT popout helper must not submit the preloaded command.'
     $popupParityPaths = @(
         'plugins\cogentstack\skills\cogentstack\scripts\open-chatgpt-popup.ps1',
