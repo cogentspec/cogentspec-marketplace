@@ -182,8 +182,8 @@ for ($heartbeat = 0; $heartbeat -lt 15; $heartbeat += 1) {
     $popupHelperText = Get-Content -Raw -LiteralPath (Join-Path $repositoryRoot 'plugins\cogentspec\skills\cogentspec\scripts\open-chatgpt-popup.ps1')
     Assert-BridgeLauncherTest ($popupHelperText.Contains('Add-Type -AssemblyName UIAutomationClient')) 'The ChatGPT popout helper does not use the accessible composer surface.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains("[string]`$_.Current.Name -eq 'Work with ChatGPT'")) 'The ChatGPT popout helper does not require the exact composer identity.'
-    Assert-BridgeLauncherTest ($popupHelperText.Contains('[System.Windows.Automation.ValuePattern]::Pattern')) 'The ChatGPT popout helper does not require safe value input.'
-    Assert-BridgeLauncherTest ($popupHelperText.Contains('$valuePattern.SetValue($Text)')) 'The ChatGPT popout helper does not preload the exact requested command.'
+    Assert-BridgeLauncherTest ($popupHelperText.Contains('[System.Windows.Automation.ValuePattern]::Pattern')) 'The ChatGPT popout helper does not inspect whether an existing draft must be preserved.'
+    Assert-BridgeLauncherTest (-not $popupHelperText.Contains('$valuePattern.SetValue(')) 'The ChatGPT popout helper can still insert text into the composer.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains('$placeholderValue = $currentValue.TrimEnd("`r", "`n")')) "The ChatGPT popout helper does not recognize Chromium's empty-composer placeholder value."
     Assert-BridgeLauncherTest ($popupHelperText.Contains('$placeholderValue -ceq [string]$composer.Current.Name')) 'The ChatGPT popout helper does not bind its empty-composer check to the verified accessible name.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains('function Invoke-PopupActivation')) 'The ChatGPT popout helper does not absorb transient Windows foreground-lock failures within one click.'
@@ -198,22 +198,23 @@ for ($heartbeat = 0; $heartbeat -lt 15; $heartbeat += 1) {
     Assert-BridgeLauncherTest ($popupHelperText.Contains('SWP_NOACTIVATE')) 'The ChatGPT popout pin can steal keyboard focus.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains('uint flags = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE;')) 'The ChatGPT popout pin incorrectly forces a hidden window visible.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains("status = if (`$shouldPin) { 'pinned' } else { 'unpinned' }")) 'The ChatGPT popout helper does not report the verified pin state.'
-    Assert-BridgeLauncherTest ($popupHelperText.Contains("ChatGPT already contains text in the composer. CogentSpec left that draft unchanged.")) 'The ChatGPT popout helper can overwrite an existing draft.'
-    Assert-BridgeLauncherTest ($popupHelperText.Contains('composerPreloaded = $true')) 'The ChatGPT popout helper does not verify the preloaded composer.'
-    Assert-BridgeLauncherTest ($popupHelperText.Contains("composerText = '`$cogentspec'")) 'The ChatGPT popout helper does not report the exact CogentSpec command.'
+    Assert-BridgeLauncherTest ($popupHelperText.Contains('draftPreserved = $draftPresent')) 'The ChatGPT popout helper does not report that an existing draft was preserved.'
+    Assert-BridgeLauncherTest ($popupHelperText.Contains('composerPreloaded = $false')) 'The ChatGPT popout helper does not explicitly report that no command was preloaded.'
+    Assert-BridgeLauncherTest ($popupHelperText.Contains('composerDraftPreserved = [bool]$composer.draftPreserved')) 'The ChatGPT popout helper does not expose its non-destructive draft result.'
+    Assert-BridgeLauncherTest (-not $popupHelperText.Contains("composerText = '`$cogentspec'")) 'The ChatGPT popout helper still advertises a preloaded CogentSpec command.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains('for ($attempt = 1; $attempt -le 2; $attempt++)')) 'The ChatGPT popout helper does not make one bounded retry when the host only foregrounds itself on the first shortcut.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains('shortcutAttempts = $shortcutAttempts')) 'The ChatGPT popout helper does not report how many shortcut attempts were required.'
     Assert-BridgeLauncherTest ($popupHelperText.IndexOf('$shortcutAttempts = 0') -lt $popupHelperText.IndexOf("if (`$Mode -eq 'inspect')")) 'The ChatGPT popout helper does not initialize its shortcut-attempt result for an already-open popout.'
-    $composerPreloadIndex = $popupHelperText.IndexOf('$composer = Set-ChatGptComposerText')
-    Assert-BridgeLauncherTest ($composerPreloadIndex -ge 0 -and $popupHelperText.IndexOf('Invoke-PopupActivation -PopupWindow $popupWindow', $composerPreloadIndex) -gt $composerPreloadIndex) 'The ChatGPT popout helper does not restore verified foreground activation after preloading the composer.'
-    Assert-BridgeLauncherTest ($popupHelperText.Contains('Set-ChatGptComposerFocus -Composer $composer')) 'The ChatGPT popout helper does not restore keyboard focus when the command is already preloaded.'
+    $composerFocusIndex = $popupHelperText.IndexOf('$composer = Focus-ChatGptComposer')
+    Assert-BridgeLauncherTest ($composerFocusIndex -ge 0 -and $popupHelperText.IndexOf('Invoke-PopupActivation -PopupWindow $popupWindow', $composerFocusIndex) -gt $composerFocusIndex) 'The ChatGPT popout helper does not restore verified foreground activation after focusing the composer.'
+    Assert-BridgeLauncherTest ($popupHelperText.Contains('Set-ChatGptComposerFocus -Composer $composer')) 'The ChatGPT popout helper does not give keyboard focus to the empty or existing composer.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains('[System.Windows.Automation.AutomationElement]::NameProperty') -and $popupHelperText.Contains("'Dismiss Popout Window'")) 'The ChatGPT popout helper does not identify the exact host dismiss control before clearing its stale hover.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains('CancelPopupInteraction(IntPtr window)')) 'The ChatGPT popout helper does not release the host interaction state after an X-button hide.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains("SetPopupTopmost(`$popupWindow, `$false)")) 'The ChatGPT popout helper does not temporarily release a frozen pinned window.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains("SetPopupTopmost(`$popupWindow, `$true)")) 'The ChatGPT popout helper does not restore the requested pinned state after interaction recovery.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains('topmostCycleReset = $topmostCycleReset')) 'The ChatGPT popout helper does not report pinned-window recovery.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains('composerFocused = [bool]$composer.focused')) 'The ChatGPT popout helper does not report verified composer focus.'
-    Assert-BridgeLauncherTest (-not $popupHelperText.Contains('VK_RETURN')) 'The ChatGPT popout helper must not submit the preloaded command.'
+    Assert-BridgeLauncherTest (-not $popupHelperText.Contains('VK_RETURN')) 'The ChatGPT popout helper must not submit composer text.'
     $popupParityPaths = @(
         'plugins\cogentstack\skills\cogentstack\scripts\open-chatgpt-popup.ps1',
         'claude-plugins\cogentspec\skills\cogentspec\scripts\open-chatgpt-popup.ps1',
@@ -224,7 +225,8 @@ for ($heartbeat = 0; $heartbeat -lt 15; $heartbeat += 1) {
         Assert-BridgeLauncherTest ($candidateText -ceq $popupHelperText) "The ChatGPT popout helper is inconsistent at $relativePath."
     }
     $watcherText = Get-Content -Raw -LiteralPath (Join-Path $repositoryRoot 'plugins\cogentspec\skills\cogentspec\scripts\watch-cogentstack-bridge.ps1')
-    Assert-BridgeLauncherTest ($watcherText.Contains("ChatGPT popout shown with `$cogentspec ready in the composer")) 'The Bridge does not report the preloaded ChatGPT composer.'
+    Assert-BridgeLauncherTest ($watcherText.Contains('ChatGPT popout shown with its composer ready')) 'The Bridge does not report the ready ChatGPT composer.'
+    Assert-BridgeLauncherTest (-not $watcherText.Contains('ready in the composer')) 'The Bridge still reports the removed CogentSpec command preload.'
     Assert-BridgeLauncherTest ($watcherText.Contains("'set_chatgpt_popup_topmost' { 'open-chatgpt-popup.ps1' }")) 'The Bridge does not route ChatGPT popout pin requests through the verified helper.'
     Assert-BridgeLauncherTest ($watcherText.Contains("'chatgpt-desktop-popup:pinned' { 'pin' }")) 'The Bridge does not validate the ChatGPT popout pin target.'
     Assert-BridgeLauncherTest ($watcherText.Contains("'chatgpt-desktop-popup:unpinned' { 'unpin' }")) 'The Bridge does not validate the ChatGPT popout unpin target.'

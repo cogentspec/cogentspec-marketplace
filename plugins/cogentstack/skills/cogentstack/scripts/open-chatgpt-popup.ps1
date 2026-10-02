@@ -30,7 +30,7 @@ function Set-ChatGptComposerFocus($Composer) {
     throw 'ChatGPT did not give keyboard focus to the popout composer.'
 }
 
-function Set-ChatGptComposerText([IntPtr]$PopupWindow, [string]$Text) {
+function Focus-ChatGptComposer([IntPtr]$PopupWindow) {
     try {
         Add-Type -AssemblyName UIAutomationClient -ErrorAction Stop
         $root = [System.Windows.Automation.AutomationElement]::FromHandle($PopupWindow)
@@ -55,39 +55,24 @@ function Set-ChatGptComposerText([IntPtr]$PopupWindow, [string]$Text) {
             throw 'The ChatGPT composer is not ready for input.'
         }
 
+        Set-ChatGptComposerFocus -Composer $composer
+        $draftPresent = $false
         $patternObject = $null
-        if (-not $composer.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$patternObject)) {
-            throw 'The ChatGPT composer does not expose safe text input.'
+        if ($composer.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$patternObject)) {
+            $valuePattern = [System.Windows.Automation.ValuePattern]$patternObject
+            $currentValue = [string]$valuePattern.Current.Value
+            $placeholderValue = $currentValue.TrimEnd("`r", "`n")
+            if ($placeholderValue -ceq [string]$composer.Current.Name) {
+                $currentValue = ''
+            }
+            $draftPresent = -not [string]::IsNullOrWhiteSpace($currentValue)
         }
-        $valuePattern = [System.Windows.Automation.ValuePattern]$patternObject
-        if ($valuePattern.Current.IsReadOnly) { throw 'The ChatGPT composer is read-only.' }
-
-        $currentValue = [string]$valuePattern.Current.Value
-        $placeholderValue = $currentValue.TrimEnd("`r", "`n")
-        if ($placeholderValue -ceq [string]$composer.Current.Name) {
-            $currentValue = ''
-        }
-        if ($currentValue -eq $Text) {
-            Set-ChatGptComposerFocus -Composer $composer
-            return [ordered]@{ status = 'preloaded'; preloaded = $true; alreadyPreloaded = $true; focused = $true }
-        }
-        if (-not [string]::IsNullOrWhiteSpace($currentValue)) {
-            return [ordered]@{ status = 'draft_exists'; preloaded = $false; alreadyPreloaded = $false }
-        }
-
-        Set-ChatGptComposerFocus -Composer $composer
-        $valuePattern.SetValue($Text)
-        Start-Sleep -Milliseconds 100
-        if ([string]$valuePattern.Current.Value -ne $Text) {
-            throw 'ChatGPT did not retain the preloaded CogentSpec command.'
-        }
-        Set-ChatGptComposerFocus -Composer $composer
-        return [ordered]@{ status = 'preloaded'; preloaded = $true; alreadyPreloaded = $false; focused = $true }
+        return [ordered]@{ status = 'focused'; focused = $true; draftPreserved = $draftPresent }
     } catch {
         return [ordered]@{
-            status = 'preload_failed'
-            preloaded = $false
-            alreadyPreloaded = $false
+            status = 'focus_failed'
+            focused = $false
+            draftPreserved = $false
             reason = $_.Exception.Message
         }
     }
@@ -544,8 +529,8 @@ $dismissHoverCleared = [bool]$interaction.dismissHoverCleared
 $topmostCycleReset = $false
 $topmostRestored = $true
 
-$composer = Set-ChatGptComposerText -PopupWindow $popupWindow -Text '$cogentspec'
-if (-not $composer.preloaded -and [string]$composer.status -eq 'preload_failed' -and
+$composer = Focus-ChatGptComposer -PopupWindow $popupWindow
+if (-not $composer.focused -and [string]$composer.status -eq 'focus_failed' -and
     [string]$composer.reason -eq 'ChatGPT did not give keyboard focus to the popout composer.' -and
     [CogentSpec.ChatGptPopupNative]::IsTopmost($popupWindow)) {
     if (-not [CogentSpec.ChatGptPopupNative]::SetPopupTopmost($popupWindow, $false)) {
@@ -558,7 +543,7 @@ if (-not $composer.preloaded -and [string]$composer.status -eq 'preload_failed' 
     $recoveryInteraction = Reset-ChatGptPopupInteraction -PopupWindow $popupWindow
     $dismissHoverCleared = $dismissHoverCleared -or [bool]$recoveryInteraction.dismissHoverCleared
     if ($recoveryInteraction.reset) {
-        $composer = Set-ChatGptComposerText -PopupWindow $popupWindow -Text '$cogentspec'
+        $composer = Focus-ChatGptComposer -PopupWindow $popupWindow
     }
 
     $topmostRestored = [CogentSpec.ChatGptPopupNative]::SetPopupTopmost($popupWindow, $true)
@@ -570,22 +555,14 @@ if (-not $composer.preloaded -and [string]$composer.status -eq 'preload_failed' 
         Write-Failure -Status ([string]$recoveryInteraction.status) -Reason ([string]$recoveryInteraction.reason) -Opened $true
         return
     }
-    if ($composer.preloaded) {
-        $composer = Set-ChatGptComposerText -PopupWindow $popupWindow -Text '$cogentspec'
-    }
 }
-if (-not $composer.preloaded) {
-    $reason = if ([string]$composer.status -eq 'draft_exists') {
-        'ChatGPT already contains text in the composer. CogentSpec left that draft unchanged.'
-    } else {
-        [string]$composer.reason
-    }
-    Write-Failure -Status ([string]$composer.status) -Reason $reason -Opened $true
+if (-not $composer.focused) {
+    Write-Failure -Status ([string]$composer.status) -Reason ([string]$composer.reason) -Opened $true
     return
 }
 
 if (-not (Invoke-PopupActivation -PopupWindow $popupWindow)) {
-    Write-Failure -Status 'popup_activation_failed' -Reason 'CogentSpec prepared the ChatGPT popout but could not make it ready for keyboard input. Click the composer once to continue.' -Opened $true
+    Write-Failure -Status 'popup_activation_failed' -Reason 'CogentSpec opened the ChatGPT popout but could not make it ready for keyboard input. Click the composer once to continue.' -Opened $true
     return
 }
 
@@ -604,9 +581,8 @@ Write-CompactJson ([ordered]@{
     dismissHoverCleared = $dismissHoverCleared
     topmostCycleReset = $topmostCycleReset
     topmostRestored = $topmostRestored
-    composerPreloaded = $true
-    composerAlreadyPreloaded = [bool]$composer.alreadyPreloaded
+    composerPreloaded = $false
     composerFocused = [bool]$composer.focused
-    composerText = '$cogentspec'
+    composerDraftPreserved = [bool]$composer.draftPreserved
     shortcut = 'Ctrl+Shift+Space'
 })

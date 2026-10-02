@@ -183,7 +183,7 @@ try {
                     'create_project' { 'Project foundation created and verified.' }
                     'delete_project' { 'Project, folder, and linked CogentSpec state deleted.' }
                     'preview_project' { "Verified project preview opened at $([string]$result.localUrl)" }
-                    'open_chatgpt_popup' { 'ChatGPT popout shown with $cogentspec ready in the composer after verifying the signed ChatGPT Desktop application.' }
+                    'open_chatgpt_popup' { 'ChatGPT popout shown with its composer ready after verifying the signed ChatGPT Desktop application.' }
                     'set_chatgpt_popup_topmost' {
                         if ([string]$result.status -eq 'pinned') { 'ChatGPT popout pinned above other windows.' } else { 'ChatGPT popout returned to normal window ordering.' }
                     }
