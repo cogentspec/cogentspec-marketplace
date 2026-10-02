@@ -104,7 +104,12 @@ function Invoke-ActionHelper($Request) {
         'create_project' { $arguments += @('-Mode', 'create', '-RequestId', [string]$Request.targetRequestId, '-ContextKey', $ContextKey) }
         'delete_project' { $arguments += @('-Mode', 'delete', '-RequestId', [string]$Request.targetRequestId, '-ContextKey', $ContextKey) }
         'preview_project' { $arguments += @('-Mode', 'generate', '-ContextKey', $ContextKey) }
-        'open_chatgpt_popup' { $arguments += @('-Mode', 'open') }
+        'open_chatgpt_popup' {
+            $arguments += @('-Mode', 'open')
+            if ([string]$Request.targetRequestId -eq 'chatgpt-desktop-popup:update') {
+                $arguments += '-PasteClipboard'
+            }
+        }
         'set_chatgpt_popup_topmost' {
             $pinMode = switch ([string]$Request.targetRequestId) {
                 'chatgpt-desktop-popup:pinned' { 'pin' }
@@ -183,7 +188,13 @@ try {
                     'create_project' { 'Project foundation created and verified.' }
                     'delete_project' { 'Project, folder, and linked CogentSpec state deleted.' }
                     'preview_project' { "Verified project preview opened at $([string]$result.localUrl)" }
-                    'open_chatgpt_popup' { 'ChatGPT popout shown with its composer ready after verifying the signed ChatGPT Desktop application.' }
+                    'open_chatgpt_popup' {
+                        if ($result.PSObject.Properties['composerPopulated'] -and [bool]$result.composerPopulated) {
+                            'ChatGPT popout shown and its verified composer populated with the copied update request.'
+                        } else {
+                            'ChatGPT popout shown with its composer ready after verifying the signed ChatGPT Desktop application.'
+                        }
+                    }
                     'set_chatgpt_popup_topmost' {
                         if ([string]$result.status -eq 'pinned') { 'ChatGPT popout pinned above other windows.' } else { 'ChatGPT popout returned to normal window ordering.' }
                     }

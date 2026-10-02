@@ -1,7 +1,8 @@
 [CmdletBinding()]
 param(
-    [ValidateSet('inspect', 'open', 'pin', 'unpin')]
-    [string]$Mode = 'open'
+    [ValidateSet('inspect', 'open', 'dismiss', 'pin', 'unpin')]
+    [string]$Mode = 'open',
+    [switch]$PasteClipboard
 )
 
 Set-StrictMode -Version Latest
@@ -168,6 +169,8 @@ namespace CogentSpec {
         private const ushort VK_CONTROL = 0x11;
         private const ushort VK_SHIFT = 0x10;
         private const ushort VK_SPACE = 0x20;
+        private const ushort VK_A = 0x41;
+        private const ushort VK_V = 0x56;
         private const int GWL_EXSTYLE = -20;
         private const long WS_EX_TOPMOST = 0x00000008L;
         private const long WS_EX_TOOLWINDOW = 0x00000080L;
@@ -180,6 +183,7 @@ namespace CogentSpec {
         private const uint SWP_NOACTIVATE = 0x0010;
         private const uint SWP_SHOWWINDOW = 0x0040;
         private const uint WM_CANCELMODE = 0x001F;
+        private const uint WM_CLOSE = 0x0010;
 
         private delegate bool EnumWindowsProc(IntPtr window, IntPtr parameter);
 
@@ -304,6 +308,26 @@ namespace CogentSpec {
             return SendInput((uint)inputs.Length, inputs, Marshal.SizeOf(typeof(INPUT))) == inputs.Length;
         }
 
+        public static bool SendControlV() {
+            var inputs = new[] {
+                Key(VK_CONTROL, 0),
+                Key(VK_V, 0),
+                Key(VK_V, KEYEVENTF_KEYUP),
+                Key(VK_CONTROL, KEYEVENTF_KEYUP)
+            };
+            return SendInput((uint)inputs.Length, inputs, Marshal.SizeOf(typeof(INPUT))) == inputs.Length;
+        }
+
+        public static bool SendControlA() {
+            var inputs = new[] {
+                Key(VK_CONTROL, 0),
+                Key(VK_A, 0),
+                Key(VK_A, KEYEVENTF_KEYUP),
+                Key(VK_CONTROL, KEYEVENTF_KEYUP)
+            };
+            return SendInput((uint)inputs.Length, inputs, Marshal.SizeOf(typeof(INPUT))) == inputs.Length;
+        }
+
         public static IntPtr[] FindPopupWindows(int[] processIds) {
             List<IntPtr> popupWindows = new List<IntPtr>();
             EnumWindows(delegate(IntPtr window, IntPtr parameter) {
@@ -358,6 +382,10 @@ namespace CogentSpec {
 
         public static bool CancelPopupInteraction(IntPtr window) {
             return window != IntPtr.Zero && PostMessage(window, WM_CANCELMODE, IntPtr.Zero, IntPtr.Zero);
+        }
+
+        public static bool RequestClosePopup(IntPtr window) {
+            return window != IntPtr.Zero && PostMessage(window, WM_CLOSE, IntPtr.Zero, IntPtr.Zero);
         }
 
         public static CursorPoint GetCursorPosition() {
@@ -439,6 +467,63 @@ function Find-VerifiedChatGptPopupWindow([int[]]$ProcessIds) {
     return [IntPtr]::Zero
 }
 
+function Find-VerifiedChatGptComposer([IntPtr]$Window) {
+    if ($Window -eq [IntPtr]::Zero) { return $null }
+    Add-Type -AssemblyName UIAutomationClient -ErrorAction Stop
+    $root = [System.Windows.Automation.AutomationElement]::FromHandle($Window)
+    $editCondition = [System.Windows.Automation.PropertyCondition]::new(
+        [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+        [System.Windows.Automation.ControlType]::Edit
+    )
+    $matches = @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $editCondition) | Where-Object {
+        [string]$_.Current.Name -eq 'Work with ChatGPT'
+    })
+    if ($matches.Count -eq 1) { return $matches[0] }
+    return $null
+}
+
+function Get-ChatGptComposerText($Composer) {
+    try {
+        $valuePattern = $Composer.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
+        if ($valuePattern) { return [string]$valuePattern.Current.Value }
+    } catch { }
+    try {
+        $textPattern = $Composer.GetCurrentPattern([System.Windows.Automation.TextPattern]::Pattern)
+        if ($textPattern) { return [string]$textPattern.DocumentRange.GetText(-1) }
+    } catch { }
+    return ''
+}
+
+function Set-ChatGptComposerFromClipboard([IntPtr]$Window) {
+    $clipboardText = [string](Get-Clipboard -Raw -ErrorAction Stop)
+    if ([string]::IsNullOrWhiteSpace($clipboardText)) { throw 'The copied update request is no longer available.' }
+    $composerElement = Find-VerifiedChatGptComposer -Window $Window
+    if ($null -eq $composerElement) { throw 'ChatGPT did not expose one verified composer field.' }
+    $existingText = Get-ChatGptComposerText -Composer $composerElement
+    $normalizedExistingText = ($existingText -replace '[\u200B-\u200D\uFEFF]', '').Trim()
+    $knownGeneratedText = $normalizedExistingText -match '^(?:Work with ChatGPT\s*)?\$cogentspec$' -or $normalizedExistingText.Contains('Update CogentSpec on this computer by following only Update Protocol v1:')
+    if (-not [string]::IsNullOrWhiteSpace($existingText) -and -not $knownGeneratedText) {
+        throw 'The ChatGPT composer already contains unsent text.'
+    }
+    Set-ChatGptComposerFocus -Composer $composerElement
+    Start-Sleep -Milliseconds 100
+    if ($knownGeneratedText) {
+        if (-not [CogentSpec.ChatGptPopupNative]::SendControlA()) { throw 'Windows could not select the previous CogentSpec composer text.' }
+        Start-Sleep -Milliseconds 50
+    }
+    if (-not [CogentSpec.ChatGptPopupNative]::SendControlV()) { throw 'Windows could not paste the copied update request.' }
+    $expectedFirstLine = [string](@($clipboardText -split "`r?`n")[0]).Trim()
+    $pasteDeadline = [DateTime]::UtcNow.AddSeconds(3)
+    do {
+        Start-Sleep -Milliseconds 100
+        $composerText = Get-ChatGptComposerText -Composer $composerElement
+    } while (($expectedFirstLine -and -not $composerText.Contains($expectedFirstLine)) -and [DateTime]::UtcNow -lt $pasteDeadline)
+    if (-not $expectedFirstLine -or -not $composerText.Contains($expectedFirstLine)) {
+        throw 'ChatGPT did not confirm that the update request reached the composer.'
+    }
+    return $true
+}
+
 $chatGptProcessIds = [int[]]@($chatGptProcesses | ForEach-Object { [int]$_.Id })
 $popupWindow = Find-VerifiedChatGptPopupWindow -ProcessIds $chatGptProcessIds
 $popupWasVisible = $null
@@ -459,6 +544,26 @@ if ($Mode -eq 'inspect') {
         popupTopmost = [CogentSpec.ChatGptPopupNative]::IsTopmost($popupWindow)
         manualShortcut = 'Ctrl+Shift+Space'
     })
+    return
+}
+
+if ($Mode -eq 'dismiss') {
+    if ($popupWindow -eq [IntPtr]::Zero -or -not [CogentSpec.ChatGptPopupNative]::IsVisible($popupWindow)) {
+        Write-CompactJson ([ordered]@{ status = 'dismissed'; opened = $false; processId = [int]$chatGpt.Id; publisherVerified = $true; popupVerified = ($popupWindow -ne [IntPtr]::Zero); shortcutSent = $false })
+        return
+    }
+    [void][CogentSpec.ChatGptPopupNative]::SendControlShiftSpace()
+    $dismissDeadline = [DateTime]::UtcNow.AddSeconds(3)
+    do { Start-Sleep -Milliseconds 100 } while ([CogentSpec.ChatGptPopupNative]::IsVisible($popupWindow) -and [DateTime]::UtcNow -lt $dismissDeadline)
+    if ([CogentSpec.ChatGptPopupNative]::IsVisible($popupWindow)) {
+        [void][CogentSpec.ChatGptPopupNative]::RequestClosePopup($popupWindow)
+        Start-Sleep -Milliseconds 250
+    }
+    if ([CogentSpec.ChatGptPopupNative]::IsVisible($popupWindow)) {
+        Write-Failure -Status 'popup_dismiss_failed' -Reason 'ChatGPT left the popout visible after its popout shortcut.' -Opened $true
+        return
+    }
+    Write-CompactJson ([ordered]@{ status = 'dismissed'; opened = $false; processId = [int]$chatGpt.Id; publisherVerified = $true; popupVerified = $true; shortcutSent = $true })
     return
 }
 
@@ -566,6 +671,26 @@ if (-not (Invoke-PopupActivation -PopupWindow $popupWindow)) {
     return
 }
 
+$composerPopulated = $false
+if ($PasteClipboard) {
+    try {
+        $composerPopulated = Set-ChatGptComposerFromClipboard -Window $popupWindow
+    } catch {
+        $failureReason = $_.Exception.Message
+        if (-not $activatedExisting) {
+            [void][CogentSpec.ChatGptPopupNative]::SendControlShiftSpace()
+            $restoreDeadline = [DateTime]::UtcNow.AddSeconds(3)
+            do { Start-Sleep -Milliseconds 100 } while ([CogentSpec.ChatGptPopupNative]::IsVisible($popupWindow) -and [DateTime]::UtcNow -lt $restoreDeadline)
+            if ([CogentSpec.ChatGptPopupNative]::IsVisible($popupWindow)) {
+                [void][CogentSpec.ChatGptPopupNative]::RequestClosePopup($popupWindow)
+                Start-Sleep -Milliseconds 250
+            }
+        }
+        Write-Failure -Status 'composer_not_populated' -Reason $failureReason -Opened ([CogentSpec.ChatGptPopupNative]::IsVisible($popupWindow))
+        return
+    }
+}
+
 Write-CompactJson ([ordered]@{
     status = 'opened'
     opened = $true
@@ -581,7 +706,8 @@ Write-CompactJson ([ordered]@{
     dismissHoverCleared = $dismissHoverCleared
     topmostCycleReset = $topmostCycleReset
     topmostRestored = $topmostRestored
-    composerPreloaded = $false
+    composerPreloaded = $composerPopulated
+    composerPopulated = $composerPopulated
     composerFocused = [bool]$composer.focused
     composerDraftPreserved = [bool]$composer.draftPreserved
     shortcut = 'Ctrl+Shift+Space'
