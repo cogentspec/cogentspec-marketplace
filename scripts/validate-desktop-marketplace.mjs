@@ -148,15 +148,31 @@ for (const requiredUpdateInstruction of [
 }
 
 const canonicalStarter = await readFile(join(sourcePluginPath, "skills", "cogentspec", "scripts", "start-cogentstack-bridge.ps1"), "utf8");
+const canonicalSkill = await readFile(join(sourcePluginPath, "skills", "cogentspec", "SKILL.md"), "utf8");
 const canonicalUpdateCheck = await readFile(join(sourcePluginPath, "skills", "cogentspec", "scripts", "check-cogentspec-update.ps1"), "utf8");
 const canonicalConnector = await readFile(join(sourcePluginPath, "skills", "cogentspec", "scripts", "connect-cogentstack.ps1"), "utf8");
 const canonicalReset = await readFile(join(sourcePluginPath, "skills", "cogentspec", "scripts", "reset-cogentspec-update.ps1"), "utf8");
 const compatibilityStarter = await readFile(join(compatibilityPluginPath, "skills", "cogentstack", "scripts", "start-cogentstack-bridge.ps1"), "utf8");
+const compatibilitySkill = await readFile(join(compatibilityPluginPath, "skills", "cogentstack", "SKILL.md"), "utf8");
 const compatibilityUpdateCheck = await readFile(join(compatibilityPluginPath, "skills", "cogentstack", "scripts", "check-cogentspec-update.ps1"), "utf8");
 const compatibilityConnector = await readFile(join(compatibilityPluginPath, "skills", "cogentstack", "scripts", "connect-cogentstack.ps1"), "utf8");
 const compatibilityReset = await readFile(join(compatibilityPluginPath, "skills", "cogentstack", "scripts", "reset-cogentspec-update.ps1"), "utf8");
 for (const marker of ["cogentspec-update-check-v1", "/api/plugin-version", "update_available", "check_unavailable", "UPDATE.v1.md"]) {
   if (!canonicalUpdateCheck.includes(marker)) fail(`the automatic update check is missing marker: ${marker}`);
+}
+for (const [name, source] of [["canonical skill", canonicalSkill], ["compatibility skill", compatibilitySkill]]) {
+  for (const marker of [
+    "Keep `webWorkspaceUrl` as a recovery destination",
+    "[Open CogentSpec workspace](<URL>)",
+    "After either accepted result, do not render `webWorkspaceUrl`",
+    "CogentSpec is connected. Continue in the workspace beside this conversation.",
+    "the web link is recovery only",
+  ]) {
+    if (!source.includes(marker)) fail(`${name} is missing native-open response marker: ${marker}`);
+  }
+  if (source.includes("Open this task’s CogentSpec workspace in web")) {
+    fail(`${name} still renders the redundant workspace-in-web link`);
+  }
 }
 for (const [name, source] of [["starter", canonicalStarter], ["connector", canonicalConnector]]) {
   for (const marker of name === "starter"
