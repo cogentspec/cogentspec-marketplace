@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [ValidateSet('inspect', 'open', 'dismiss', 'pin', 'unpin')]
+    [ValidateSet('inspect', 'open', 'desktop', 'dismiss', 'pin', 'unpin')]
     [string]$Mode = 'open',
     [switch]$PasteClipboard,
     [switch]$UseRetainedChat,
@@ -632,6 +632,58 @@ if ($Mode -eq 'inspect') {
         popupVisible = [CogentSpec.ChatGptPopupNative]::IsVisible($popupWindow)
         popupTopmost = [CogentSpec.ChatGptPopupNative]::IsTopmost($popupWindow)
         manualShortcut = 'Ctrl+Shift+Space'
+    })
+    return
+}
+
+if ($Mode -eq 'desktop') {
+    if (-not $ThreadId) {
+        Write-Failure -Status 'task_identity_unavailable' -Reason 'Desktop Bridge could not identify the connected ChatGPT task. Return to that task and run CogentSpec again.'
+        return
+    }
+    try {
+        Start-Process "codex://threads/$ThreadId" -ErrorAction Stop
+    } catch {
+        Write-Failure -Status 'task_reopen_failed' -Reason 'Desktop Bridge could not reopen the connected ChatGPT task in Desktop UI.'
+        return
+    }
+    $taskOwner = Wait-ForChatGptTaskOwner -ProcessIds $chatGptProcessIds
+    if (-not $taskOwner.ready -or $taskOwner.window -eq [IntPtr]::Zero) {
+        Write-Failure -Status 'task_owner_not_ready' -Reason 'CogentSpec reopened the connected task, but ChatGPT did not make its Desktop UI ready.'
+        return
+    }
+    if (-not (Invoke-PopupActivation -PopupWindow $taskOwner.window)) {
+        Write-Failure -Status 'task_activation_failed' -Reason 'CogentSpec found the connected ChatGPT task but could not make its Desktop UI ready for input.' -Opened $true
+        return
+    }
+    $composer = Focus-ChatGptComposer -PopupWindow $taskOwner.window
+    if (-not $composer.focused) {
+        Write-Failure -Status ([string]$composer.status) -Reason ([string]$composer.reason) -Opened $true
+        return
+    }
+    $composerPopulated = $false
+    if ($PasteClipboard) {
+        try {
+            $composerPopulated = Set-ChatGptComposerFromClipboard -Window $taskOwner.window
+        } catch {
+            Write-Failure -Status 'composer_not_populated' -Reason $_.Exception.Message -Opened $true
+            return
+        }
+    }
+    Write-CompactJson ([ordered]@{
+        status = 'opened'
+        opened = $true
+        processId = [int]$chatGpt.Id
+        publisherVerified = $true
+        ownerThreadReopened = $true
+        ownerTaskActivated = $true
+        desktopWindowLaunched = $true
+        ownerTaskReady = [bool]$taskOwner.ready
+        ownerTaskStableMilliseconds = [int]$taskOwner.stableMilliseconds
+        composerPreloaded = $composerPopulated
+        composerPopulated = $composerPopulated
+        composerFocused = [bool]$composer.focused
+        composerDraftPreserved = [bool]$composer.draftPreserved
     })
     return
 }

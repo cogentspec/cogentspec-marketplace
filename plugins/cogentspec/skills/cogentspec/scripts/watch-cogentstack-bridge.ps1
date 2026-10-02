@@ -107,8 +107,9 @@ function Invoke-ActionHelper($Request) {
         'delete_project' { $arguments += @('-Mode', 'delete', '-RequestId', [string]$Request.targetRequestId, '-ContextKey', $ContextKey) }
         'preview_project' { $arguments += @('-Mode', 'generate', '-ContextKey', $ContextKey) }
         'open_chatgpt_popup' {
-            $arguments += @('-Mode', 'open', '-ThreadId', $ThreadId)
-            if ([string]$Request.targetRequestId -in @('chatgpt-desktop-popup:connect', 'chatgpt-desktop-popup:update')) {
+            $desktopUiRequest = [string]$Request.targetRequestId -in @('chatgpt-desktop-ui:connect', 'chatgpt-desktop-ui:update')
+            $arguments += @('-Mode', $(if ($desktopUiRequest) { 'desktop' } else { 'open' }), '-ThreadId', $ThreadId)
+            if ($desktopUiRequest -or [string]$Request.targetRequestId -in @('chatgpt-desktop-popup:connect', 'chatgpt-desktop-popup:update')) {
                 $arguments += '-PasteClipboard'
             }
             if ([string]$Request.targetRequestId -eq 'chatgpt-desktop-popup:connect') {
@@ -194,7 +195,11 @@ try {
                     'delete_project' { 'Project, folder, and linked CogentSpec state deleted.' }
                     'preview_project' { "Verified project preview opened at $([string]$result.localUrl)" }
                     'open_chatgpt_popup' {
-                        if ($result.PSObject.Properties['composerPopulated'] -and [bool]$result.composerPopulated) {
+                        if ([string]$claimed.request.targetRequestId -eq 'chatgpt-desktop-ui:connect') {
+                            'Connected ChatGPT task opened in Desktop UI with $cogentspec ready to send.'
+                        } elseif ([string]$claimed.request.targetRequestId -eq 'chatgpt-desktop-ui:update') {
+                            'Connected ChatGPT task opened in Desktop UI with the verified update request ready to send.'
+                        } elseif ($result.PSObject.Properties['composerPopulated'] -and [bool]$result.composerPopulated) {
                             if ([string]$claimed.request.targetRequestId -eq 'chatgpt-desktop-popup:connect') {
                                 'ChatGPT popout shown with $cogentspec ready to send in the retained chat.'
                             } else {
