@@ -3,6 +3,7 @@ param(
     [ValidateSet('inspect', 'open', 'dismiss', 'pin', 'unpin')]
     [string]$Mode = 'open',
     [switch]$PasteClipboard,
+    [switch]$UseRetainedChat,
     [ValidatePattern('^$|^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')]
     [string]$ThreadId = ''
 )
@@ -21,6 +22,12 @@ function Write-Failure([string]$Status, [string]$Reason, [bool]$Opened = $false)
         reason = $Reason
         manualShortcut = 'Ctrl+Shift+Space'
     })
+}
+
+function Test-IsChatGptComposer($Element) {
+    if ($null -eq $Element) { return $false }
+    $name = [string]$Element.Current.Name
+    return $name -in @('Work with ChatGPT', 'Ask ChatGPT anything locally', 'Ask ChatGPT anything')
 }
 
 function Set-ChatGptComposerFocus($Composer) {
@@ -47,7 +54,7 @@ function Focus-ChatGptComposer([IntPtr]$PopupWindow) {
         )
         do {
             $matches = @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $editCondition) | Where-Object {
-                [string]$_.Current.Name -eq 'Work with ChatGPT'
+                Test-IsChatGptComposer -Element $_
             })
             if ($matches.Count -eq 1) { $composer = $matches[0]; break }
             Start-Sleep -Milliseconds 100
@@ -153,7 +160,7 @@ function Wait-ForChatGptTaskOwner([int[]]$ProcessIds) {
             try {
                 $root = [System.Windows.Automation.AutomationElement]::FromHandle($mainWindow)
                 $composer = @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $editCondition) | Where-Object {
-                    [string]$_.Current.Name -eq 'Work with ChatGPT' -and $_.Current.IsEnabled -and $_.Current.IsKeyboardFocusable
+                    (Test-IsChatGptComposer -Element $_) -and $_.Current.IsEnabled -and $_.Current.IsKeyboardFocusable
                 })
                 $ready = $composer.Count -eq 1
             } catch {
@@ -537,7 +544,7 @@ function Find-VerifiedChatGptPopupWindow([int[]]$ProcessIds) {
         try {
             $root = [System.Windows.Automation.AutomationElement]::FromHandle($_)
             $matches = @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $editCondition) | Where-Object {
-                [string]$_.Current.Name -eq 'Work with ChatGPT'
+                Test-IsChatGptComposer -Element $_
             })
             $matches.Count -eq 1
         } catch { $false }
@@ -555,7 +562,7 @@ function Find-VerifiedChatGptComposer([IntPtr]$Window) {
         [System.Windows.Automation.ControlType]::Edit
     )
     $matches = @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $editCondition) | Where-Object {
-        [string]$_.Current.Name -eq 'Work with ChatGPT'
+        Test-IsChatGptComposer -Element $_
     })
     if ($matches.Count -eq 1) { return $matches[0] }
     return $null
@@ -575,13 +582,16 @@ function Get-ChatGptComposerText($Composer) {
 
 function Set-ChatGptComposerFromClipboard([IntPtr]$Window) {
     $clipboardText = [string](Get-Clipboard -Raw -ErrorAction Stop)
-    if ([string]::IsNullOrWhiteSpace($clipboardText)) { throw 'The copied update request is no longer available.' }
+    if ([string]::IsNullOrWhiteSpace($clipboardText)) { throw 'The copied CogentSpec request is no longer available.' }
     $composerElement = Find-VerifiedChatGptComposer -Window $Window
     if ($null -eq $composerElement) { throw 'ChatGPT did not expose one verified composer field.' }
     $existingText = Get-ChatGptComposerText -Composer $composerElement
     $normalizedExistingText = ($existingText -replace '[\u200B-\u200D\uFEFF]', '').Trim()
-    $knownGeneratedText = $normalizedExistingText -match '^(?:Work with ChatGPT\s*)?\$cogentspec$' -or $normalizedExistingText.Contains('Update CogentSpec on this computer by following only Update Protocol v1:')
-    if (-not [string]::IsNullOrWhiteSpace($existingText) -and -not $knownGeneratedText) {
+    if ($normalizedExistingText -ceq ([string]$composerElement.Current.Name).Trim()) {
+        $normalizedExistingText = ''
+    }
+    $knownGeneratedText = $normalizedExistingText -eq '$cogentspec' -or $normalizedExistingText.Contains('Update CogentSpec on this computer by following only Update Protocol v1:')
+    if (-not [string]::IsNullOrWhiteSpace($normalizedExistingText) -and -not $knownGeneratedText) {
         throw 'The ChatGPT composer already contains unsent text.'
     }
     Set-ChatGptComposerFocus -Composer $composerElement
@@ -590,7 +600,7 @@ function Set-ChatGptComposerFromClipboard([IntPtr]$Window) {
         if (-not [CogentSpec.ChatGptPopupNative]::SendControlA()) { throw 'Windows could not select the previous CogentSpec composer text.' }
         Start-Sleep -Milliseconds 50
     }
-    if (-not [CogentSpec.ChatGptPopupNative]::SendControlV()) { throw 'Windows could not paste the copied update request.' }
+    if (-not [CogentSpec.ChatGptPopupNative]::SendControlV()) { throw 'Windows could not paste the copied CogentSpec request.' }
     $expectedFirstLine = [string](@($clipboardText -split "`r?`n")[0]).Trim()
     $pasteDeadline = [DateTime]::UtcNow.AddSeconds(3)
     do {
@@ -598,7 +608,7 @@ function Set-ChatGptComposerFromClipboard([IntPtr]$Window) {
         $composerText = Get-ChatGptComposerText -Composer $composerElement
     } while (($expectedFirstLine -and -not $composerText.Contains($expectedFirstLine)) -and [DateTime]::UtcNow -lt $pasteDeadline)
     if (-not $expectedFirstLine -or -not $composerText.Contains($expectedFirstLine)) {
-        throw 'ChatGPT did not confirm that the update request reached the composer.'
+        throw 'ChatGPT did not confirm that the CogentSpec request reached the composer.'
     }
     return $true
 }
@@ -668,14 +678,20 @@ if ($Mode -in @('pin', 'unpin')) {
 }
 
 $existingPopupDismissed = $false
-if (-not $ThreadId) {
+if (-not $ThreadId -and -not $UseRetainedChat) {
     Write-Failure -Status 'task_identity_unavailable' -Reason 'Desktop Bridge could not identify the ChatGPT task that owns this popout. Return to the intended task and run CogentSpec again.'
     return
 }
 
 if ($popupWindow -ne [IntPtr]::Zero) {
     $popupWasVisible = [CogentSpec.ChatGptPopupNative]::IsVisible($popupWindow)
-    if ($popupWasVisible) {
+    if ($popupWasVisible -and $UseRetainedChat) {
+        if (-not (Invoke-PopupActivation -PopupWindow $popupWindow)) {
+            Write-Failure -Status 'popup_activation_failed' -Reason 'CogentSpec found the retained ChatGPT popout but could not make it ready for reconnection. Click its composer once, then try again.' -Opened $true
+            return
+        }
+        $activatedExisting = $true
+    } elseif ($popupWasVisible) {
         [void][CogentSpec.ChatGptPopupNative]::SendControlShiftSpace()
         $dismissDeadline = [DateTime]::UtcNow.AddSeconds(3)
         do { Start-Sleep -Milliseconds 100 } while ([CogentSpec.ChatGptPopupNative]::IsVisible($popupWindow) -and [DateTime]::UtcNow -lt $dismissDeadline)
@@ -691,31 +707,38 @@ if ($popupWindow -ne [IntPtr]::Zero) {
     }
 }
 
-$taskOwner = Wait-ForChatGptTaskOwner -ProcessIds $chatGptProcessIds
-if (-not $taskOwner.ready) {
-    Write-Failure -Status 'task_owner_not_ready' -Reason 'The connected ChatGPT task is not ready to own a popout. Return to that task, then try again.'
-    return
-}
-
-for ($attempt = 1; $attempt -le 2; $attempt++) {
-    if (-not [CogentSpec.ChatGptPopupNative]::SendControlShiftSpace()) {
-        Write-Failure -Status 'shortcut_failed' -Reason 'CogentSpec could not send the popout shortcut. Press Ctrl + Shift + Space.'
+$taskOwner = [ordered]@{ ready = $false; window = [IntPtr]::Zero; stableMilliseconds = 0 }
+if (-not $UseRetainedChat) {
+    $taskOwner = Wait-ForChatGptTaskOwner -ProcessIds $chatGptProcessIds
+    if (-not $taskOwner.ready) {
+        Write-Failure -Status 'task_owner_not_ready' -Reason 'The connected ChatGPT task is not ready to own a popout. Return to that task, then try again.'
         return
     }
-    $shortcutSent = $true
-    $shortcutAttempts = $attempt
-
-    $popupDeadline = [DateTime]::UtcNow.AddSeconds(3)
-    do {
-        Start-Sleep -Milliseconds 100
-        $popupWindow = Find-VerifiedChatGptPopupWindow -ProcessIds $chatGptProcessIds
-        $popupVisible = [CogentSpec.ChatGptPopupNative]::IsVisible($popupWindow)
-    } while (($popupWindow -eq [IntPtr]::Zero -or -not $popupVisible) -and [DateTime]::UtcNow -lt $popupDeadline)
-
-    if ($popupWindow -ne [IntPtr]::Zero -and $popupVisible) { break }
 }
 
-if ($popupWindow -ne [IntPtr]::Zero -and $popupVisible) {
+if (-not $activatedExisting) {
+    for ($attempt = 1; $attempt -le 2; $attempt++) {
+        if (-not [CogentSpec.ChatGptPopupNative]::SendControlShiftSpace()) {
+            Write-Failure -Status 'shortcut_failed' -Reason 'CogentSpec could not send the popout shortcut. Press Ctrl + Shift + Space.'
+            return
+        }
+        $shortcutSent = $true
+        $shortcutAttempts = $attempt
+
+        $popupDeadline = [DateTime]::UtcNow.AddSeconds(3)
+        do {
+            Start-Sleep -Milliseconds 100
+            $popupWindow = Find-VerifiedChatGptPopupWindow -ProcessIds $chatGptProcessIds
+            $popupVisible = [CogentSpec.ChatGptPopupNative]::IsVisible($popupWindow)
+        } while (($popupWindow -eq [IntPtr]::Zero -or -not $popupVisible) -and [DateTime]::UtcNow -lt $popupDeadline)
+
+        if ($popupWindow -ne [IntPtr]::Zero -and $popupVisible) { break }
+    }
+} else {
+    $popupVisible = [CogentSpec.ChatGptPopupNative]::IsVisible($popupWindow)
+}
+
+if (-not $activatedExisting -and $popupWindow -ne [IntPtr]::Zero -and $popupVisible) {
     # The popout is a follower of the main task window. Let its first owner snapshot settle
     # before focusing or pasting so a close-and-reopen cycle cannot submit through a stale client.
     Start-Sleep -Milliseconds 1200
@@ -801,6 +824,7 @@ Write-CompactJson ([ordered]@{
     shortcutSent = $shortcutSent
     shortcutAttempts = $shortcutAttempts
     activatedExisting = $activatedExisting
+    retainedChatRequested = [bool]$UseRetainedChat
     ownerThreadReopened = $false
     ownerTaskActivated = $false
     desktopWindowLaunched = $false

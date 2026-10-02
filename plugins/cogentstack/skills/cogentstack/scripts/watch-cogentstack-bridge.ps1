@@ -108,8 +108,11 @@ function Invoke-ActionHelper($Request) {
         'preview_project' { $arguments += @('-Mode', 'generate', '-ContextKey', $ContextKey) }
         'open_chatgpt_popup' {
             $arguments += @('-Mode', 'open', '-ThreadId', $ThreadId)
-            if ([string]$Request.targetRequestId -eq 'chatgpt-desktop-popup:update') {
+            if ([string]$Request.targetRequestId -in @('chatgpt-desktop-popup:connect', 'chatgpt-desktop-popup:update')) {
                 $arguments += '-PasteClipboard'
+            }
+            if ([string]$Request.targetRequestId -eq 'chatgpt-desktop-popup:connect') {
+                $arguments += '-UseRetainedChat'
             }
         }
         'set_chatgpt_popup_topmost' {
@@ -192,7 +195,11 @@ try {
                     'preview_project' { "Verified project preview opened at $([string]$result.localUrl)" }
                     'open_chatgpt_popup' {
                         if ($result.PSObject.Properties['composerPopulated'] -and [bool]$result.composerPopulated) {
-                            'ChatGPT popout shown and its verified composer populated with the copied update request.'
+                            if ([string]$claimed.request.targetRequestId -eq 'chatgpt-desktop-popup:connect') {
+                                'ChatGPT popout shown with $cogentspec ready to send in the retained chat.'
+                            } else {
+                                'ChatGPT popout shown and its verified composer populated with the copied update request.'
+                            }
                         } else {
                             'ChatGPT popout shown with its composer ready after verifying the signed ChatGPT Desktop application.'
                         }
