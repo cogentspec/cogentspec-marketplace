@@ -150,16 +150,14 @@ function Wait-ForChatGptTaskOwner([int[]]$ProcessIds) {
         if ($mainWindows.Count -eq 1) {
             $mainWindow = [IntPtr]$mainWindows[0]
             $ready = $false
-            if ([CogentSpec.ChatGptPopupNative]::ActivatePopupWindow($mainWindow)) {
-                try {
-                    $root = [System.Windows.Automation.AutomationElement]::FromHandle($mainWindow)
-                    $composer = @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $editCondition) | Where-Object {
-                        [string]$_.Current.Name -eq 'Work with ChatGPT' -and $_.Current.IsEnabled -and $_.Current.IsKeyboardFocusable
-                    })
-                    $ready = $composer.Count -eq 1
-                } catch {
-                    $ready = $false
-                }
+            try {
+                $root = [System.Windows.Automation.AutomationElement]::FromHandle($mainWindow)
+                $composer = @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $editCondition) | Where-Object {
+                    [string]$_.Current.Name -eq 'Work with ChatGPT' -and $_.Current.IsEnabled -and $_.Current.IsKeyboardFocusable
+                })
+                $ready = $composer.Count -eq 1
+            } catch {
+                $ready = $false
             }
 
             if ($ready) {
@@ -693,16 +691,9 @@ if ($popupWindow -ne [IntPtr]::Zero) {
     }
 }
 
-try {
-    Start-Process "codex://threads/$ThreadId" -ErrorAction Stop
-} catch {
-    Write-Failure -Status 'task_reopen_failed' -Reason 'Desktop Bridge could not reopen the ChatGPT task that owns this popout.'
-    return
-}
-
 $taskOwner = Wait-ForChatGptTaskOwner -ProcessIds $chatGptProcessIds
 if (-not $taskOwner.ready) {
-    Write-Failure -Status 'task_owner_not_ready' -Reason 'CogentSpec reopened the intended task, but ChatGPT did not make its main task window ready before the popout was requested.'
+    Write-Failure -Status 'task_owner_not_ready' -Reason 'The connected ChatGPT task is not ready to own a popout. Return to that task, then try again.'
     return
 }
 
@@ -731,7 +722,7 @@ if ($popupWindow -ne [IntPtr]::Zero -and $popupVisible) {
 }
 
 if ($popupWindow -eq [IntPtr]::Zero -or -not $popupVisible -or -not (Invoke-PopupActivation -PopupWindow $popupWindow)) {
-    Write-Failure -Status 'popup_not_opened' -Reason 'CogentSpec reopened the intended task, but ChatGPT did not expose its popout window. Press Ctrl + Shift + Space from that task.'
+    Write-Failure -Status 'popup_not_opened' -Reason 'The connected ChatGPT task did not expose its popout window. Press Ctrl + Shift + Space from that task.'
     return
 }
 $restoredHidden = ($null -ne $popupWasVisible -and -not $popupWasVisible)
@@ -810,7 +801,9 @@ Write-CompactJson ([ordered]@{
     shortcutSent = $shortcutSent
     shortcutAttempts = $shortcutAttempts
     activatedExisting = $activatedExisting
-    ownerThreadReopened = $true
+    ownerThreadReopened = $false
+    ownerTaskActivated = $false
+    desktopWindowLaunched = $false
     ownerTaskReady = [bool]$taskOwner.ready
     ownerTaskStableMilliseconds = [int]$taskOwner.stableMilliseconds
     popupFollowerSettleMilliseconds = 1200
