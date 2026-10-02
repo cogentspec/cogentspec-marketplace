@@ -212,6 +212,17 @@ for ($heartbeat = 0; $heartbeat -lt 15; $heartbeat += 1) {
     Assert-BridgeLauncherTest (-not $popupHelperText.Contains('RevealPopupWindow')) 'The ChatGPT popout helper can expose a host-dismissed native window without reopening it through ChatGPT.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains('task_identity_unavailable')) 'The ChatGPT popout helper does not fail closed without an owning task identity.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains('Start-Process "codex://threads/$ThreadId"')) 'The ChatGPT popout helper does not reopen the exact owning task before showing the popout.'
+    Assert-BridgeLauncherTest ($popupHelperText.Contains('function Wait-ForChatGptTaskOwner')) 'The ChatGPT popout helper does not wait for the owning task window to become ready.'
+    Assert-BridgeLauncherTest ($popupHelperText.Contains('FindMainWindows(int[] processIds)')) 'The ChatGPT popout helper cannot distinguish the main task owner from its tool-window popout.'
+    Assert-BridgeLauncherTest ($popupHelperText.Contains('$requiredStableMilliseconds = 2000')) 'The ChatGPT popout helper does not require a stable task owner before opening the follower window.'
+    Assert-BridgeLauncherTest ($popupHelperText.Contains("Status 'task_owner_not_ready'")) 'The ChatGPT popout helper does not fail closed when the task owner is unavailable.'
+    $ownerReadyIndex = $popupHelperText.IndexOf('$taskOwner = Wait-ForChatGptTaskOwner')
+    $shortcutLoopIndex = $popupHelperText.IndexOf('for ($attempt = 1; $attempt -le 2; $attempt++)')
+    Assert-BridgeLauncherTest ($ownerReadyIndex -ge 0 -and $shortcutLoopIndex -gt $ownerReadyIndex) 'The ChatGPT popout helper can open a follower before the main task owner is ready.'
+    Assert-BridgeLauncherTest ($popupHelperText.Contains('popupFollowerSettleMilliseconds = 1200')) 'The ChatGPT popout helper does not report its follower snapshot settling interval.'
+    $followerSettleIndex = $popupHelperText.IndexOf('Start-Sleep -Milliseconds 1200', $shortcutLoopIndex)
+    $popupComposerIndex = $popupHelperText.IndexOf('$composer = Focus-ChatGptComposer', $shortcutLoopIndex)
+    Assert-BridgeLauncherTest ($followerSettleIndex -gt $shortcutLoopIndex -and $popupComposerIndex -gt $followerSettleIndex) 'The ChatGPT popout helper can focus the follower composer before its owner snapshot settles.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains('popup_owner_refresh_failed')) 'The ChatGPT popout helper can still reuse an unreleased popout owner.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains('$restoredHidden = ($null -ne $popupWasVisible -and -not $popupWasVisible)')) 'The ChatGPT popout helper does not report a hidden popout reopened through the host shortcut.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains("ValidateSet('inspect', 'open', 'dismiss', 'pin', 'unpin')")) 'The ChatGPT popout helper does not expose reversible dismiss and pin modes.'

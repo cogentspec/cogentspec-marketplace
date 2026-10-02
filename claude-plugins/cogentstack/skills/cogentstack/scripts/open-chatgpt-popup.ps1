@@ -135,6 +135,58 @@ function Invoke-PopupActivation([IntPtr]$PopupWindow) {
     return $false
 }
 
+function Wait-ForChatGptTaskOwner([int[]]$ProcessIds) {
+    Add-Type -AssemblyName UIAutomationClient -ErrorAction Stop
+    $deadline = [DateTime]::UtcNow.AddSeconds(10)
+    $stableSince = $null
+    $requiredStableMilliseconds = 2000
+    $editCondition = [System.Windows.Automation.PropertyCondition]::new(
+        [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+        [System.Windows.Automation.ControlType]::Edit
+    )
+
+    do {
+        $mainWindows = @([CogentSpec.ChatGptPopupNative]::FindMainWindows($ProcessIds))
+        if ($mainWindows.Count -eq 1) {
+            $mainWindow = [IntPtr]$mainWindows[0]
+            $ready = $false
+            if ([CogentSpec.ChatGptPopupNative]::ActivatePopupWindow($mainWindow)) {
+                try {
+                    $root = [System.Windows.Automation.AutomationElement]::FromHandle($mainWindow)
+                    $composer = @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $editCondition) | Where-Object {
+                        [string]$_.Current.Name -eq 'Work with ChatGPT' -and $_.Current.IsEnabled -and $_.Current.IsKeyboardFocusable
+                    })
+                    $ready = $composer.Count -eq 1
+                } catch {
+                    $ready = $false
+                }
+            }
+
+            if ($ready) {
+                if ($null -eq $stableSince) { $stableSince = [DateTime]::UtcNow }
+                if (([DateTime]::UtcNow - $stableSince).TotalMilliseconds -ge $requiredStableMilliseconds) {
+                    return [ordered]@{
+                        ready = $true
+                        window = $mainWindow
+                        stableMilliseconds = $requiredStableMilliseconds
+                    }
+                }
+            } else {
+                $stableSince = $null
+            }
+        } else {
+            $stableSince = $null
+        }
+        Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $deadline)
+
+    return [ordered]@{
+        ready = $false
+        window = [IntPtr]::Zero
+        stableMilliseconds = 0
+    }
+}
+
 $chatGptProcesses = @(Get-Process -Name 'ChatGPT' -ErrorAction SilentlyContinue | Where-Object {
     try { [IO.Path]::GetFileName([string]$_.Path) -eq 'ChatGPT.exe' } catch { $false }
 })
@@ -361,6 +413,33 @@ namespace CogentSpec {
                 return true;
             }, IntPtr.Zero);
             return popupWindows.ToArray();
+        }
+
+        public static IntPtr[] FindMainWindows(int[] processIds) {
+            List<IntPtr> mainWindows = new List<IntPtr>();
+            EnumWindows(delegate(IntPtr window, IntPtr parameter) {
+                uint processId;
+                GetWindowThreadProcessId(window, out processId);
+                bool matchesProcess = false;
+                foreach (int candidateProcessId in processIds) {
+                    if (processId == (uint)candidateProcessId) {
+                        matchesProcess = true;
+                        break;
+                    }
+                }
+                if (!matchesProcess || !IsWindowVisible(window)) return true;
+
+                StringBuilder className = new StringBuilder(128);
+                GetClassName(window, className, className.Capacity);
+                if (!String.Equals(className.ToString(), "Chrome_WidgetWin_1", StringComparison.Ordinal)) return true;
+
+                long extendedStyle = GetWindowLongPtr(window, GWL_EXSTYLE).ToInt64();
+                if ((extendedStyle & WS_EX_TOOLWINDOW) != 0) return true;
+
+                mainWindows.Add(window);
+                return true;
+            }, IntPtr.Zero);
+            return mainWindows.ToArray();
         }
 
         public static bool IsVisible(IntPtr window) {
@@ -620,7 +699,12 @@ try {
     Write-Failure -Status 'task_reopen_failed' -Reason 'Desktop Bridge could not reopen the ChatGPT task that owns this popout.'
     return
 }
-Start-Sleep -Milliseconds 1200
+
+$taskOwner = Wait-ForChatGptTaskOwner -ProcessIds $chatGptProcessIds
+if (-not $taskOwner.ready) {
+    Write-Failure -Status 'task_owner_not_ready' -Reason 'CogentSpec reopened the intended task, but ChatGPT did not make its main task window ready before the popout was requested.'
+    return
+}
 
 for ($attempt = 1; $attempt -le 2; $attempt++) {
     if (-not [CogentSpec.ChatGptPopupNative]::SendControlShiftSpace()) {
@@ -638,6 +722,12 @@ for ($attempt = 1; $attempt -le 2; $attempt++) {
     } while (($popupWindow -eq [IntPtr]::Zero -or -not $popupVisible) -and [DateTime]::UtcNow -lt $popupDeadline)
 
     if ($popupWindow -ne [IntPtr]::Zero -and $popupVisible) { break }
+}
+
+if ($popupWindow -ne [IntPtr]::Zero -and $popupVisible) {
+    # The popout is a follower of the main task window. Let its first owner snapshot settle
+    # before focusing or pasting so a close-and-reopen cycle cannot submit through a stale client.
+    Start-Sleep -Milliseconds 1200
 }
 
 if ($popupWindow -eq [IntPtr]::Zero -or -not $popupVisible -or -not (Invoke-PopupActivation -PopupWindow $popupWindow)) {
@@ -721,6 +811,9 @@ Write-CompactJson ([ordered]@{
     shortcutAttempts = $shortcutAttempts
     activatedExisting = $activatedExisting
     ownerThreadReopened = $true
+    ownerTaskReady = [bool]$taskOwner.ready
+    ownerTaskStableMilliseconds = [int]$taskOwner.stableMilliseconds
+    popupFollowerSettleMilliseconds = 1200
     existingPopupDismissed = $existingPopupDismissed
     restoredHidden = $restoredHidden
     popupVerified = $true
