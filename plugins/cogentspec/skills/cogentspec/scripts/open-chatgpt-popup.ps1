@@ -2,7 +2,9 @@
 param(
     [ValidateSet('inspect', 'open', 'dismiss', 'pin', 'unpin')]
     [string]$Mode = 'open',
-    [switch]$PasteClipboard
+    [switch]$PasteClipboard,
+    [ValidatePattern('^$|^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')]
+    [string]$ThreadId = ''
 )
 
 Set-StrictMode -Version Latest
@@ -588,42 +590,61 @@ if ($Mode -in @('pin', 'unpin')) {
     return
 }
 
+$existingPopupDismissed = $false
+if (-not $ThreadId) {
+    Write-Failure -Status 'task_identity_unavailable' -Reason 'Desktop Bridge could not identify the ChatGPT task that owns this popout. Return to the intended task and run CogentSpec again.'
+    return
+}
+
 if ($popupWindow -ne [IntPtr]::Zero) {
     $popupWasVisible = [CogentSpec.ChatGptPopupNative]::IsVisible($popupWindow)
-    if ($popupWasVisible -and -not (Invoke-PopupActivation -PopupWindow $popupWindow)) {
-        Write-Failure -Status 'popup_activation_failed' -Reason 'CogentSpec found the ChatGPT popout but could not bring it forward. Press Ctrl + Shift + Space.'
-        return
-    }
     if ($popupWasVisible) {
-        $activatedExisting = $true
-    }
-}
-
-if (-not $activatedExisting) {
-    for ($attempt = 1; $attempt -le 2; $attempt++) {
-        if (-not [CogentSpec.ChatGptPopupNative]::SendControlShiftSpace()) {
-            Write-Failure -Status 'shortcut_failed' -Reason 'CogentSpec could not send the popout shortcut. Press Ctrl + Shift + Space.'
+        [void][CogentSpec.ChatGptPopupNative]::SendControlShiftSpace()
+        $dismissDeadline = [DateTime]::UtcNow.AddSeconds(3)
+        do { Start-Sleep -Milliseconds 100 } while ([CogentSpec.ChatGptPopupNative]::IsVisible($popupWindow) -and [DateTime]::UtcNow -lt $dismissDeadline)
+        if ([CogentSpec.ChatGptPopupNative]::IsVisible($popupWindow)) {
+            [void][CogentSpec.ChatGptPopupNative]::RequestClosePopup($popupWindow)
+            Start-Sleep -Milliseconds 250
+        }
+        if ([CogentSpec.ChatGptPopupNative]::IsVisible($popupWindow)) {
+            Write-Failure -Status 'popup_owner_refresh_failed' -Reason 'ChatGPT did not release its previous popout. Close that popout, return to the intended task, and try again.' -Opened $true
             return
         }
-        $shortcutSent = $true
-        $shortcutAttempts = $attempt
-
-        $popupDeadline = [DateTime]::UtcNow.AddSeconds(3)
-        do {
-            Start-Sleep -Milliseconds 100
-            $popupWindow = Find-VerifiedChatGptPopupWindow -ProcessIds $chatGptProcessIds
-            $popupVisible = [CogentSpec.ChatGptPopupNative]::IsVisible($popupWindow)
-        } while (($popupWindow -eq [IntPtr]::Zero -or -not $popupVisible) -and [DateTime]::UtcNow -lt $popupDeadline)
-
-        if ($popupWindow -ne [IntPtr]::Zero -and $popupVisible) { break }
+        $existingPopupDismissed = $true
     }
+}
 
-    if ($popupWindow -eq [IntPtr]::Zero -or -not $popupVisible -or -not (Invoke-PopupActivation -PopupWindow $popupWindow)) {
-        Write-Failure -Status 'popup_not_opened' -Reason 'CogentSpec sent the popout shortcut, but ChatGPT did not expose a popout window. Press Ctrl + Shift + Space.'
+try {
+    Start-Process "codex://threads/$ThreadId" -ErrorAction Stop
+} catch {
+    Write-Failure -Status 'task_reopen_failed' -Reason 'Desktop Bridge could not reopen the ChatGPT task that owns this popout.'
+    return
+}
+Start-Sleep -Milliseconds 1200
+
+for ($attempt = 1; $attempt -le 2; $attempt++) {
+    if (-not [CogentSpec.ChatGptPopupNative]::SendControlShiftSpace()) {
+        Write-Failure -Status 'shortcut_failed' -Reason 'CogentSpec could not send the popout shortcut. Press Ctrl + Shift + Space.'
         return
     }
-    $restoredHidden = ($null -ne $popupWasVisible -and -not $popupWasVisible)
+    $shortcutSent = $true
+    $shortcutAttempts = $attempt
+
+    $popupDeadline = [DateTime]::UtcNow.AddSeconds(3)
+    do {
+        Start-Sleep -Milliseconds 100
+        $popupWindow = Find-VerifiedChatGptPopupWindow -ProcessIds $chatGptProcessIds
+        $popupVisible = [CogentSpec.ChatGptPopupNative]::IsVisible($popupWindow)
+    } while (($popupWindow -eq [IntPtr]::Zero -or -not $popupVisible) -and [DateTime]::UtcNow -lt $popupDeadline)
+
+    if ($popupWindow -ne [IntPtr]::Zero -and $popupVisible) { break }
 }
+
+if ($popupWindow -eq [IntPtr]::Zero -or -not $popupVisible -or -not (Invoke-PopupActivation -PopupWindow $popupWindow)) {
+    Write-Failure -Status 'popup_not_opened' -Reason 'CogentSpec reopened the intended task, but ChatGPT did not expose its popout window. Press Ctrl + Shift + Space from that task.'
+    return
+}
+$restoredHidden = ($null -ne $popupWasVisible -and -not $popupWasVisible)
 
 $interaction = Reset-ChatGptPopupInteraction -PopupWindow $popupWindow
 if (-not $interaction.reset) {
@@ -699,6 +720,8 @@ Write-CompactJson ([ordered]@{
     shortcutSent = $shortcutSent
     shortcutAttempts = $shortcutAttempts
     activatedExisting = $activatedExisting
+    ownerThreadReopened = $true
+    existingPopupDismissed = $existingPopupDismissed
     restoredHidden = $restoredHidden
     popupVerified = $true
     foregroundVerified = [CogentSpec.ChatGptPopupNative]::IsForeground($popupWindow)

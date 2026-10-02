@@ -34,6 +34,8 @@ $workerProcessId = 0
 $launcherProcessId = 0
 $launcherProcess = $null
 $originalConnectorProcessPath = $env:COGENTSPEC_LAUNCHER_TEST_CONNECTOR_PROCESS_PATH
+$originalThreadId = $env:CODEX_THREAD_ID
+$fixtureThreadId = [Guid]::NewGuid().ToString()
 
 try {
     Copy-Item -LiteralPath (Join-Path $repositoryRoot 'plugins\cogentspec') -Destination $fixturePlugin -Recurse -Force
@@ -73,6 +75,7 @@ param(
     [string]$ContextKey,
     [string]$PluginId,
     [string]$PluginVersion,
+    [string]$ThreadId,
     [string]$ReadyPath
 )
 Start-Sleep -Milliseconds 700
@@ -82,6 +85,7 @@ for ($heartbeat = 0; $heartbeat -lt 15; $heartbeat += 1) {
         contextKey = $ContextKey
         pluginId = $PluginId
         pluginVersion = $PluginVersion
+        threadId = $ThreadId
         serverAcknowledged = $true
         acknowledgedAt = [DateTime]::UtcNow.ToString('o')
     } | ConvertTo-Json -Compress | Set-Content -LiteralPath $ReadyPath -Encoding UTF8
@@ -91,6 +95,7 @@ for ($heartbeat = 0; $heartbeat -lt 15; $heartbeat += 1) {
     Set-Content -LiteralPath (Join-Path $fixtureScripts 'watch-cogentstack-bridge.ps1') -Value $watcherFixture -Encoding UTF8
 
     $env:COGENTSPEC_LAUNCHER_TEST_CONNECTOR_PROCESS_PATH = $connectorProcessPath
+    $env:CODEX_THREAD_ID = $fixtureThreadId
     $powerShellExecutable = (Get-Process -Id $PID).Path
     $launcherCommand = "& '$((Join-Path $fixtureScripts 'start-cogentstack-bridge.ps1').Replace("'", "''"))' -ContextKey '$contextKey' -Surface chatgpt"
     $encodedLauncherCommand = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($launcherCommand))
@@ -144,6 +149,7 @@ for ($heartbeat = 0; $heartbeat -lt 15; $heartbeat += 1) {
     Assert-BridgeLauncherTest (Test-Path -LiteralPath $readyPath -PathType Leaf) 'The server acknowledgement marker was not written.'
     $readyMarker = Get-Content -Raw -LiteralPath $readyPath | ConvertFrom-Json
     Assert-BridgeLauncherTest ([int]$readyMarker.processId -eq $workerProcessId -and [bool]$readyMarker.serverAcknowledged) 'The server acknowledgement marker does not identify the verified worker.'
+    Assert-BridgeLauncherTest ([string]$readyMarker.threadId -ceq $fixtureThreadId) 'The verified worker is not bound to the invoking ChatGPT task.'
 
     $reuseOutput = @(& (Join-Path $fixtureScripts 'start-cogentstack-bridge.ps1') -ContextKey $contextKey -Surface chatgpt 2>&1)
     $reuseJsonLine = @($reuseOutput | ForEach-Object { $_.ToString() } | Where-Object { $_.Trim().StartsWith('{') } | Select-Object -Last 1)
@@ -151,6 +157,19 @@ for ($heartbeat = 0; $heartbeat -lt 15; $heartbeat += 1) {
     $reuseResult = $reuseJsonLine | ConvertFrom-Json
     Assert-BridgeLauncherTest ([string]$reuseResult.status -eq 'ready' -and [string]$reuseResult.bridge -eq 'already_running') 'The Bridge launcher did not reuse the verified worker.'
     Assert-BridgeLauncherTest ([bool]$reuseResult.presenceVerified -and [int]$reuseResult.processId -eq $workerProcessId) 'The reused Bridge worker was reported ready without verified context presence.'
+
+    $previousWorkerProcessId = $workerProcessId
+    $replacementThreadId = [Guid]::NewGuid().ToString()
+    $env:CODEX_THREAD_ID = $replacementThreadId
+    $replacementOutput = @(& (Join-Path $fixtureScripts 'start-cogentstack-bridge.ps1') -ContextKey $contextKey -Surface chatgpt 2>&1)
+    $replacementJsonLine = @($replacementOutput | ForEach-Object { $_.ToString() } | Where-Object { $_.Trim().StartsWith('{') } | Select-Object -Last 1)
+    Assert-BridgeLauncherTest ([bool]$replacementJsonLine) 'The task-rebound Bridge launcher returned no JSON result.'
+    $replacementResult = $replacementJsonLine | ConvertFrom-Json
+    $workerProcessId = [int]$replacementResult.processId
+    Assert-BridgeLauncherTest ([string]$replacementResult.status -eq 'ready' -and [string]$replacementResult.bridge -eq 'started') 'The Bridge launcher reused a worker owned by another ChatGPT task.'
+    Assert-BridgeLauncherTest ($workerProcessId -gt 0 -and $workerProcessId -ne $previousWorkerProcessId) 'The Bridge launcher did not replace the stale task-owned worker.'
+    $replacementMarker = Get-Content -Raw -LiteralPath $readyPath | ConvertFrom-Json
+    Assert-BridgeLauncherTest ([string]$replacementMarker.threadId -ceq $replacementThreadId) 'The replacement Bridge worker is not bound to the new ChatGPT task.'
     if (Test-Path -LiteralPath $statePath -PathType Leaf) {
         $state = Get-Content -Raw -LiteralPath $statePath | ConvertFrom-Json
         $runtimeRoot = Split-Path -Parent ([string]$state.watcherScript)
@@ -191,7 +210,9 @@ for ($heartbeat = 0; $heartbeat -lt 15; $heartbeat += 1) {
     Assert-BridgeLauncherTest ($popupHelperText.Contains('FindPopupWindows(int[] processIds)')) 'The ChatGPT popout helper cannot inspect every signed ChatGPT tool window.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains('function Find-VerifiedChatGptPopupWindow')) 'The ChatGPT popout helper does not select the exact accessible composer window.'
     Assert-BridgeLauncherTest (-not $popupHelperText.Contains('RevealPopupWindow')) 'The ChatGPT popout helper can expose a host-dismissed native window without reopening it through ChatGPT.'
-    Assert-BridgeLauncherTest ($popupHelperText.Contains('if ($popupWasVisible -and -not (Invoke-PopupActivation -PopupWindow $popupWindow))')) 'The ChatGPT popout helper does not limit direct activation to a host-visible popout.'
+    Assert-BridgeLauncherTest ($popupHelperText.Contains('task_identity_unavailable')) 'The ChatGPT popout helper does not fail closed without an owning task identity.'
+    Assert-BridgeLauncherTest ($popupHelperText.Contains('Start-Process "codex://threads/$ThreadId"')) 'The ChatGPT popout helper does not reopen the exact owning task before showing the popout.'
+    Assert-BridgeLauncherTest ($popupHelperText.Contains('popup_owner_refresh_failed')) 'The ChatGPT popout helper can still reuse an unreleased popout owner.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains('$restoredHidden = ($null -ne $popupWasVisible -and -not $popupWasVisible)')) 'The ChatGPT popout helper does not report a hidden popout reopened through the host shortcut.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains("ValidateSet('inspect', 'open', 'dismiss', 'pin', 'unpin')")) 'The ChatGPT popout helper does not expose reversible dismiss and pin modes.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains('SetPopupTopmost(IntPtr window, bool enabled)')) 'The ChatGPT popout helper does not use verified native always-on-top control.'
@@ -232,6 +253,7 @@ for ($heartbeat = 0; $heartbeat -lt 15; $heartbeat += 1) {
     $watcherText = Get-Content -Raw -LiteralPath (Join-Path $repositoryRoot 'plugins\cogentspec\skills\cogentspec\scripts\watch-cogentstack-bridge.ps1')
     Assert-BridgeLauncherTest ($watcherText.Contains('ChatGPT popout shown with its composer ready')) 'The Bridge does not report the ready ChatGPT composer.'
     Assert-BridgeLauncherTest ($watcherText.Contains("targetRequestId -eq 'chatgpt-desktop-popup:update'")) 'The Bridge does not distinguish the verified update-composer action.'
+    Assert-BridgeLauncherTest ($watcherText.Contains("@('-Mode', 'open', '-ThreadId', `$ThreadId)")) 'The Bridge does not bind popout actions to the invoking ChatGPT task.'
     Assert-BridgeLauncherTest ($watcherText.Contains("`$arguments += '-PasteClipboard'")) 'The Bridge does not request update-composer population.'
     Assert-BridgeLauncherTest ($watcherText.Contains('ChatGPT popout shown and its verified composer populated with the copied update request.')) 'The Bridge does not report verified update-composer population.'
     Assert-BridgeLauncherTest (-not $watcherText.Contains('ready in the composer')) 'The Bridge still reports the removed CogentSpec command preload.'
@@ -243,6 +265,8 @@ for ($heartbeat = 0; $heartbeat -lt 15; $heartbeat += 1) {
     $launcherText = Get-Content -Raw -LiteralPath (Join-Path $repositoryRoot 'plugins\cogentspec\skills\cogentspec\scripts\start-cogentstack-bridge.ps1')
     Assert-BridgeLauncherTest ($launcherText.Contains('function Wait-BridgePresenceReady')) 'The Bridge launcher does not wait for server-acknowledged context presence.'
     Assert-BridgeLauncherTest ($launcherText.Contains('presenceVerified = $true')) 'The Bridge launcher does not expose verified context presence.'
+    Assert-BridgeLauncherTest ($launcherText.Contains('$env:CODEX_THREAD_ID')) 'The Bridge launcher does not capture the invoking ChatGPT task identity.'
+    Assert-BridgeLauncherTest ($launcherText.Contains('$sameThread')) 'The Bridge launcher can reuse a worker owned by a different ChatGPT task.'
     $bridgeParityRoots = @(
         'plugins\cogentstack\skills\cogentstack\scripts',
         'claude-plugins\cogentspec\skills\cogentspec\scripts',
@@ -265,6 +289,7 @@ for ($heartbeat = 0; $heartbeat -lt 15; $heartbeat += 1) {
         projectDataConnection = 'ready'
         presenceVerified = [bool]$result.presenceVerified
         reuseVerified = [bool]$reuseResult.presenceVerified
+        taskRebindVerified = [string]$replacementMarker.threadId -ceq $replacementThreadId
         workspaceLinksReturned = 2
     } | ConvertTo-Json -Compress
 } finally {
@@ -285,6 +310,11 @@ for ($heartbeat = 0; $heartbeat -lt 15; $heartbeat += 1) {
         Remove-Item Env:\COGENTSPEC_LAUNCHER_TEST_CONNECTOR_PROCESS_PATH -ErrorAction SilentlyContinue
     } else {
         $env:COGENTSPEC_LAUNCHER_TEST_CONNECTOR_PROCESS_PATH = $originalConnectorProcessPath
+    }
+    if ($null -eq $originalThreadId) {
+        Remove-Item Env:\CODEX_THREAD_ID -ErrorAction SilentlyContinue
+    } else {
+        $env:CODEX_THREAD_ID = $originalThreadId
     }
     if (Test-Path -LiteralPath $fixtureRoot -PathType Container) { Remove-Item -LiteralPath $fixtureRoot -Recurse -Force }
 }

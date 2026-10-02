@@ -64,13 +64,14 @@ function Start-DetachedBridgeWatcher(
     [string]$WatcherContextKey,
     [string]$WatcherPluginId,
     [string]$WatcherPluginVersion,
+    [string]$WatcherThreadId,
     [string]$WatcherReadyPath
 ) {
     $escape = {
         param([string]$Value)
         return $Value.Replace("'", "''")
     }
-    $command = "& '$(& $escape $WatcherScript)' -ContextKey '$(& $escape $WatcherContextKey)' -PluginId '$(& $escape $WatcherPluginId)' -PluginVersion '$(& $escape $WatcherPluginVersion)' -ReadyPath '$(& $escape $WatcherReadyPath)'"
+    $command = "& '$(& $escape $WatcherScript)' -ContextKey '$(& $escape $WatcherContextKey)' -PluginId '$(& $escape $WatcherPluginId)' -PluginVersion '$(& $escape $WatcherPluginVersion)' -ThreadId '$(& $escape $WatcherThreadId)' -ReadyPath '$(& $escape $WatcherReadyPath)'"
     $encodedCommand = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
     $commandLine = '"' + $PowerShellExecutable + '" -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -EncodedCommand ' + $encodedCommand
     $creation = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $commandLine }
@@ -87,7 +88,8 @@ function Test-BridgePresenceReady(
     [int]$ProcessId,
     [string]$ExpectedContextKey,
     [string]$ExpectedPluginId,
-    [string]$ExpectedPluginVersion
+    [string]$ExpectedPluginVersion,
+    [string]$ExpectedThreadId
 ) {
     if (-not (Test-Path -LiteralPath $ReadyPath -PathType Leaf)) { return $false }
     try {
@@ -96,6 +98,7 @@ function Test-BridgePresenceReady(
             [string]$marker.contextKey -cne $ExpectedContextKey -or
             [string]$marker.pluginId -cne $ExpectedPluginId -or
             [string]$marker.pluginVersion -cne $ExpectedPluginVersion -or
+            ($ExpectedThreadId -and (-not $marker.PSObject.Properties['threadId'] -or [string]$marker.threadId -cne $ExpectedThreadId)) -or
             -not [bool]$marker.serverAcknowledged) {
             return $false
         }
@@ -121,6 +124,7 @@ function Wait-BridgePresenceReady(
     [string]$ExpectedContextKey,
     [string]$ExpectedPluginId,
     [string]$ExpectedPluginVersion,
+    [string]$ExpectedThreadId,
     [int]$TimeoutMilliseconds
 ) {
     $deadline = [DateTime]::UtcNow.AddMilliseconds($TimeoutMilliseconds)
@@ -131,7 +135,8 @@ function Wait-BridgePresenceReady(
             -ProcessId $ProcessId `
             -ExpectedContextKey $ExpectedContextKey `
             -ExpectedPluginId $ExpectedPluginId `
-            -ExpectedPluginVersion $ExpectedPluginVersion) {
+            -ExpectedPluginVersion $ExpectedPluginVersion `
+            -ExpectedThreadId $ExpectedThreadId) {
             return $true
         }
         Start-Sleep -Milliseconds 100
@@ -139,6 +144,9 @@ function Wait-BridgePresenceReady(
     return $false
 }
 $connectionUrl = "https://cogentspec.com/stack?surface=$([Uri]::EscapeDataString($Surface))"
+$threadId = if ($Surface -eq 'chatgpt' -and [string]$env:CODEX_THREAD_ID -match '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$') {
+    [string]$env:CODEX_THREAD_ID
+} else { '' }
 $workspaceUrl = $connectionUrl
 $webWorkspaceUrl = $connectionUrl
 $chatgptWorkspaceUrl = $connectionUrl
@@ -245,18 +253,20 @@ if (Test-Path -LiteralPath $statePath -PathType Leaf) {
         $existingProcess = if ($existingProcessId -gt 0) { Get-CimInstance Win32_Process -Filter "ProcessId=$existingProcessId" -ErrorAction SilentlyContinue } else { $null }
         $expectedWatcher = [string]$state.watcherScript
         $sameRuntime = [string]$state.runtimeVersion -eq $runtimeVersion
+        $sameThread = -not $threadId -or ($state.PSObject.Properties['threadId'] -and [string]$state.threadId -ceq $threadId)
         $verifiedBridgeProcess = $existingProcess -and
             $expectedWatcher -and
             [string]$state.contextKey -ceq $resolvedContext -and
             [string]$existingProcess.ExecutablePath -ieq $powershellExecutable -and
             ([string]$existingProcess.CommandLine).IndexOf('-EncodedCommand', [StringComparison]::OrdinalIgnoreCase) -ge 0
-        if ($verifiedBridgeProcess -and $sameRuntime) {
+        if ($verifiedBridgeProcess -and $sameRuntime -and $sameThread) {
             $presenceReady = Wait-BridgePresenceReady `
                 -ReadyPath $readyPath `
                 -ProcessId $existingProcessId `
                 -ExpectedContextKey $resolvedContext `
                 -ExpectedPluginId $pluginId `
                 -ExpectedPluginVersion $pluginVersion `
+                -ExpectedThreadId $threadId `
                 -TimeoutMilliseconds 3000
             if ($presenceReady) {
                 Write-CompactJson ([ordered]@{
@@ -282,7 +292,7 @@ if (Test-Path -LiteralPath $statePath -PathType Leaf) {
             Wait-Process -Id $existingProcessId -Timeout 2 -ErrorAction SilentlyContinue
             Remove-Item -LiteralPath $readyPath -Force -ErrorAction SilentlyContinue
         }
-        if ($verifiedBridgeProcess -and -not $sameRuntime) {
+        if ($verifiedBridgeProcess -and (-not $sameRuntime -or -not $sameThread)) {
             Stop-Process -Id $existingProcessId -Force
         }
     } catch { }
@@ -296,6 +306,7 @@ $watcher = Start-DetachedBridgeWatcher `
     -WatcherContextKey $resolvedContext `
     -WatcherPluginId $pluginId `
     -WatcherPluginVersion $pluginVersion `
+    -WatcherThreadId $threadId `
     -WatcherReadyPath $readyPath
 $presenceReady = Wait-BridgePresenceReady `
     -ReadyPath $readyPath `
@@ -303,6 +314,7 @@ $presenceReady = Wait-BridgePresenceReady `
     -ExpectedContextKey $resolvedContext `
     -ExpectedPluginId $pluginId `
     -ExpectedPluginVersion $pluginVersion `
+    -ExpectedThreadId $threadId `
     -TimeoutMilliseconds 8000
 if (-not $presenceReady) {
     Stop-Process -Id $watcher.Id -Force -ErrorAction SilentlyContinue
@@ -322,6 +334,7 @@ if (-not $presenceReady) {
     startedAt = [DateTime]::UtcNow.ToString('o')
     pluginId = $pluginId
     pluginVersion = $pluginVersion
+    threadId = $threadId
 } | ConvertTo-Json | Set-Content -LiteralPath $statePath -Encoding UTF8
 
 Write-CompactJson ([ordered]@{

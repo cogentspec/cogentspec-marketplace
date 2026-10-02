@@ -3,6 +3,7 @@ param(
     [Parameter(Mandatory = $true)][string]$ContextKey,
     [Parameter(Mandatory = $true)][ValidateSet('cogentspec', 'cogentstack')][string]$PluginId,
     [Parameter(Mandatory = $true)][ValidatePattern('^\d+\.\d+\.\d+$')][string]$PluginVersion,
+    [ValidatePattern('^$|^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')][string]$ThreadId = '',
     [Parameter(Mandatory = $true)][string]$ReadyPath
 )
 
@@ -70,6 +71,7 @@ function Write-BridgePresenceReady {
         contextKey = $ContextKey
         pluginId = $PluginId
         pluginVersion = $PluginVersion
+        threadId = $ThreadId
         serverAcknowledged = $true
         acknowledgedAt = [DateTime]::UtcNow.ToString('o')
     } | ConvertTo-Json -Compress
@@ -105,7 +107,7 @@ function Invoke-ActionHelper($Request) {
         'delete_project' { $arguments += @('-Mode', 'delete', '-RequestId', [string]$Request.targetRequestId, '-ContextKey', $ContextKey) }
         'preview_project' { $arguments += @('-Mode', 'generate', '-ContextKey', $ContextKey) }
         'open_chatgpt_popup' {
-            $arguments += @('-Mode', 'open')
+            $arguments += @('-Mode', 'open', '-ThreadId', $ThreadId)
             if ([string]$Request.targetRequestId -eq 'chatgpt-desktop-popup:update') {
                 $arguments += '-PasteClipboard'
             }
