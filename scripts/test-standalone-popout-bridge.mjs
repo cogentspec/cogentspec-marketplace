@@ -27,7 +27,8 @@ const composerConditionSource = productionHelperSource.slice(
   productionHelperSource.indexOf("function Set-ChatGptComposerFocus"),
 );
 assert.doesNotMatch(composerConditionSource, /ControlTypeProperty/);
-assert.match(productionHelperSource, /Re-run ChatGPT's own popout hotkey so ChatGPT re-presents the\s+# retained chat and exposes its composer before CogentSpec tries to paste\./);
+assert.match(productionHelperSource, /Temporarily pin the verified window before looking for its composer;/);
+assert.match(productionHelperSource, /\$temporaryTopmostRestored = Restore-ChatGptPopupTopmost/);
 assert.match(productionHelperSource, /\$verifiedRetainedPopup = Find-VerifiedChatGptPopupWindow -ProcessIds \$chatGptProcessIds -AllowNativeRetainedFallback \$false/);
 assert.match(productionHelperSource, /if \(-not \$UseRetainedChat -and -not \(Invoke-PopupActivation -PopupWindow \$popupWindow\)\)/);
 assert.doesNotMatch(productionHelperSource, /found the retained ChatGPT popout but could not make it ready for reconnection/);
