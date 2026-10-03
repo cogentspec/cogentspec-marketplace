@@ -42,9 +42,11 @@ $bridgeStateRoot = Join-Path $localStateRoot 'bridge'
 $runtimeRoot = Join-Path $localStateRoot 'bridge-runtime'
 $popoutStateRoot = Join-Path $localStateRoot 'popout-bridge'
 $popoutRuntimeRoot = Join-Path $localStateRoot 'popout-runtime'
+$desktopUiStateRoot = Join-Path $localStateRoot 'desktop-ui-bridge'
+$desktopUiRuntimeRoot = Join-Path $localStateRoot 'desktop-ui-runtime'
 $resolvedStateRoot = [IO.Path]::GetFullPath($localStateRoot).TrimEnd('\', '/')
 
-foreach ($target in @($bridgeStateRoot, $runtimeRoot, $popoutStateRoot, $popoutRuntimeRoot)) {
+foreach ($target in @($bridgeStateRoot, $runtimeRoot, $popoutStateRoot, $popoutRuntimeRoot, $desktopUiStateRoot, $desktopUiRuntimeRoot)) {
     $resolvedTarget = [IO.Path]::GetFullPath($target).TrimEnd('\', '/')
     if (-not $resolvedTarget.StartsWith($resolvedStateRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
         throw 'A Bridge cleanup target resolved outside the CogentSpec local state directory.'
@@ -55,6 +57,7 @@ $workersStopped = 0
 $stoppedProcessIds = New-Object 'Collections.Generic.HashSet[int]'
 $resolvedRuntimeRoot = [IO.Path]::GetFullPath($runtimeRoot).TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
 $resolvedPopoutRuntime = [IO.Path]::GetFullPath($popoutRuntimeRoot).TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
+$resolvedDesktopUiRuntime = [IO.Path]::GetFullPath($desktopUiRuntimeRoot).TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
 if (Test-Path -LiteralPath $bridgeStateRoot -PathType Container) {
     foreach ($stateFile in @(Get-ChildItem -LiteralPath $bridgeStateRoot -Filter '*.json' -File -ErrorAction SilentlyContinue)) {
         try {
@@ -101,6 +104,28 @@ if (Test-Path -LiteralPath $popoutStateRoot -PathType Container) {
     }
 }
 
+if (Test-Path -LiteralPath $desktopUiStateRoot -PathType Container) {
+    foreach ($stateFile in @(Get-ChildItem -LiteralPath $desktopUiStateRoot -Filter '*.json' -File -ErrorAction SilentlyContinue)) {
+        try {
+            $state = Get-Content -Raw -LiteralPath $stateFile.FullName | ConvertFrom-Json
+            $processId = [int]$state.processId
+            $watcherScript = [string]$state.watcherScript
+            if ($processId -le 0 -or -not $watcherScript) { continue }
+            $resolvedWatcher = [IO.Path]::GetFullPath($watcherScript)
+            if (-not $resolvedWatcher.StartsWith($resolvedDesktopUiRuntime, [StringComparison]::OrdinalIgnoreCase)) { continue }
+            $process = Get-CimInstance Win32_Process -Filter "ProcessId=$processId" -ErrorAction SilentlyContinue
+            $payload = if ($process) { Get-PowerShellPayload $process } else { '' }
+            if ($process -and $payload.IndexOf('watch-cogentspec-desktop-ui-bridge.ps1', [StringComparison]::OrdinalIgnoreCase) -ge 0) {
+                Stop-Process -Id $processId -Force -ErrorAction Stop
+                [void]$stoppedProcessIds.Add($processId)
+                $workersStopped++
+            }
+        } catch {
+            if ($_.Exception.Message -match 'Access is denied|Cannot stop process') { throw }
+        }
+    }
+}
+
 
 if (-not $TestMode -or (Test-Path -LiteralPath $runtimeRoot -PathType Container)) {
     foreach ($process in @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
@@ -113,7 +138,9 @@ if (-not $TestMode -or (Test-Path -LiteralPath $runtimeRoot -PathType Container)
             $payload.IndexOf($resolvedRuntimeRoot, [StringComparison]::OrdinalIgnoreCase) -ge 0
         $standaloneWorker = $payload.IndexOf('watch-cogentspec-popout-bridge.ps1', [StringComparison]::OrdinalIgnoreCase) -ge 0 -and
             $payload.IndexOf([IO.Path]::GetFullPath($popoutRuntimeRoot), [StringComparison]::OrdinalIgnoreCase) -ge 0
-        if (-not $taskWorker -and -not $standaloneWorker) { continue }
+        $desktopUiWorker = $payload.IndexOf('watch-cogentspec-desktop-ui-bridge.ps1', [StringComparison]::OrdinalIgnoreCase) -ge 0 -and
+            $payload.IndexOf([IO.Path]::GetFullPath($desktopUiRuntimeRoot), [StringComparison]::OrdinalIgnoreCase) -ge 0
+        if (-not $taskWorker -and -not $standaloneWorker -and -not $desktopUiWorker) { continue }
         try {
             Stop-Process -Id $processId -Force -ErrorAction Stop
             [void]$stoppedProcessIds.Add($processId)
@@ -124,7 +151,7 @@ if (-not $TestMode -or (Test-Path -LiteralPath $runtimeRoot -PathType Container)
     }
 }
 
-foreach ($target in @($bridgeStateRoot, $runtimeRoot, $popoutStateRoot, $popoutRuntimeRoot)) {
+foreach ($target in @($bridgeStateRoot, $runtimeRoot, $popoutStateRoot, $popoutRuntimeRoot, $desktopUiStateRoot, $desktopUiRuntimeRoot)) {
     if (Test-Path -LiteralPath $target) {
         Remove-Item -LiteralPath $target -Recurse -Force
     }
@@ -132,6 +159,7 @@ foreach ($target in @($bridgeStateRoot, $runtimeRoot, $popoutStateRoot, $popoutR
 
 if (-not $TestMode) {
     Remove-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name 'CogentSpecStandalonePopoutBridge' -ErrorAction SilentlyContinue
+    Remove-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name 'CogentSpecDesktopUiBridge' -ErrorAction SilentlyContinue
 }
 
 $credentialPreserved = (-not $credentialExistedBefore) -or (Test-Path -LiteralPath $credentialPath -PathType Leaf)

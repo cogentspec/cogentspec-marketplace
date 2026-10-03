@@ -92,6 +92,15 @@ if ($Mode -ne 'claim' -or $InstallationRequest -notmatch '^cgb_[A-Za-z0-9_-]{40,
 '@
     Set-Content -LiteralPath (Join-Path $fixturePlugin 'skills\cogentspec\scripts\start-cogentspec-popout-bridge.ps1') -Value $popoutBridgeFixture -Encoding UTF8
 
+    $desktopUiBridgeFixture = @'
+[ordered]@{
+    status = 'ready'
+    bridge = 'started'
+    processId = 4343
+} | ConvertTo-Json -Compress
+'@
+    Set-Content -LiteralPath (Join-Path $fixturePlugin 'skills\cogentspec\scripts\start-cogentspec-desktop-ui-bridge.ps1') -Value $desktopUiBridgeFixture -Encoding UTF8
+
     $pluginManifest = Get-Content -LiteralPath (Join-Path $fixturePlugin '.codex-plugin\plugin.json') -Raw | ConvertFrom-Json
     $escapedMarketplace = $fixtureMarketplace.Replace("'", "''")
     $escapedSourcePlugin = $fixturePlugin.Replace("'", "''")
@@ -192,6 +201,7 @@ public static class GitFixture
     Assert-InstallerTest ([bool]$update.packageRuntimeCleared) 'The update fixture did not clear the superseded Bridge runtime.'
     Assert-InstallerTest ([bool]$update.workerStateCleared) 'The update fixture did not clear the superseded worker state.'
     Assert-InstallerTest ([bool]$update.popoutBridgeReady) 'The update fixture did not start the standalone Popout Bridge.'
+    Assert-InstallerTest ([bool]$update.desktopUiBridgeReady) 'The update fixture did not start the independent Desktop UI Bridge.'
     Assert-InstallerTest ([int]$update.workersStopped -eq 1) 'The update fixture did not report the stopped verified worker.'
     Assert-InstallerTest ([bool]$update.continueCurrentTask) 'The update fixture did not permit the current task to continue.'
     Assert-InstallerTest ([bool]$update.fastUpdatePath) 'The update fixture did not use the fast update-only path.'
@@ -204,6 +214,7 @@ public static class GitFixture
     $updateStageNames = @($update.completedStages | ForEach-Object { [string]$_.stage })
     Assert-InstallerTest ($updateStageNames -contains 'superseded_bridge_cleanup') 'The update fixture did not evidence superseded Bridge cleanup.'
     Assert-InstallerTest ($updateStageNames -contains 'standalone_popout_bridge') 'The update fixture did not evidence standalone Popout Bridge startup.'
+    Assert-InstallerTest ($updateStageNames -contains 'desktop_ui_bridge') 'The update fixture did not evidence Desktop UI Bridge startup.'
     Assert-InstallerTest ($updateStageNames -contains 'secure_project_data_connection') 'The update fixture did not evidence the secure project-data connection.'
     Assert-InstallerTest ($updateStageNames -contains 'workspace_readiness_skipped_for_update') 'The update fixture did not evidence the skipped first-install web check.'
     Assert-InstallerTest ($updateStageNames -notcontains 'workspace_readiness') 'The update fixture repeated the first-install web readiness stage.'
@@ -220,6 +231,7 @@ public static class GitFixture
     Assert-InstallerTest ($claimRun.exitCode -eq 0) ("The isolated v3 claim fixture returned a non-zero exit code: {0}" -f ($claim | ConvertTo-Json -Compress -Depth 5))
     Assert-InstallerTest ([string]$claim.status -eq 'installed') 'The isolated claim fixture did not complete installation.'
     Assert-InstallerTest ([bool]$claim.popoutBridgeReady) 'The isolated claim fixture did not start the standalone Popout Bridge.'
+    Assert-InstallerTest ([bool]$claim.desktopUiBridgeReady) 'The isolated claim fixture did not start the independent Desktop UI Bridge.'
     Assert-InstallerTest ([bool]$claim.claimAttempted) 'The isolated claim fixture did not attempt its local claim helper.'
     Assert-InstallerTest ([bool]$claim.accountRequestConsumed) 'The isolated claim fixture did not report consumption.'
     Assert-InstallerTest ([bool]$claim.connected -and [bool]$claim.accountBound -and [bool]$claim.installationBound) 'The isolated claim fixture did not return all connection guarantees.'

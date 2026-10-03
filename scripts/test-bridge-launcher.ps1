@@ -211,16 +211,16 @@ for ($heartbeat = 0; $heartbeat -lt 15; $heartbeat += 1) {
     Assert-BridgeLauncherTest ($popupHelperText.Contains('FindPopupWindows(int[] processIds)')) 'The ChatGPT popout helper cannot inspect every signed ChatGPT tool window.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains('function Find-VerifiedChatGptPopupWindow')) 'The ChatGPT popout helper does not select the exact accessible composer window.'
     Assert-BridgeLauncherTest (-not $popupHelperText.Contains('RevealPopupWindow')) 'The ChatGPT popout helper can expose a host-dismissed native window without reopening it through ChatGPT.'
-    Assert-BridgeLauncherTest ($popupHelperText.Contains("if (`$Mode -eq 'desktop')")) 'The ChatGPT helper does not isolate the full Desktop UI flow from the popout flow.'
-    $desktopModeStart = $popupHelperText.IndexOf("if (`$Mode -eq 'desktop')")
-    $desktopModeEnd = $popupHelperText.IndexOf("if (`$Mode -eq 'dismiss')", $desktopModeStart)
-    $desktopModeText = $popupHelperText.Substring($desktopModeStart, $desktopModeEnd - $desktopModeStart)
-    Assert-BridgeLauncherTest (-not $desktopModeText.Contains('task_identity_unavailable')) 'The Desktop UI bootstrap still requires a previously connected task.'
-    Assert-BridgeLauncherTest ($popupHelperText.Contains("if (`$ThreadId)")) 'The Desktop UI flow does not distinguish exact-task reopening from first-connection bootstrap.'
-    Assert-BridgeLauncherTest ($popupHelperText.Contains('Start-Process "codex://threads/$ThreadId"')) 'The Desktop UI flow does not reopen the exact connected ChatGPT task when its identity is available.'
-    Assert-BridgeLauncherTest ($popupHelperText.Contains('function Wait-ForChatGptMainWindow')) 'The Desktop UI bootstrap does not wait for the main ChatGPT Desktop window.'
-    Assert-BridgeLauncherTest ($popupHelperText.Contains('ownerThreadReopened = $ownerThreadReopened')) 'The Desktop UI flow does not report whether it reopened an exact task.'
-    Assert-BridgeLauncherTest ($popupHelperText.Contains('desktopWindowLaunched = $ownerThreadReopened')) 'The Desktop UI flow does not distinguish exact-task launch from current-window bootstrap.'
+    $desktopUiHelperText = Get-Content -Raw -LiteralPath (Join-Path $repositoryRoot 'plugins\cogentspec\skills\cogentspec\scripts\open-chatgpt-desktop-ui.ps1')
+    Assert-BridgeLauncherTest ($desktopUiHelperText.Contains('function Start-ChatGptDesktop')) 'The independent Desktop UI helper cannot launch ChatGPT Desktop.'
+    Assert-BridgeLauncherTest ($desktopUiHelperText.Contains('function Start-NewChat')) 'The independent Desktop UI helper does not create a new chat.'
+    Assert-BridgeLauncherTest ($desktopUiHelperText.Contains("'New chat', 'Start new chat'")) 'The Desktop UI helper does not bind the verified new-chat action.'
+    Assert-BridgeLauncherTest ($desktopUiHelperText.Contains('[switch]$StartNewChat')) 'The Desktop UI helper does not require an explicit new-chat request.'
+    Assert-BridgeLauncherTest ($desktopUiHelperText.Contains('[switch]$PasteClipboard')) 'The Desktop UI helper cannot populate the new-chat composer.'
+    Assert-BridgeLauncherTest ($desktopUiHelperText.Contains('newChatStarted = $true')) 'The Desktop UI helper does not report verified new-chat creation.'
+    Assert-BridgeLauncherTest ($desktopUiHelperText.Contains('messageSubmitted = $false')) 'The Desktop UI helper does not prove it left submission to the user.'
+    Assert-BridgeLauncherTest (-not $desktopUiHelperText.Contains('codex://threads/')) 'The Desktop UI helper still depends on a Codex task deep link.'
+    Assert-BridgeLauncherTest (-not $desktopUiHelperText.Contains('VK_RETURN')) 'The Desktop UI helper must not submit composer text.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains('desktopWindowLaunched = $false')) 'The ChatGPT popout helper does not report that it preserved the existing desktop window.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains('ownerThreadReopened = $false')) 'The ChatGPT popout helper still reports reopening the owning task.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains('function Wait-ForChatGptTaskOwner')) 'The ChatGPT popout helper does not wait for the owning task window to become ready.'
@@ -276,18 +276,27 @@ for ($heartbeat = 0; $heartbeat -lt 15; $heartbeat += 1) {
         $candidateText = Get-Content -Raw -LiteralPath (Join-Path $repositoryRoot $relativePath)
         Assert-BridgeLauncherTest ($candidateText -ceq $popupHelperText) "The ChatGPT popout helper is inconsistent at $relativePath."
     }
+    foreach ($scriptName in @('open-chatgpt-desktop-ui.ps1', 'start-cogentspec-desktop-ui-bridge.ps1', 'watch-cogentspec-desktop-ui-bridge.ps1')) {
+        $canonicalDesktopUiText = Get-Content -Raw -LiteralPath (Join-Path $repositoryRoot "plugins\cogentspec\skills\cogentspec\scripts\$scriptName")
+        $compatibilityDesktopUiText = Get-Content -Raw -LiteralPath (Join-Path $repositoryRoot "plugins\cogentstack\skills\cogentstack\scripts\$scriptName")
+        Assert-BridgeLauncherTest ($compatibilityDesktopUiText -ceq $canonicalDesktopUiText) "The independent Desktop UI script is inconsistent at $scriptName."
+    }
     $watcherText = Get-Content -Raw -LiteralPath (Join-Path $repositoryRoot 'plugins\cogentspec\skills\cogentspec\scripts\watch-cogentstack-bridge.ps1')
     Assert-BridgeLauncherTest ($watcherText.Contains('ChatGPT popout shown with its composer ready')) 'The Bridge does not report the ready ChatGPT composer.'
     Assert-BridgeLauncherTest ($watcherText.Contains("targetRequestId -in @('chatgpt-desktop-popup:connect', 'chatgpt-desktop-popup:update')")) 'The Bridge does not distinguish the popout connection and update composer actions.'
-    Assert-BridgeLauncherTest ($watcherText.Contains("targetRequestId -in @('chatgpt-desktop-ui:connect', 'chatgpt-desktop-ui:update')")) 'The Bridge does not distinguish the separate Desktop UI connection and update actions.'
-    Assert-BridgeLauncherTest ($watcherText.Contains("if (`$desktopUiRequest) { 'desktop' } else { 'open' }")) 'The Bridge does not keep Desktop UI and popout helper modes separate.'
+    Assert-BridgeLauncherTest ($watcherText.Contains("targetRequestId -in @('chatgpt-desktop-ui:connect', 'chatgpt-desktop-ui:update')")) 'The legacy project worker no longer preserves its existing Desktop UI compatibility branches.'
+    Assert-BridgeLauncherTest ($watcherText.Contains("if (`$desktopUiRequest) { 'desktop' } else { 'open' }")) 'The legacy project worker no longer preserves its existing helper-mode separation.'
     Assert-BridgeLauncherTest ($watcherText.Contains("'-ThreadId', `$ThreadId")) 'The Bridge does not bind ChatGPT actions to the invoking task identity.'
     Assert-BridgeLauncherTest ($watcherText.Contains("`$arguments += '-PasteClipboard'")) 'The Bridge does not request update-composer population.'
     Assert-BridgeLauncherTest ($watcherText.Contains("`$arguments += '-UseRetainedChat'")) 'The Bridge does not request explicit reconnection of the retained popout chat.'
     Assert-BridgeLauncherTest ($watcherText.Contains('ChatGPT popout shown and its verified composer populated with the copied update request.')) 'The Bridge does not report verified update-composer population.'
     Assert-BridgeLauncherTest ($watcherText.Contains('ChatGPT popout shown with $cogentspec ready to send in the retained chat.')) 'The Bridge does not report the explicit connection command preload.'
-    Assert-BridgeLauncherTest ($watcherText.Contains('Connected ChatGPT task opened in Desktop UI with $cogentspec ready to send.')) 'The Bridge does not report the separate Desktop UI connection result.'
-    Assert-BridgeLauncherTest ($watcherText.Contains('Connected ChatGPT task opened in Desktop UI with the verified update request ready to send.')) 'The Bridge does not report the separate Desktop UI update result.'
+    $desktopUiWatcherText = Get-Content -Raw -LiteralPath (Join-Path $repositoryRoot 'plugins\cogentspec\skills\cogentspec\scripts\watch-cogentspec-desktop-ui-bridge.ps1')
+    Assert-BridgeLauncherTest ($desktopUiWatcherText.Contains('/api/plugin/desktop-ui-actions')) 'The independent Desktop UI worker does not poll its account-level queue.'
+    Assert-BridgeLauncherTest ($desktopUiWatcherText.Contains("@('chatgpt-desktop-ui:connect', 'chatgpt-desktop-ui:update')")) 'The Desktop UI worker does not restrict its two supported requests.'
+    Assert-BridgeLauncherTest ($desktopUiWatcherText.Contains('-StartNewChat -PasteClipboard')) 'The Desktop UI worker does not request a new chat with a filled composer.'
+    Assert-BridgeLauncherTest ($desktopUiWatcherText.Contains('A new ChatGPT Desktop chat opened with $cogentspec ready to send.')) 'The Desktop UI worker does not report the new connection chat.'
+    Assert-BridgeLauncherTest ($desktopUiWatcherText.Contains('A new ChatGPT Desktop chat opened with the verified update request ready to send.')) 'The Desktop UI worker does not report the new update chat.'
     Assert-BridgeLauncherTest ($watcherText.Contains("'set_chatgpt_popup_topmost' { 'open-chatgpt-popup.ps1' }")) 'The Bridge does not route ChatGPT popout pin requests through the verified helper.'
     Assert-BridgeLauncherTest ($watcherText.Contains("'chatgpt-desktop-popup:pinned' { 'pin' }")) 'The Bridge does not validate the ChatGPT popout pin target.'
     Assert-BridgeLauncherTest ($watcherText.Contains("'chatgpt-desktop-popup:unpinned' { 'unpin' }")) 'The Bridge does not validate the ChatGPT popout unpin target.'

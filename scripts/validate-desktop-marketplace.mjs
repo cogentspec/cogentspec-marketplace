@@ -99,6 +99,7 @@ for (const requiredInstallerMarker of [
   "previousPackageReplaced = $true",
   "packageRuntimeCleared = $true",
   "workerStateCleared = $true",
+  "desktopUiBridgeReady = $true",
   "continueCurrentTask = $true",
   "fastUpdatePath = $true",
   "workspaceReadinessSkipped = $true",
@@ -154,6 +155,9 @@ const canonicalConnector = await readFile(join(sourcePluginPath, "skills", "coge
 const canonicalReset = await readFile(join(sourcePluginPath, "skills", "cogentspec", "scripts", "reset-cogentspec-update.ps1"), "utf8");
 const canonicalPopoutStarter = await readFile(join(sourcePluginPath, "skills", "cogentspec", "scripts", "start-cogentspec-popout-bridge.ps1"), "utf8");
 const canonicalPopoutWatcher = await readFile(join(sourcePluginPath, "skills", "cogentspec", "scripts", "watch-cogentspec-popout-bridge.ps1"), "utf8");
+const canonicalDesktopUiStarter = await readFile(join(sourcePluginPath, "skills", "cogentspec", "scripts", "start-cogentspec-desktop-ui-bridge.ps1"), "utf8");
+const canonicalDesktopUiWatcher = await readFile(join(sourcePluginPath, "skills", "cogentspec", "scripts", "watch-cogentspec-desktop-ui-bridge.ps1"), "utf8");
+const canonicalDesktopUiHelper = await readFile(join(sourcePluginPath, "skills", "cogentspec", "scripts", "open-chatgpt-desktop-ui.ps1"), "utf8");
 const compatibilityStarter = await readFile(join(compatibilityPluginPath, "skills", "cogentstack", "scripts", "start-cogentstack-bridge.ps1"), "utf8");
 const compatibilitySkill = await readFile(join(compatibilityPluginPath, "skills", "cogentstack", "SKILL.md"), "utf8");
 const compatibilityUpdateCheck = await readFile(join(compatibilityPluginPath, "skills", "cogentstack", "scripts", "check-cogentspec-update.ps1"), "utf8");
@@ -161,6 +165,9 @@ const compatibilityConnector = await readFile(join(compatibilityPluginPath, "ski
 const compatibilityReset = await readFile(join(compatibilityPluginPath, "skills", "cogentstack", "scripts", "reset-cogentspec-update.ps1"), "utf8");
 const compatibilityPopoutStarter = await readFile(join(compatibilityPluginPath, "skills", "cogentstack", "scripts", "start-cogentspec-popout-bridge.ps1"), "utf8");
 const compatibilityPopoutWatcher = await readFile(join(compatibilityPluginPath, "skills", "cogentstack", "scripts", "watch-cogentspec-popout-bridge.ps1"), "utf8");
+const compatibilityDesktopUiStarter = await readFile(join(compatibilityPluginPath, "skills", "cogentstack", "scripts", "start-cogentspec-desktop-ui-bridge.ps1"), "utf8");
+const compatibilityDesktopUiWatcher = await readFile(join(compatibilityPluginPath, "skills", "cogentstack", "scripts", "watch-cogentspec-desktop-ui-bridge.ps1"), "utf8");
+const compatibilityDesktopUiHelper = await readFile(join(compatibilityPluginPath, "skills", "cogentstack", "scripts", "open-chatgpt-desktop-ui.ps1"), "utf8");
 for (const marker of ["cogentspec-update-check-v1", "/api/plugin-version", "update_available", "check_unavailable", "UPDATE.v1.md"]) {
   if (!canonicalUpdateCheck.includes(marker)) fail(`the automatic update check is missing marker: ${marker}`);
 }
@@ -191,7 +198,7 @@ const canonicalWatcher = await readFile(join(sourcePluginPath, "skills", "cogent
 for (const marker of ["[string]$PluginId", "[string]$PluginVersion", "pluginVersion=$([Uri]::EscapeDataString($PluginVersion))"]) {
   if (!canonicalWatcher.includes(marker)) fail(`the Desktop Bridge watcher is missing version marker: ${marker}`);
 }
-for (const marker of ["bridge-runtime", "Stop-Process", "packageRuntimeCleared = $true", "workerStateCleared = $true", "credentialPreserved = $true"]) {
+for (const marker of ["bridge-runtime", "desktop-ui-runtime", "watch-cogentspec-desktop-ui-bridge.ps1", "Stop-Process", "packageRuntimeCleared = $true", "workerStateCleared = $true", "credentialPreserved = $true"]) {
   if (!canonicalReset.includes(marker)) fail(`the update reset helper is missing marker: ${marker}`);
 }
 for (const marker of ["CogentSpecStandalonePopoutBridge", "popout-runtime", "watch-cogentspec-popout-bridge.ps1", "serverAcknowledged", "while (`$true)", "supervised = $true"]) {
@@ -200,11 +207,26 @@ for (const marker of ["CogentSpecStandalonePopoutBridge", "popout-runtime", "wat
 for (const marker of ["/api/plugin/desktop-popout-actions", "-UseRetainedChat", "-PasteClipboard", "composerPopulated", "Get-HttpStatusCode", "consecutiveFailures", "MaximumRetryMilliseconds"]) {
   if (!canonicalPopoutWatcher.includes(marker)) fail(`the standalone Popout Bridge watcher is missing marker: ${marker}`);
 }
+for (const marker of ["CogentSpecDesktopUiBridge", "desktop-ui-runtime", "watch-cogentspec-desktop-ui-bridge.ps1", "serverAcknowledged", "while (`$true)", "supervised = $true"]) {
+  if (!canonicalDesktopUiStarter.includes(marker)) fail(`the Desktop UI Bridge starter is missing marker: ${marker}`);
+}
+for (const marker of ["/api/plugin/desktop-ui-actions", "-StartNewChat", "-PasteClipboard", "newChatStarted", "composerPopulated", "messageSubmitted", "Get-HttpStatusCode", "MaximumRetryMilliseconds"]) {
+  if (!canonicalDesktopUiWatcher.includes(marker)) fail(`the Desktop UI Bridge watcher is missing marker: ${marker}`);
+}
+for (const marker of ["Start-ChatGptDesktop", "Start-NewChat", "'New chat', 'Start new chat'", "publisherVerified = $true", "messageSubmitted = $false", "The new ChatGPT composer unexpectedly contains unsent text."]) {
+  if (!canonicalDesktopUiHelper.includes(marker)) fail(`the Desktop UI helper is missing marker: ${marker}`);
+}
+if (canonicalDesktopUiHelper.includes("VK_RETURN") || canonicalDesktopUiHelper.includes("codex://threads/")) {
+  fail("the Desktop UI helper must neither submit the request nor depend on a Codex task deep link");
+}
 const normalizedScript = (value) => value.replaceAll("\r\n", "\n");
 if (normalizedScript(canonicalStarter) !== normalizedScript(compatibilityStarter)
   || normalizedScript(canonicalUpdateCheck) !== normalizedScript(compatibilityUpdateCheck)
   || normalizedScript(canonicalConnector) !== normalizedScript(compatibilityConnector)
   || normalizedScript(canonicalReset) !== normalizedScript(compatibilityReset)
+  || normalizedScript(canonicalDesktopUiStarter) !== normalizedScript(compatibilityDesktopUiStarter)
+  || normalizedScript(canonicalDesktopUiWatcher) !== normalizedScript(compatibilityDesktopUiWatcher)
+  || normalizedScript(canonicalDesktopUiHelper) !== normalizedScript(compatibilityDesktopUiHelper)
   || normalizedScript(canonicalPopoutStarter) !== normalizedScript(compatibilityPopoutStarter)
   || normalizedScript(canonicalPopoutWatcher) !== normalizedScript(compatibilityPopoutWatcher)) {
   fail("the canonical and compatibility Desktop Bridge handoffs differ");

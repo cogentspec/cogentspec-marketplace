@@ -299,6 +299,7 @@ try {
         'skills/cogentspec/scripts/restore-project-version.ps1',
         'skills/cogentspec/scripts/save-project-version.ps1',
         'skills/cogentspec/scripts/native-command.ps1',
+        'skills/cogentspec/scripts/open-chatgpt-desktop-ui.ps1',
         'skills/cogentspec/scripts/open-chatgpt-popup.ps1',
         'skills/cogentspec/scripts/prepare-development-handoff.ps1',
         'skills/cogentspec/scripts/prepare-deployment.ps1',
@@ -307,8 +308,10 @@ try {
         'skills/cogentspec/scripts/project-knowledge.ps1',
         'skills/cogentspec/scripts/project-preview-readiness.ps1',
         'skills/cogentspec/scripts/reset-cogentspec-update.ps1',
+        'skills/cogentspec/scripts/start-cogentspec-desktop-ui-bridge.ps1',
         'skills/cogentspec/scripts/start-cogentspec-popout-bridge.ps1',
         'skills/cogentspec/scripts/start-cogentstack-bridge.ps1',
+        'skills/cogentspec/scripts/watch-cogentspec-desktop-ui-bridge.ps1',
         'skills/cogentspec/scripts/watch-cogentspec-popout-bridge.ps1',
         'skills/cogentspec/scripts/watch-cogentstack-bridge.ps1',
         'skills/cogentspec/SKILL.md'
@@ -410,6 +413,15 @@ try {
         }
         Complete-InstallStage
 
+        Set-InstallStage -Name 'desktop_ui_bridge'
+        $desktopUiBridgeStart = Join-Path $installedPath 'skills\cogentspec\scripts\start-cogentspec-desktop-ui-bridge.ps1'
+        $desktopUiBridgeOutput = @(& $desktopUiBridgeStart 2>&1)
+        $desktopUiBridgeResult = Read-JsonResult -Text (($desktopUiBridgeOutput | ForEach-Object { [string]$_ }) -join "`n") -Operation 'Desktop UI Bridge startup'
+        if ([string]$desktopUiBridgeResult.status -ne 'ready') {
+            throw 'Desktop UI Bridge did not become ready after the update.'
+        }
+        Complete-InstallStage
+
         [ordered]@{
             protocol = 'trusted-marketplace-update-v1'
             status = 'updated'
@@ -428,6 +440,7 @@ try {
             packageRuntimeCleared = $true
             workerStateCleared = $true
             popoutBridgeReady = $true
+            desktopUiBridgeReady = $true
             workersStopped = [int]$resetResult.workersStopped
             continueCurrentTask = $true
             fastUpdatePath = $true
@@ -499,6 +512,15 @@ try {
     }
     Complete-InstallStage
 
+    Set-InstallStage -Name 'desktop_ui_bridge'
+    $desktopUiBridgeStart = Join-Path $installedPath 'skills\cogentspec\scripts\start-cogentspec-desktop-ui-bridge.ps1'
+    $desktopUiBridgeOutput = @(& $desktopUiBridgeStart 2>&1)
+    $desktopUiBridgeResult = Read-JsonResult -Text (($desktopUiBridgeOutput | ForEach-Object { [string]$_ }) -join "`n") -Operation 'Desktop UI Bridge startup'
+    if ([string]$desktopUiBridgeResult.status -ne 'ready') {
+        throw 'Desktop UI Bridge did not become ready after installation.'
+    }
+    Complete-InstallStage
+
     [ordered]@{
         protocol = $protocol
         status = 'installed'
@@ -516,6 +538,7 @@ try {
         accountBound = $true
         installationBound = $true
         popoutBridgeReady = $true
+        desktopUiBridgeReady = $true
         projectDataConnectionReady = $projectDataConnectionReady
         version = [string]$installedManifest.version
         installerElapsedMs = [int]$timer.ElapsedMilliseconds
