@@ -26,21 +26,17 @@ function Write-Failure([string]$Status, [string]$Reason, [bool]$Opened = $false)
 
 function Test-IsChatGptComposer($Element) {
     if ($null -eq $Element) { return $false }
-    $name = [string]$Element.Current.Name
-    return $name -in @('Work with ChatGPT', 'Ask ChatGPT anything locally', 'Ask ChatGPT anything')
+    $name = (([string]$Element.Current.Name) -replace '[\u200B-\u200D\uFEFF]', '').Trim()
+    return $name -in @('Work with ChatGPT', 'Ask ChatGPT anything locally', 'Ask ChatGPT anything') -and
+        $Element.Current.IsEnabled -and $Element.Current.IsKeyboardFocusable
 }
 
 function Get-ChatGptComposerCondition {
-    return [System.Windows.Automation.OrCondition]::new(
-        [System.Windows.Automation.PropertyCondition]::new(
-            [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
-            [System.Windows.Automation.ControlType]::Edit
-        ),
-        [System.Windows.Automation.PropertyCondition]::new(
-            [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
-            [System.Windows.Automation.ControlType]::Document
-        )
-    )
+    # ChatGPT has exposed the same named contenteditable composer as Edit,
+    # Document, and Custom controls across Desktop releases. The signed process,
+    # verified Popout window, exact normalized name, and focusability are the
+    # stable identity boundaries; the host's transient UIA role is not.
+    return [System.Windows.Automation.Condition]::TrueCondition
 }
 
 function Set-ChatGptComposerFocus($Composer) {

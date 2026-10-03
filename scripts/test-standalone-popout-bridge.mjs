@@ -20,7 +20,13 @@ const popupWindowFinder = productionHelperSource.slice(
 );
 assert.match(popupWindowFinder, /if \(!IsWindowVisible\(window\)\) return true;/);
 assert.match(productionHelperSource, /'Dismiss Popout Window'/);
-assert.match(productionHelperSource, /\[System\.Windows\.Automation\.ControlType\]::Document/);
+assert.match(productionHelperSource, /return \[System\.Windows\.Automation\.Condition\]::TrueCondition/);
+assert.match(productionHelperSource, /\$Element\.Current\.IsEnabled -and \$Element\.Current\.IsKeyboardFocusable/);
+const composerConditionSource = productionHelperSource.slice(
+  productionHelperSource.indexOf("function Get-ChatGptComposerCondition"),
+  productionHelperSource.indexOf("function Set-ChatGptComposerFocus"),
+);
+assert.doesNotMatch(composerConditionSource, /ControlTypeProperty/);
 assert.match(productionHelperSource, /Re-run ChatGPT's own popout hotkey so ChatGPT re-presents the\s+# retained chat and exposes its composer before CogentSpec tries to paste\./);
 assert.match(productionHelperSource, /\$verifiedRetainedPopup = Find-VerifiedChatGptPopupWindow -ProcessIds \$chatGptProcessIds -AllowNativeRetainedFallback \$false/);
 assert.match(productionHelperSource, /if \(-not \$UseRetainedChat -and -not \(Invoke-PopupActivation -PopupWindow \$popupWindow\)\)/);
