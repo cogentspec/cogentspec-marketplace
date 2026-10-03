@@ -864,10 +864,10 @@ if (-not $ThreadId -and -not $UseRetainedChat) {
 if ($popupWindow -ne [IntPtr]::Zero) {
     $popupWasVisible = [CogentSpec.ChatGptPopupNative]::IsVisible($popupWindow)
     if ($popupWasVisible -and $UseRetainedChat) {
-        if (-not (Invoke-PopupActivation -PopupWindow $popupWindow)) {
-            Write-Failure -Status 'popup_activation_failed' -Reason 'CogentSpec found the retained ChatGPT popout but could not make it ready for reconnection. Click its composer once, then try again.' -Opened $true
-            return
-        }
+        # A web-initiated request can be denied permission to take foreground even
+        # though UI Automation can still focus the verified composer. Treat native
+        # activation as best effort and let composer focus be the readiness proof.
+        [void](Invoke-PopupActivation -PopupWindow $popupWindow)
         $activatedExisting = $true
     } elseif ($popupWasVisible) {
         [void][CogentSpec.ChatGptPopupNative]::SendControlShiftSpace()
@@ -922,7 +922,11 @@ if (-not $activatedExisting -and $popupWindow -ne [IntPtr]::Zero -and $popupVisi
     Start-Sleep -Milliseconds 1200
 }
 
-if ($popupWindow -eq [IntPtr]::Zero -or -not $popupVisible -or -not (Invoke-PopupActivation -PopupWindow $popupWindow)) {
+if ($popupWindow -eq [IntPtr]::Zero -or -not $popupVisible) {
+    Write-Failure -Status 'popup_not_opened' -Reason 'The connected ChatGPT task did not expose its popout window. Press Ctrl + Shift + Space from that task.'
+    return
+}
+if (-not $UseRetainedChat -and -not (Invoke-PopupActivation -PopupWindow $popupWindow)) {
     Write-Failure -Status 'popup_not_opened' -Reason 'The connected ChatGPT task did not expose its popout window. Press Ctrl + Shift + Space from that task.'
     return
 }
@@ -969,7 +973,7 @@ if (-not $composer.focused) {
     return
 }
 
-if (-not (Invoke-PopupActivation -PopupWindow $popupWindow)) {
+if (-not $UseRetainedChat -and -not (Invoke-PopupActivation -PopupWindow $popupWindow)) {
     Write-Failure -Status 'popup_activation_failed' -Reason 'CogentSpec opened the ChatGPT popout but could not make it ready for keyboard input. Click the composer once to continue.' -Opened $true
     return
 }

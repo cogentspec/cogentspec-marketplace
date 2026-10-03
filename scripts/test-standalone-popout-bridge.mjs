@@ -21,6 +21,9 @@ const popupWindowFinder = productionHelperSource.slice(
 assert.match(popupWindowFinder, /if \(!IsWindowVisible\(window\)\) return true;/);
 assert.match(productionHelperSource, /'Dismiss Popout Window'/);
 assert.match(productionHelperSource, /\[System\.Windows\.Automation\.ControlType\]::Document/);
+assert.match(productionHelperSource, /Treat native\s+# activation as best effort and let composer focus be the readiness proof\./);
+assert.match(productionHelperSource, /if \(-not \$UseRetainedChat -and -not \(Invoke-PopupActivation -PopupWindow \$popupWindow\)\)/);
+assert.doesNotMatch(productionHelperSource, /found the retained ChatGPT popout but could not make it ready for reconnection/);
 assert.doesNotMatch(popupWindowFinder, /className\.ToString\(\), "Chrome_WidgetWin_1"/);
 assert.doesNotMatch(popupWindowFinder, /bool isPopupToolWindow/);
 
