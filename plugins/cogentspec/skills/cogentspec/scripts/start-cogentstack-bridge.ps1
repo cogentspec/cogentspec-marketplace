@@ -83,6 +83,52 @@ function Start-DetachedBridgeWatcher(
     return $process
 }
 
+function Read-DesktopBridgeToken {
+    if ($null -eq ('System.Security.Cryptography.ProtectedData' -as [type])) {
+        try { Add-Type -AssemblyName System.Security.Cryptography.ProtectedData -ErrorAction Stop }
+        catch { Add-Type -AssemblyName System.Security -ErrorAction Stop }
+    }
+    $credentialPath = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'CogentSpec\desktop-credential.json'
+    if (-not (Test-Path -LiteralPath $credentialPath -PathType Leaf)) { return '' }
+    $credential = Get-Content -Raw -LiteralPath $credentialPath | ConvertFrom-Json
+    $protected = [Convert]::FromBase64String([string]$credential.token)
+    $bytes = [System.Security.Cryptography.ProtectedData]::Unprotect(
+        $protected,
+        $null,
+        [System.Security.Cryptography.DataProtectionScope]::CurrentUser
+    )
+    return [Text.Encoding]::UTF8.GetString($bytes)
+}
+
+function Confirm-StandalonePopoutConnection([string]$SurfaceName, [string]$ConnectedContextKey, [string]$ConnectedThreadId) {
+    if ($SurfaceName -ne 'chatgpt') { return $false }
+    $token = ''
+    try {
+        $token = Read-DesktopBridgeToken
+        if (-not $token) { return $false }
+        $body = @{
+            contextKey = $ConnectedContextKey
+            threadId = $ConnectedThreadId
+        } | ConvertTo-Json -Compress
+        $requestParameters = @{
+            Method = 'Post'
+            Uri = 'https://cogentspec.com/api/plugin/desktop-popout-actions'
+            Headers = @{ Accept = 'application/json'; Authorization = "Bearer $token" }
+            ContentType = 'application/json'
+            Body = $body
+            TimeoutSec = 8
+        }
+        $response = Invoke-RestMethod @requestParameters
+        return [bool]$response.confirmed
+    } catch {
+        # The normal task connection must not fail when no standalone Popout
+        # reconnection is waiting to be confirmed.
+        return $false
+    } finally {
+        $token = $null
+    }
+}
+
 function Test-BridgePresenceReady(
     [string]$ReadyPath,
     [int]$ProcessId,
@@ -269,6 +315,10 @@ if (Test-Path -LiteralPath $statePath -PathType Leaf) {
                 -ExpectedThreadId $threadId `
                 -TimeoutMilliseconds 3000
             if ($presenceReady) {
+                $popoutConnectionConfirmed = Confirm-StandalonePopoutConnection `
+                    -SurfaceName $Surface `
+                    -ConnectedContextKey $resolvedContext `
+                    -ConnectedThreadId $threadId
                 Write-CompactJson ([ordered]@{
                     status = 'ready'
                     bridge = 'already_running'
@@ -284,6 +334,7 @@ if (Test-Path -LiteralPath $statePath -PathType Leaf) {
                     mcpState = $mcpState
                     pluginId = $pluginId
                     pluginVersion = $pluginVersion
+                    popoutConnectionConfirmed = $popoutConnectionConfirmed
                     launcherElapsedMs = [int]$launcherTimer.ElapsedMilliseconds
                 })
                 return
@@ -321,6 +372,10 @@ if (-not $presenceReady) {
     Remove-Item -LiteralPath $readyPath -Force -ErrorAction SilentlyContinue
     throw 'Desktop Bridge started, but CogentSpec did not verify this AI task.'
 }
+$popoutConnectionConfirmed = Confirm-StandalonePopoutConnection `
+    -SurfaceName $Surface `
+    -ConnectedContextKey $resolvedContext `
+    -ConnectedThreadId $threadId
 
 [ordered]@{
     processId = $watcher.Id
@@ -352,5 +407,6 @@ Write-CompactJson ([ordered]@{
     mcpState = $mcpState
     pluginId = $pluginId
     pluginVersion = $pluginVersion
+    popoutConnectionConfirmed = $popoutConnectionConfirmed
     launcherElapsedMs = [int]$launcherTimer.ElapsedMilliseconds
 })

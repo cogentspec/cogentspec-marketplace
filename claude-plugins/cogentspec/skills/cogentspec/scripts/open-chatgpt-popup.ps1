@@ -633,13 +633,14 @@ namespace CogentSpec {
 '@
 }
 
-function Find-VerifiedChatGptPopupWindow([int[]]$ProcessIds) {
+function Find-VerifiedChatGptPopupWindow([int[]]$ProcessIds, [bool]$AllowNativeRetainedFallback = $false) {
     Add-Type -AssemblyName UIAutomationClient -ErrorAction Stop
     $editCondition = [System.Windows.Automation.PropertyCondition]::new(
         [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
         [System.Windows.Automation.ControlType]::Edit
     )
-    $verified = @([CogentSpec.ChatGptPopupNative]::FindPopupWindows($ProcessIds) | Where-Object {
+    $nativeCandidates = @([CogentSpec.ChatGptPopupNative]::FindPopupWindows($ProcessIds))
+    $verified = @($nativeCandidates | Where-Object {
         try {
             $root = [System.Windows.Automation.AutomationElement]::FromHandle($_)
             $matches = @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $editCondition) | Where-Object {
@@ -649,6 +650,12 @@ function Find-VerifiedChatGptPopupWindow([int[]]$ProcessIds) {
         } catch { $false }
     })
     if ($verified.Count -eq 1) { return [IntPtr]$verified[0] }
+    # An occluded retained popout can temporarily stop exposing its UI Automation
+    # descendants. Its signed process, exact class/title and tool-window shape are
+    # still sufficient to activate the one retained window without toggling it.
+    if ($AllowNativeRetainedFallback -and $nativeCandidates.Count -eq 1) {
+        return [IntPtr]$nativeCandidates[0]
+    }
     return [IntPtr]::Zero
 }
 
@@ -713,7 +720,7 @@ function Set-ChatGptComposerFromClipboard([IntPtr]$Window) {
 }
 
 $chatGptProcessIds = [int[]]@($chatGptProcesses | ForEach-Object { [int]$_.Id })
-$popupWindow = Find-VerifiedChatGptPopupWindow -ProcessIds $chatGptProcessIds
+$popupWindow = Find-VerifiedChatGptPopupWindow -ProcessIds $chatGptProcessIds -AllowNativeRetainedFallback ([bool]$UseRetainedChat)
 $popupWasVisible = $null
 $shortcutSent = $false
 $shortcutAttempts = 0
@@ -895,7 +902,7 @@ if (-not $activatedExisting) {
         $popupDeadline = [DateTime]::UtcNow.AddSeconds(3)
         do {
             Start-Sleep -Milliseconds 100
-            $popupWindow = Find-VerifiedChatGptPopupWindow -ProcessIds $chatGptProcessIds
+            $popupWindow = Find-VerifiedChatGptPopupWindow -ProcessIds $chatGptProcessIds -AllowNativeRetainedFallback ([bool]$UseRetainedChat)
             $popupVisible = [CogentSpec.ChatGptPopupNative]::IsVisible($popupWindow)
         } while (($popupWindow -eq [IntPtr]::Zero -or -not $popupVisible) -and [DateTime]::UtcNow -lt $popupDeadline)
 
