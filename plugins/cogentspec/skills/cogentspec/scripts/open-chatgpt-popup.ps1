@@ -192,6 +192,84 @@ function Wait-ForChatGptTaskOwner([int[]]$ProcessIds) {
     }
 }
 
+function Wait-ForChatGptMainWindow([int[]]$ProcessIds) {
+    $deadline = [DateTime]::UtcNow.AddSeconds(10)
+    $stableSince = $null
+    $requiredStableMilliseconds = 1200
+    do {
+        $mainWindows = @([CogentSpec.ChatGptPopupNative]::FindMainWindows($ProcessIds))
+        if ($mainWindows.Count -eq 1) {
+            if ($null -eq $stableSince) { $stableSince = [DateTime]::UtcNow }
+            if (([DateTime]::UtcNow - $stableSince).TotalMilliseconds -ge $requiredStableMilliseconds) {
+                return [ordered]@{ ready = $true; window = [IntPtr]$mainWindows[0]; stableMilliseconds = $requiredStableMilliseconds }
+            }
+        } else {
+            $stableSince = $null
+        }
+        Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $deadline)
+    return [ordered]@{ ready = $false; window = [IntPtr]::Zero; stableMilliseconds = 0 }
+}
+
+function Enter-ChatGptFullView([IntPtr]$Window) {
+    try {
+        Add-Type -AssemblyName UIAutomationClient -ErrorAction Stop
+        $root = [System.Windows.Automation.AutomationElement]::FromHandle($Window)
+        if (-not $root) { throw 'The verified ChatGPT Desktop window did not expose an accessible interface.' }
+
+        $fullViewCondition = [System.Windows.Automation.AndCondition]::new(
+            [System.Windows.Automation.PropertyCondition]::new(
+                [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+                [System.Windows.Automation.ControlType]::Button
+            ),
+            [System.Windows.Automation.PropertyCondition]::new(
+                [System.Windows.Automation.AutomationElement]::NameProperty,
+                'Enter full view'
+            )
+        )
+        $fullViewButton = $root.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $fullViewCondition)
+        if (-not $fullViewButton) {
+            return [ordered]@{ ready = $true; changed = $false; status = 'already_full_view' }
+        }
+
+        $invokePatternObject = $null
+        if ($fullViewButton.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$invokePatternObject)) {
+            ([System.Windows.Automation.InvokePattern]$invokePatternObject).Invoke()
+        } else {
+            $bounds = $fullViewButton.Current.BoundingRectangle
+            if ($bounds.IsEmpty -or $bounds.Width -le 0 -or $bounds.Height -le 0) {
+                throw 'ChatGPT Desktop exposed full view, but its control had no usable screen position.'
+            }
+            $cursor = [CogentSpec.ChatGptPopupNative]::GetCursorPosition()
+            $targetX = [int]($bounds.Left + ($bounds.Width / 2))
+            $targetY = [int]($bounds.Top + ($bounds.Height / 2))
+            try {
+                if (-not [CogentSpec.ChatGptPopupNative]::SetCursorPosition($targetX, $targetY)) {
+                    throw 'Windows could not position the pointer on ChatGPT Desktop full view.'
+                }
+                if (-not [CogentSpec.ChatGptPopupNative]::SendLeftClick()) {
+                    throw 'Windows could not activate ChatGPT Desktop full view.'
+                }
+            } finally {
+                [void][CogentSpec.ChatGptPopupNative]::SetCursorPosition($cursor.X, $cursor.Y)
+            }
+        }
+
+        $deadline = [DateTime]::UtcNow.AddSeconds(3)
+        do {
+            Start-Sleep -Milliseconds 100
+            $root = [System.Windows.Automation.AutomationElement]::FromHandle($Window)
+            $fullViewButton = if ($root) { $root.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $fullViewCondition) } else { $null }
+        } while ($fullViewButton -and [DateTime]::UtcNow -lt $deadline)
+
+        if ($fullViewButton) { throw 'ChatGPT Desktop did not enter full view.' }
+        return [ordered]@{ ready = $true; changed = $true; status = 'full_view' }
+    } catch {
+        return [ordered]@{ ready = $false; changed = $false; status = 'full_view_failed'; reason = $_.Exception.Message }
+    }
+}
+
+
 $chatGptProcesses = @(Get-Process -Name 'ChatGPT' -ErrorAction SilentlyContinue | Where-Object {
     try { [IO.Path]::GetFileName([string]$_.Path) -eq 'ChatGPT.exe' } catch { $false }
 })
@@ -223,7 +301,10 @@ using System.Runtime.InteropServices;
 
 namespace CogentSpec {
     public static class ChatGptPopupNative {
+        private const uint INPUT_MOUSE = 0;
         private const uint INPUT_KEYBOARD = 1;
+        private const uint MOUSEEVENTF_LEFTDOWN = 0x0002;
+        private const uint MOUSEEVENTF_LEFTUP = 0x0004;
         private const uint KEYEVENTF_KEYUP = 0x0002;
         private const ushort VK_CONTROL = 0x11;
         private const ushort VK_SHIFT = 0x10;
@@ -383,6 +464,24 @@ namespace CogentSpec {
                 Key(VK_A, 0),
                 Key(VK_A, KEYEVENTF_KEYUP),
                 Key(VK_CONTROL, KEYEVENTF_KEYUP)
+            };
+            return SendInput((uint)inputs.Length, inputs, Marshal.SizeOf(typeof(INPUT))) == inputs.Length;
+        }
+
+        public static bool SendLeftClick() {
+            var inputs = new[] {
+                new INPUT {
+                    type = INPUT_MOUSE,
+                    U = new InputUnion {
+                        mouse = new MOUSEINPUT { flags = MOUSEEVENTF_LEFTDOWN }
+                    }
+                },
+                new INPUT {
+                    type = INPUT_MOUSE,
+                    U = new InputUnion {
+                        mouse = new MOUSEINPUT { flags = MOUSEEVENTF_LEFTUP }
+                    }
+                }
             };
             return SendInput((uint)inputs.Length, inputs, Marshal.SizeOf(typeof(INPUT))) == inputs.Length;
         }
@@ -637,23 +736,37 @@ if ($Mode -eq 'inspect') {
 }
 
 if ($Mode -eq 'desktop') {
-    if (-not $ThreadId) {
-        Write-Failure -Status 'task_identity_unavailable' -Reason 'Desktop Bridge could not identify the connected ChatGPT task. Return to that task and run CogentSpec again.'
+    $ownerThreadReopened = $false
+    if ($ThreadId) {
+        try {
+            Start-Process "codex://threads/$ThreadId" -ErrorAction Stop
+            $ownerThreadReopened = $true
+        } catch {
+            Write-Failure -Status 'task_reopen_failed' -Reason 'Desktop Bridge could not reopen the connected ChatGPT task in Desktop UI.'
+            return
+        }
+    }
+    $desktopWindow = Wait-ForChatGptMainWindow -ProcessIds $chatGptProcessIds
+    if (-not $desktopWindow.ready -or $desktopWindow.window -eq [IntPtr]::Zero) {
+        Write-Failure -Status 'desktop_window_not_ready' -Reason 'ChatGPT Desktop did not expose one main window.'
         return
     }
-    try {
-        Start-Process "codex://threads/$ThreadId" -ErrorAction Stop
-    } catch {
-        Write-Failure -Status 'task_reopen_failed' -Reason 'Desktop Bridge could not reopen the connected ChatGPT task in Desktop UI.'
+    if (-not (Invoke-PopupActivation -PopupWindow $desktopWindow.window)) {
+        Write-Failure -Status 'task_activation_failed' -Reason 'CogentSpec found ChatGPT Desktop but could not make its main window ready.' -Opened $true
+        return
+    }
+    $fullView = Enter-ChatGptFullView -Window $desktopWindow.window
+    if (-not $fullView.ready) {
+        Write-Failure -Status 'full_view_failed' -Reason ([string]$fullView.reason) -Opened $true
         return
     }
     $taskOwner = Wait-ForChatGptTaskOwner -ProcessIds $chatGptProcessIds
     if (-not $taskOwner.ready -or $taskOwner.window -eq [IntPtr]::Zero) {
-        Write-Failure -Status 'task_owner_not_ready' -Reason 'CogentSpec reopened the connected task, but ChatGPT did not make its Desktop UI ready.'
+        Write-Failure -Status 'task_owner_not_ready' -Reason 'ChatGPT Desktop opened, but the current task did not become ready for input.' -Opened $true
         return
     }
     if (-not (Invoke-PopupActivation -PopupWindow $taskOwner.window)) {
-        Write-Failure -Status 'task_activation_failed' -Reason 'CogentSpec found the connected ChatGPT task but could not make its Desktop UI ready for input.' -Opened $true
+        Write-Failure -Status 'task_activation_failed' -Reason 'ChatGPT Desktop opened, but could not activate the current task.' -Opened $true
         return
     }
     $composer = Focus-ChatGptComposer -PopupWindow $taskOwner.window
@@ -675,9 +788,11 @@ if ($Mode -eq 'desktop') {
         opened = $true
         processId = [int]$chatGpt.Id
         publisherVerified = $true
-        ownerThreadReopened = $true
+        ownerThreadReopened = $ownerThreadReopened
         ownerTaskActivated = $true
-        desktopWindowLaunched = $true
+        desktopWindowLaunched = $ownerThreadReopened
+        fullViewEntered = [bool]$fullView.changed
+        alreadyFullView = (-not [bool]$fullView.changed)
         ownerTaskReady = [bool]$taskOwner.ready
         ownerTaskStableMilliseconds = [int]$taskOwner.stableMilliseconds
         composerPreloaded = $composerPopulated

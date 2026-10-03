@@ -196,9 +196,17 @@ try {
                     'preview_project' { "Verified project preview opened at $([string]$result.localUrl)" }
                     'open_chatgpt_popup' {
                         if ([string]$claimed.request.targetRequestId -eq 'chatgpt-desktop-ui:connect') {
-                            'Connected ChatGPT task opened in Desktop UI with $cogentspec ready to send.'
+                            if ($result.PSObject.Properties['ownerThreadReopened'] -and [bool]$result.ownerThreadReopened) {
+                                'Connected ChatGPT task opened in Desktop UI with $cogentspec ready to send.'
+                            } else {
+                                'ChatGPT Desktop opened in full view with $cogentspec ready to establish this task connection.'
+                            }
                         } elseif ([string]$claimed.request.targetRequestId -eq 'chatgpt-desktop-ui:update') {
-                            'Connected ChatGPT task opened in Desktop UI with the verified update request ready to send.'
+                            if ($result.PSObject.Properties['ownerThreadReopened'] -and [bool]$result.ownerThreadReopened) {
+                                'Connected ChatGPT task opened in Desktop UI with the verified update request ready to send.'
+                            } else {
+                                'ChatGPT Desktop opened in full view with the verified update request ready to send.'
+                            }
                         } elseif ($result.PSObject.Properties['composerPopulated'] -and [bool]$result.composerPopulated) {
                             if ([string]$claimed.request.targetRequestId -eq 'chatgpt-desktop-popup:connect') {
                                 'ChatGPT popout shown with $cogentspec ready to send in the retained chat.'

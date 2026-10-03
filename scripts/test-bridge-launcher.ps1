@@ -211,11 +211,16 @@ for ($heartbeat = 0; $heartbeat -lt 15; $heartbeat += 1) {
     Assert-BridgeLauncherTest ($popupHelperText.Contains('FindPopupWindows(int[] processIds)')) 'The ChatGPT popout helper cannot inspect every signed ChatGPT tool window.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains('function Find-VerifiedChatGptPopupWindow')) 'The ChatGPT popout helper does not select the exact accessible composer window.'
     Assert-BridgeLauncherTest (-not $popupHelperText.Contains('RevealPopupWindow')) 'The ChatGPT popout helper can expose a host-dismissed native window without reopening it through ChatGPT.'
-    Assert-BridgeLauncherTest ($popupHelperText.Contains('task_identity_unavailable')) 'The ChatGPT popout helper does not fail closed without an owning task identity.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains("if (`$Mode -eq 'desktop')")) 'The ChatGPT helper does not isolate the full Desktop UI flow from the popout flow.'
-    Assert-BridgeLauncherTest ($popupHelperText.Contains('Start-Process "codex://threads/$ThreadId"')) 'The Desktop UI flow does not reopen the exact connected ChatGPT task.'
-    Assert-BridgeLauncherTest ($popupHelperText.Contains('ownerThreadReopened = $true')) 'The Desktop UI flow does not report reopening the exact connected task.'
-    Assert-BridgeLauncherTest ($popupHelperText.Contains('desktopWindowLaunched = $true')) 'The Desktop UI flow does not report its explicit desktop-window launch.'
+    $desktopModeStart = $popupHelperText.IndexOf("if (`$Mode -eq 'desktop')")
+    $desktopModeEnd = $popupHelperText.IndexOf("if (`$Mode -eq 'dismiss')", $desktopModeStart)
+    $desktopModeText = $popupHelperText.Substring($desktopModeStart, $desktopModeEnd - $desktopModeStart)
+    Assert-BridgeLauncherTest (-not $desktopModeText.Contains('task_identity_unavailable')) 'The Desktop UI bootstrap still requires a previously connected task.'
+    Assert-BridgeLauncherTest ($popupHelperText.Contains("if (`$ThreadId)")) 'The Desktop UI flow does not distinguish exact-task reopening from first-connection bootstrap.'
+    Assert-BridgeLauncherTest ($popupHelperText.Contains('Start-Process "codex://threads/$ThreadId"')) 'The Desktop UI flow does not reopen the exact connected ChatGPT task when its identity is available.'
+    Assert-BridgeLauncherTest ($popupHelperText.Contains('function Wait-ForChatGptMainWindow')) 'The Desktop UI bootstrap does not wait for the main ChatGPT Desktop window.'
+    Assert-BridgeLauncherTest ($popupHelperText.Contains('ownerThreadReopened = $ownerThreadReopened')) 'The Desktop UI flow does not report whether it reopened an exact task.'
+    Assert-BridgeLauncherTest ($popupHelperText.Contains('desktopWindowLaunched = $ownerThreadReopened')) 'The Desktop UI flow does not distinguish exact-task launch from current-window bootstrap.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains('desktopWindowLaunched = $false')) 'The ChatGPT popout helper does not report that it preserved the existing desktop window.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains('ownerThreadReopened = $false')) 'The ChatGPT popout helper still reports reopening the owning task.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains('function Wait-ForChatGptTaskOwner')) 'The ChatGPT popout helper does not wait for the owning task window to become ready.'
