@@ -864,11 +864,31 @@ if (-not $ThreadId -and -not $UseRetainedChat) {
 if ($popupWindow -ne [IntPtr]::Zero) {
     $popupWasVisible = [CogentSpec.ChatGptPopupNative]::IsVisible($popupWindow)
     if ($popupWasVisible -and $UseRetainedChat) {
-        # A web-initiated request can be denied permission to take foreground even
-        # though UI Automation can still focus the verified composer. Treat native
-        # activation as best effort and let composer focus be the readiness proof.
-        [void](Invoke-PopupActivation -PopupWindow $popupWindow)
-        $activatedExisting = $true
+        # Clicking the web LED necessarily leaves the retained popout behind the
+        # browser. Re-run ChatGPT's own popout hotkey so ChatGPT re-presents the
+        # retained chat and exposes its composer before CogentSpec tries to paste.
+        $verifiedRetainedPopup = [IntPtr]::Zero
+        for ($attempt = 1; $attempt -le 2; $attempt++) {
+            if (-not [CogentSpec.ChatGptPopupNative]::SendControlShiftSpace()) {
+                Write-Failure -Status 'shortcut_failed' -Reason 'CogentSpec could not send the popout shortcut. Press Ctrl + Shift + Space.'
+                return
+            }
+            $shortcutSent = $true
+            $shortcutAttempts = $attempt
+            $retainedDeadline = [DateTime]::UtcNow.AddSeconds(3)
+            do {
+                Start-Sleep -Milliseconds 100
+                $verifiedRetainedPopup = Find-VerifiedChatGptPopupWindow -ProcessIds $chatGptProcessIds -AllowNativeRetainedFallback $false
+            } while (($verifiedRetainedPopup -eq [IntPtr]::Zero -or -not [CogentSpec.ChatGptPopupNative]::IsVisible($verifiedRetainedPopup)) -and [DateTime]::UtcNow -lt $retainedDeadline)
+            if ($verifiedRetainedPopup -ne [IntPtr]::Zero -and [CogentSpec.ChatGptPopupNative]::IsVisible($verifiedRetainedPopup)) { break }
+        }
+        if ($verifiedRetainedPopup -ne [IntPtr]::Zero) {
+            $popupWindow = $verifiedRetainedPopup
+            [void](Invoke-PopupActivation -PopupWindow $popupWindow)
+            $activatedExisting = $true
+        } else {
+            $popupWindow = [IntPtr]::Zero
+        }
     } elseif ($popupWasVisible) {
         [void][CogentSpec.ChatGptPopupNative]::SendControlShiftSpace()
         $dismissDeadline = [DateTime]::UtcNow.AddSeconds(3)
