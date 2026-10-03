@@ -307,7 +307,9 @@ try {
         'skills/cogentstack/scripts/project-knowledge.ps1',
         'skills/cogentstack/scripts/project-preview-readiness.ps1',
         'skills/cogentstack/scripts/reset-cogentspec-update.ps1',
+        'skills/cogentstack/scripts/start-cogentspec-popout-bridge.ps1',
         'skills/cogentstack/scripts/start-cogentstack-bridge.ps1',
+        'skills/cogentstack/scripts/watch-cogentspec-popout-bridge.ps1',
         'skills/cogentstack/scripts/watch-cogentstack-bridge.ps1',
         'skills/cogentstack/SKILL.md'
     )
@@ -399,6 +401,15 @@ try {
         }
         Complete-InstallStage
 
+        Set-InstallStage -Name 'standalone_popout_bridge'
+        $popoutBridgeStart = Join-Path $installedPath 'skills\cogentstack\scripts\start-cogentspec-popout-bridge.ps1'
+        $popoutBridgeOutput = @(& $popoutBridgeStart 2>&1)
+        $popoutBridgeResult = Read-JsonResult -Text (($popoutBridgeOutput | ForEach-Object { [string]$_ }) -join "`n") -Operation 'Standalone Popout Bridge startup'
+        if ([string]$popoutBridgeResult.status -ne 'ready') {
+            throw 'Standalone Popout Bridge did not become ready after the update.'
+        }
+        Complete-InstallStage
+
         [ordered]@{
             protocol = 'trusted-marketplace-update-v1'
             status = 'updated'
@@ -416,6 +427,7 @@ try {
             previousPackageReplaced = $true
             packageRuntimeCleared = $true
             workerStateCleared = $true
+            popoutBridgeReady = $true
             workersStopped = [int]$resetResult.workersStopped
             continueCurrentTask = $true
             fastUpdatePath = $true
@@ -478,6 +490,15 @@ try {
     $claimSucceeded = $true
     Complete-InstallStage
 
+    Set-InstallStage -Name 'standalone_popout_bridge'
+    $popoutBridgeStart = Join-Path $installedPath 'skills\cogentstack\scripts\start-cogentspec-popout-bridge.ps1'
+    $popoutBridgeOutput = @(& $popoutBridgeStart 2>&1)
+    $popoutBridgeResult = Read-JsonResult -Text (($popoutBridgeOutput | ForEach-Object { [string]$_ }) -join "`n") -Operation 'Standalone Popout Bridge startup'
+    if ([string]$popoutBridgeResult.status -ne 'ready') {
+        throw 'Standalone Popout Bridge did not become ready after installation.'
+    }
+    Complete-InstallStage
+
     [ordered]@{
         protocol = $protocol
         status = 'installed'
@@ -494,6 +515,7 @@ try {
         connected = $true
         accountBound = $true
         installationBound = $true
+        popoutBridgeReady = $true
         projectDataConnectionReady = $projectDataConnectionReady
         version = [string]$installedManifest.version
         installerElapsedMs = [int]$timer.ElapsedMilliseconds

@@ -152,11 +152,15 @@ const canonicalSkill = await readFile(join(sourcePluginPath, "skills", "cogentsp
 const canonicalUpdateCheck = await readFile(join(sourcePluginPath, "skills", "cogentspec", "scripts", "check-cogentspec-update.ps1"), "utf8");
 const canonicalConnector = await readFile(join(sourcePluginPath, "skills", "cogentspec", "scripts", "connect-cogentstack.ps1"), "utf8");
 const canonicalReset = await readFile(join(sourcePluginPath, "skills", "cogentspec", "scripts", "reset-cogentspec-update.ps1"), "utf8");
+const canonicalPopoutStarter = await readFile(join(sourcePluginPath, "skills", "cogentspec", "scripts", "start-cogentspec-popout-bridge.ps1"), "utf8");
+const canonicalPopoutWatcher = await readFile(join(sourcePluginPath, "skills", "cogentspec", "scripts", "watch-cogentspec-popout-bridge.ps1"), "utf8");
 const compatibilityStarter = await readFile(join(compatibilityPluginPath, "skills", "cogentstack", "scripts", "start-cogentstack-bridge.ps1"), "utf8");
 const compatibilitySkill = await readFile(join(compatibilityPluginPath, "skills", "cogentstack", "SKILL.md"), "utf8");
 const compatibilityUpdateCheck = await readFile(join(compatibilityPluginPath, "skills", "cogentstack", "scripts", "check-cogentspec-update.ps1"), "utf8");
 const compatibilityConnector = await readFile(join(compatibilityPluginPath, "skills", "cogentstack", "scripts", "connect-cogentstack.ps1"), "utf8");
 const compatibilityReset = await readFile(join(compatibilityPluginPath, "skills", "cogentstack", "scripts", "reset-cogentspec-update.ps1"), "utf8");
+const compatibilityPopoutStarter = await readFile(join(compatibilityPluginPath, "skills", "cogentstack", "scripts", "start-cogentspec-popout-bridge.ps1"), "utf8");
+const compatibilityPopoutWatcher = await readFile(join(compatibilityPluginPath, "skills", "cogentstack", "scripts", "watch-cogentspec-popout-bridge.ps1"), "utf8");
 for (const marker of ["cogentspec-update-check-v1", "/api/plugin-version", "update_available", "check_unavailable", "UPDATE.v1.md"]) {
   if (!canonicalUpdateCheck.includes(marker)) fail(`the automatic update check is missing marker: ${marker}`);
 }
@@ -190,11 +194,19 @@ for (const marker of ["[string]$PluginId", "[string]$PluginVersion", "pluginVers
 for (const marker of ["bridge-runtime", "Stop-Process", "packageRuntimeCleared = $true", "workerStateCleared = $true", "credentialPreserved = $true"]) {
   if (!canonicalReset.includes(marker)) fail(`the update reset helper is missing marker: ${marker}`);
 }
+for (const marker of ["CogentSpecStandalonePopoutBridge", "popout-runtime", "watch-cogentspec-popout-bridge.ps1", "serverAcknowledged"]) {
+  if (!canonicalPopoutStarter.includes(marker)) fail(`the standalone Popout Bridge starter is missing marker: ${marker}`);
+}
+for (const marker of ["/api/plugin/desktop-popout-actions", "-UseRetainedChat", "-PasteClipboard", "composerPopulated"]) {
+  if (!canonicalPopoutWatcher.includes(marker)) fail(`the standalone Popout Bridge watcher is missing marker: ${marker}`);
+}
 const normalizedScript = (value) => value.replaceAll("\r\n", "\n");
 if (normalizedScript(canonicalStarter) !== normalizedScript(compatibilityStarter)
   || normalizedScript(canonicalUpdateCheck) !== normalizedScript(compatibilityUpdateCheck)
   || normalizedScript(canonicalConnector) !== normalizedScript(compatibilityConnector)
-  || normalizedScript(canonicalReset) !== normalizedScript(compatibilityReset)) {
+  || normalizedScript(canonicalReset) !== normalizedScript(compatibilityReset)
+  || normalizedScript(canonicalPopoutStarter) !== normalizedScript(compatibilityPopoutStarter)
+  || normalizedScript(canonicalPopoutWatcher) !== normalizedScript(compatibilityPopoutWatcher)) {
   fail("the canonical and compatibility Desktop Bridge handoffs differ");
 }
 
