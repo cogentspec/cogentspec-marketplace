@@ -500,21 +500,10 @@ namespace CogentSpec {
                 }
                 if (!matchesProcess) return true;
 
-                StringBuilder className = new StringBuilder(128);
-                GetClassName(window, className, className.Capacity);
-                if (!String.Equals(className.ToString(), "Chrome_WidgetWin_1", StringComparison.Ordinal)) return true;
-
                 StringBuilder title = new StringBuilder(256);
                 GetWindowText(window, title, title.Capacity);
                 if (!String.Equals(title.ToString(), "ChatGPT", StringComparison.Ordinal)) return true;
-
-                long extendedStyle = GetWindowLongPtr(window, GWL_EXSTYLE).ToInt64();
-                // Recent ChatGPT Desktop releases render the retained Popout as a
-                // layered Chromium tool window. Layering changes how the surface is
-                // composed; it does not change the exact signed-process, class,
-                // title, or tool-window identity used to distinguish the Popout.
-                bool isPopupToolWindow = (extendedStyle & WS_EX_TOOLWINDOW) != 0;
-                if (!isPopupToolWindow) return true;
+                if (!IsWindowVisible(window)) return true;
 
                 popupWindows.Add(window);
                 return true;
@@ -642,6 +631,16 @@ function Find-VerifiedChatGptPopupWindow([int[]]$ProcessIds, [bool]$AllowNativeR
         [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
         [System.Windows.Automation.ControlType]::Edit
     )
+    $dismissCondition = [System.Windows.Automation.AndCondition]::new(
+        [System.Windows.Automation.PropertyCondition]::new(
+            [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+            [System.Windows.Automation.ControlType]::Button
+        ),
+        [System.Windows.Automation.PropertyCondition]::new(
+            [System.Windows.Automation.AutomationElement]::NameProperty,
+            'Dismiss Popout Window'
+        )
+    )
     $nativeCandidates = @([CogentSpec.ChatGptPopupNative]::FindPopupWindows($ProcessIds))
     $verified = @($nativeCandidates | Where-Object {
         try {
@@ -649,13 +648,14 @@ function Find-VerifiedChatGptPopupWindow([int[]]$ProcessIds, [bool]$AllowNativeR
             $matches = @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $editCondition) | Where-Object {
                 Test-IsChatGptComposer -Element $_
             })
-            $matches.Count -eq 1
+            $dismissButton = $root.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $dismissCondition)
+            $matches.Count -eq 1 -and $null -ne $dismissButton
         } catch { $false }
     })
     if ($verified.Count -eq 1) { return [IntPtr]$verified[0] }
     # An occluded retained popout can temporarily stop exposing its UI Automation
-    # descendants. Its signed process, exact class/title and tool-window shape are
-    # still sufficient to activate the one retained window without toggling it.
+    # descendants. One visible, exact-title top-level window from the already
+    # publisher-verified ChatGPT process is sufficient to activate without toggling it.
     if ($AllowNativeRetainedFallback -and $nativeCandidates.Count -eq 1) {
         return [IntPtr]$nativeCandidates[0]
     }

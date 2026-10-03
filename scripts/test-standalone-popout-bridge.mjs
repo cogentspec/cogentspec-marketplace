@@ -14,8 +14,14 @@ const helperArguments = join(fixtureRoot, "helper-arguments.json");
 const readyPath = join(fixtureRoot, "ready.json");
 
 const productionHelperSource = await readFile(productionHelper, "utf8");
-assert.match(productionHelperSource, /bool isPopupToolWindow = \(extendedStyle & WS_EX_TOOLWINDOW\) != 0;/);
-assert.doesNotMatch(productionHelperSource, /WS_EX_TOOLWINDOW\) != 0\s*&&\s*\(extendedStyle & WS_EX_LAYERED\) == 0/);
+const popupWindowFinder = productionHelperSource.slice(
+  productionHelperSource.indexOf("public static IntPtr[] FindPopupWindows"),
+  productionHelperSource.indexOf("public static IntPtr[] FindMainWindows"),
+);
+assert.match(popupWindowFinder, /if \(!IsWindowVisible\(window\)\) return true;/);
+assert.match(productionHelperSource, /'Dismiss Popout Window'/);
+assert.doesNotMatch(popupWindowFinder, /className\.ToString\(\), "Chrome_WidgetWin_1"/);
+assert.doesNotMatch(popupWindowFinder, /bool isPopupToolWindow/);
 
 await writeFile(helper, `
 param([string]$Mode, [switch]$UseRetainedChat, [switch]$PasteClipboard)
