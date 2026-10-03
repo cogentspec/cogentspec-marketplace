@@ -20,6 +20,7 @@ const popupWindowFinder = productionHelperSource.slice(
 );
 assert.match(popupWindowFinder, /if \(!IsWindowVisible\(window\)\) return true;/);
 assert.match(productionHelperSource, /'Dismiss Popout Window'/);
+assert.match(productionHelperSource, /\[System\.Windows\.Automation\.ControlType\]::Document/);
 assert.doesNotMatch(popupWindowFinder, /className\.ToString\(\), "Chrome_WidgetWin_1"/);
 assert.doesNotMatch(popupWindowFinder, /bool isPopupToolWindow/);
 

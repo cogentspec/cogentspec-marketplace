@@ -30,6 +30,19 @@ function Test-IsChatGptComposer($Element) {
     return $name -in @('Work with ChatGPT', 'Ask ChatGPT anything locally', 'Ask ChatGPT anything')
 }
 
+function Get-ChatGptComposerCondition {
+    return [System.Windows.Automation.OrCondition]::new(
+        [System.Windows.Automation.PropertyCondition]::new(
+            [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+            [System.Windows.Automation.ControlType]::Edit
+        ),
+        [System.Windows.Automation.PropertyCondition]::new(
+            [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+            [System.Windows.Automation.ControlType]::Document
+        )
+    )
+}
+
 function Set-ChatGptComposerFocus($Composer) {
     $Composer.SetFocus()
     $deadline = [DateTime]::UtcNow.AddSeconds(1)
@@ -48,12 +61,9 @@ function Focus-ChatGptComposer([IntPtr]$PopupWindow) {
 
         $composer = $null
         $deadline = [DateTime]::UtcNow.AddSeconds(3)
-        $editCondition = [System.Windows.Automation.PropertyCondition]::new(
-            [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
-            [System.Windows.Automation.ControlType]::Edit
-        )
+        $composerCondition = Get-ChatGptComposerCondition
         do {
-            $matches = @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $editCondition) | Where-Object {
+            $matches = @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $composerCondition) | Where-Object {
                 Test-IsChatGptComposer -Element $_
             })
             if ($matches.Count -eq 1) { $composer = $matches[0]; break }
@@ -147,10 +157,7 @@ function Wait-ForChatGptTaskOwner([int[]]$ProcessIds) {
     $deadline = [DateTime]::UtcNow.AddSeconds(10)
     $stableSince = $null
     $requiredStableMilliseconds = 2000
-    $editCondition = [System.Windows.Automation.PropertyCondition]::new(
-        [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
-        [System.Windows.Automation.ControlType]::Edit
-    )
+    $composerCondition = Get-ChatGptComposerCondition
 
     do {
         $mainWindows = @([CogentSpec.ChatGptPopupNative]::FindMainWindows($ProcessIds))
@@ -159,7 +166,7 @@ function Wait-ForChatGptTaskOwner([int[]]$ProcessIds) {
             $ready = $false
             try {
                 $root = [System.Windows.Automation.AutomationElement]::FromHandle($mainWindow)
-                $composer = @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $editCondition) | Where-Object {
+                $composer = @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $composerCondition) | Where-Object {
                     (Test-IsChatGptComposer -Element $_) -and $_.Current.IsEnabled -and $_.Current.IsKeyboardFocusable
                 })
                 $ready = $composer.Count -eq 1
@@ -627,10 +634,7 @@ namespace CogentSpec {
 
 function Find-VerifiedChatGptPopupWindow([int[]]$ProcessIds, [bool]$AllowNativeRetainedFallback = $false) {
     Add-Type -AssemblyName UIAutomationClient -ErrorAction Stop
-    $editCondition = [System.Windows.Automation.PropertyCondition]::new(
-        [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
-        [System.Windows.Automation.ControlType]::Edit
-    )
+    $composerCondition = Get-ChatGptComposerCondition
     $dismissCondition = [System.Windows.Automation.AndCondition]::new(
         [System.Windows.Automation.PropertyCondition]::new(
             [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
@@ -645,7 +649,7 @@ function Find-VerifiedChatGptPopupWindow([int[]]$ProcessIds, [bool]$AllowNativeR
     $verified = @($nativeCandidates | Where-Object {
         try {
             $root = [System.Windows.Automation.AutomationElement]::FromHandle($_)
-            $matches = @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $editCondition) | Where-Object {
+            $matches = @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $composerCondition) | Where-Object {
                 Test-IsChatGptComposer -Element $_
             })
             $dismissButton = $root.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $dismissCondition)
@@ -666,11 +670,8 @@ function Find-VerifiedChatGptComposer([IntPtr]$Window) {
     if ($Window -eq [IntPtr]::Zero) { return $null }
     Add-Type -AssemblyName UIAutomationClient -ErrorAction Stop
     $root = [System.Windows.Automation.AutomationElement]::FromHandle($Window)
-    $editCondition = [System.Windows.Automation.PropertyCondition]::new(
-        [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
-        [System.Windows.Automation.ControlType]::Edit
-    )
-    $matches = @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $editCondition) | Where-Object {
+    $composerCondition = Get-ChatGptComposerCondition
+    $matches = @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $composerCondition) | Where-Object {
         Test-IsChatGptComposer -Element $_
     })
     if ($matches.Count -eq 1) { return $matches[0] }
