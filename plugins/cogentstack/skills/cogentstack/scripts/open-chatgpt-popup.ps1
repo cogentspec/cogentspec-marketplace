@@ -509,8 +509,11 @@ namespace CogentSpec {
                 if (!String.Equals(title.ToString(), "ChatGPT", StringComparison.Ordinal)) return true;
 
                 long extendedStyle = GetWindowLongPtr(window, GWL_EXSTYLE).ToInt64();
-                bool isPopupToolWindow = (extendedStyle & WS_EX_TOOLWINDOW) != 0
-                    && (extendedStyle & WS_EX_LAYERED) == 0;
+                // Recent ChatGPT Desktop releases render the retained Popout as a
+                // layered Chromium tool window. Layering changes how the surface is
+                // composed; it does not change the exact signed-process, class,
+                // title, or tool-window identity used to distinguish the Popout.
+                bool isPopupToolWindow = (extendedStyle & WS_EX_TOOLWINDOW) != 0;
                 if (!isPopupToolWindow) return true;
 
                 popupWindows.Add(window);

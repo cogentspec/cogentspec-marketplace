@@ -7,10 +7,15 @@ import { spawn } from "node:child_process";
 
 const repositoryRoot = resolve(import.meta.dirname, "..");
 const watcher = join(repositoryRoot, "plugins", "cogentspec", "skills", "cogentspec", "scripts", "watch-cogentspec-popout-bridge.ps1");
+const productionHelper = join(repositoryRoot, "plugins", "cogentspec", "skills", "cogentspec", "scripts", "open-chatgpt-popup.ps1");
 const fixtureRoot = await mkdtemp(join(tmpdir(), "cogentspec-popout-worker-test-"));
 const helper = join(fixtureRoot, "open-chatgpt-popup.ps1");
 const helperArguments = join(fixtureRoot, "helper-arguments.json");
 const readyPath = join(fixtureRoot, "ready.json");
+
+const productionHelperSource = await readFile(productionHelper, "utf8");
+assert.match(productionHelperSource, /bool isPopupToolWindow = \(extendedStyle & WS_EX_TOOLWINDOW\) != 0;/);
+assert.doesNotMatch(productionHelperSource, /WS_EX_TOOLWINDOW\) != 0\s*&&\s*\(extendedStyle & WS_EX_LAYERED\) == 0/);
 
 await writeFile(helper, `
 param([string]$Mode, [switch]$UseRetainedChat, [switch]$PasteClipboard)
