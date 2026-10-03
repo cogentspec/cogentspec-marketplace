@@ -194,10 +194,10 @@ for (const marker of ["[string]$PluginId", "[string]$PluginVersion", "pluginVers
 for (const marker of ["bridge-runtime", "Stop-Process", "packageRuntimeCleared = $true", "workerStateCleared = $true", "credentialPreserved = $true"]) {
   if (!canonicalReset.includes(marker)) fail(`the update reset helper is missing marker: ${marker}`);
 }
-for (const marker of ["CogentSpecStandalonePopoutBridge", "popout-runtime", "watch-cogentspec-popout-bridge.ps1", "serverAcknowledged"]) {
+for (const marker of ["CogentSpecStandalonePopoutBridge", "popout-runtime", "watch-cogentspec-popout-bridge.ps1", "serverAcknowledged", "while (`$true)", "supervised = $true"]) {
   if (!canonicalPopoutStarter.includes(marker)) fail(`the standalone Popout Bridge starter is missing marker: ${marker}`);
 }
-for (const marker of ["/api/plugin/desktop-popout-actions", "-UseRetainedChat", "-PasteClipboard", "composerPopulated"]) {
+for (const marker of ["/api/plugin/desktop-popout-actions", "-UseRetainedChat", "-PasteClipboard", "composerPopulated", "Get-HttpStatusCode", "consecutiveFailures", "MaximumRetryMilliseconds"]) {
   if (!canonicalPopoutWatcher.includes(marker)) fail(`the standalone Popout Bridge watcher is missing marker: ${marker}`);
 }
 const normalizedScript = (value) => value.replaceAll("\r\n", "\n");

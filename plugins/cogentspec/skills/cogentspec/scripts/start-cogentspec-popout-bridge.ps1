@@ -78,12 +78,13 @@ if (Test-Path -LiteralPath $statePath -PathType Leaf) {
 }
 
 if ($TestMode) {
-    Write-CompactJson ([ordered]@{ status = 'prepared'; bridge = 'not_started_in_test_mode'; runtimeRoot = $runtimeRoot; watcherScript = $watcherPath; pluginId = $pluginId; pluginVersion = $pluginVersion })
+    Write-CompactJson ([ordered]@{ status = 'prepared'; bridge = 'not_started_in_test_mode'; supervised = $true; runtimeRoot = $runtimeRoot; watcherScript = $watcherPath; pluginId = $pluginId; pluginVersion = $pluginVersion })
     return
 }
 
 $escape = { param([string]$Value) $Value.Replace("'", "''") }
-$workerCommand = "& '$(& $escape $watcherPath)' -PluginId '$pluginId' -PluginVersion '$pluginVersion' -ReadyPath '$(& $escape $readyPath)'"
+$watcherInvocation = "& '$(& $escape $watcherPath)' -PluginId '$pluginId' -PluginVersion '$pluginVersion' -ReadyPath '$(& $escape $readyPath)'"
+$workerCommand = "`$ErrorActionPreference = 'Continue'; while (`$true) { try { $watcherInvocation } catch { }; Start-Sleep -Seconds 5 }"
 $encodedCommand = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($workerCommand))
 $commandLine = '"' + $powerShell + '" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -EncodedCommand ' + $encodedCommand
 $runCommand = $commandLine
@@ -118,6 +119,7 @@ if ([int]$ready.processId -ne $processId -or -not [bool]$ready.serverAcknowledge
     readyPath = $readyPath
     pluginId = $pluginId
     pluginVersion = $pluginVersion
+    supervised = $true
     startedAt = [DateTime]::UtcNow.ToString('o')
 } | ConvertTo-Json | Set-Content -LiteralPath $statePath -Encoding UTF8
-Write-CompactJson ([ordered]@{ status = 'ready'; bridge = 'started'; processId = $processId; pluginId = $pluginId; pluginVersion = $pluginVersion })
+Write-CompactJson ([ordered]@{ status = 'ready'; bridge = 'started'; supervised = $true; processId = $processId; pluginId = $pluginId; pluginVersion = $pluginVersion })

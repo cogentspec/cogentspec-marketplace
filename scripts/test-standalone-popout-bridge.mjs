@@ -27,8 +27,18 @@ const request = {
   statusMessage: "",
 };
 let lifecycle = "requested";
+let transientFailuresRemaining = 2;
+let getAttempts = 0;
 const calls = [];
 const server = createServer(async (incoming, response) => {
+  if (incoming.method === "GET") {
+    getAttempts += 1;
+    if (transientFailuresRemaining > 0) {
+      transientFailuresRemaining -= 1;
+      incoming.socket.destroy();
+      return;
+    }
+  }
   let body = "";
   for await (const chunk of incoming) body += chunk;
   calls.push({ method: incoming.method, url: incoming.url, authorization: incoming.headers.authorization, body });
@@ -63,11 +73,22 @@ assert.equal(typeof address, "object");
 const serviceUrl = `http://127.0.0.1:${address.port}`;
 
 try {
-  const output = await new Promise((resolveProcess, rejectProcess) => {
+  const markerStatuses = [];
+  const markerObserver = setInterval(async () => {
+    try {
+      const marker = JSON.parse((await readFile(readyPath, "utf8")).replace(/^\uFEFF/, ""));
+      markerStatuses.push(marker.status);
+    } catch {
+      // The worker may not have created the marker yet, or may be replacing it.
+    }
+  }, 25);
+  let output;
+  try {
+    output = await new Promise((resolveProcess, rejectProcess) => {
     const child = spawn("powershell.exe", [
       "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", watcher,
-      "-PluginId", "cogentspec", "-PluginVersion", "0.6.57",
-      "-ReadyPath", readyPath, "-PollMilliseconds", "250", "-MaxPolls", "2",
+      "-PluginId", "cogentspec", "-PluginVersion", "0.6.58",
+      "-ReadyPath", readyPath, "-PollMilliseconds", "500", "-MaxPolls", "3",
       "-ServiceUrl", serviceUrl, "-TestToken", "fixture-token", "-TestHelperPath", helper,
     ], { windowsHide: true });
     let stdout = "";
@@ -78,9 +99,15 @@ try {
     child.on("exit", (code) => code === 0
       ? resolveProcess({ stdout, stderr })
       : rejectProcess(new Error(`worker exited ${code}: ${stderr || stdout}`)));
-  });
+    });
+  } finally {
+    clearInterval(markerObserver);
+  }
   assert.equal(lifecycle, "completed");
-  assert.equal(calls.some((call) => call.method === "GET" && call.url.includes("/api/plugin/desktop-popout-actions?pluginId=cogentspec&pluginVersion=0.6.57")), true);
+  assert.equal(transientFailuresRemaining, 0);
+  assert.equal(getAttempts >= 2, true);
+  assert.equal(markerStatuses.includes("retrying"), true);
+  assert.equal(calls.some((call) => call.method === "GET" && call.url.includes("/api/plugin/desktop-popout-actions?pluginId=cogentspec&pluginVersion=0.6.58")), true);
   assert.equal(calls.some((call) => call.method === "PATCH" && JSON.parse(call.body).action === "claim"), true);
   assert.equal(calls.some((call) => call.method === "PATCH" && JSON.parse(call.body).action === "complete"), true);
   const helperResult = JSON.parse((await readFile(helperArguments, "utf8")).replace(/^\uFEFF/, ""));
@@ -88,7 +115,7 @@ try {
   const ready = JSON.parse((await readFile(readyPath, "utf8")).replace(/^\uFEFF/, ""));
   assert.equal(ready.serverAcknowledged, true);
   assert.equal(ready.pluginId, "cogentspec");
-  console.log(JSON.stringify({ status: "valid", lifecycle, calls: calls.length, helper: helperResult, workerOutput: output.stdout.trim() }));
+  console.log(JSON.stringify({ status: "valid", lifecycle, transientRecovery: true, markerStatuses: [...new Set(markerStatuses)], getAttempts, calls: calls.length, helper: helperResult, workerOutput: output.stdout.trim() }));
 } finally {
   await new Promise((resolveClose) => server.close(resolveClose));
   await rm(fixtureRoot, { recursive: true, force: true });

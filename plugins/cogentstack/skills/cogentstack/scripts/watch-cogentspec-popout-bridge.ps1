@@ -12,6 +12,9 @@ param(
     [ValidateRange(250, 10000)]
     [int]$PollMilliseconds = 1500,
 
+    [ValidateRange(1000, 60000)]
+    [int]$MaximumRetryMilliseconds = 30000,
+
     [string]$ServiceUrl = 'https://cogentspec.com',
 
     [string]$TestToken = '',
@@ -25,7 +28,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-function Write-ReadyMarker([bool]$ServerAcknowledged) {
+function Write-ReadyMarker([bool]$ServerAcknowledged, [string]$Status = 'ready', [string]$LastError = '') {
     if (-not $ReadyPath) { return }
     $parent = Split-Path -Parent $ReadyPath
     if ($parent) { [void](New-Item -ItemType Directory -Path $parent -Force) }
@@ -35,6 +38,8 @@ function Write-ReadyMarker([bool]$ServerAcknowledged) {
         pluginVersion = $PluginVersion
         serverAcknowledged = $ServerAcknowledged
         acknowledgedAt = [DateTime]::UtcNow.ToString('o')
+        status = $Status
+        lastError = $LastError
     } | ConvertTo-Json | Set-Content -LiteralPath $ReadyPath -Encoding UTF8
 }
 
@@ -66,6 +71,21 @@ function Invoke-PopoutApi([string]$Method, [string]$Path, [string]$Token, $Body 
     return Invoke-RestMethod @parameters
 }
 
+function Read-DesktopToken {
+    $credentialPath = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'CogentSpec\desktop-credential.json'
+    if (-not (Test-Path -LiteralPath $credentialPath -PathType Leaf)) { throw 'Desktop Bridge is not connected to an account.' }
+    $credential = Get-Content -Raw -LiteralPath $credentialPath | ConvertFrom-Json
+    return Unprotect-CogentSpecValue ([string]$credential.token)
+}
+
+function Get-HttpStatusCode($Failure) {
+    $responseProperty = $Failure.Exception.PSObject.Properties['Response']
+    if (-not $responseProperty -or $null -eq $responseProperty.Value) { return 0 }
+    $statusProperty = $responseProperty.Value.PSObject.Properties['StatusCode']
+    if (-not $statusProperty -or $null -eq $statusProperty.Value) { return 0 }
+    try { return [int]$statusProperty.Value } catch { return 0 }
+}
+
 if ($TestToken) {
     if ($ServiceUrl -notmatch '^https?://(localhost|127\.0\.0\.1)(:\d+)?$' -or -not $TestHelperPath) {
         throw 'Test tokens are restricted to a loopback service and an explicit helper.'
@@ -74,22 +94,21 @@ if ($TestToken) {
     $popupHelper = $TestHelperPath
 } else {
     if ($ServiceUrl -ne 'https://cogentspec.com') { throw 'The production standalone Popout Bridge only connects to CogentSpec.' }
-    $credentialPath = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'CogentSpec\desktop-credential.json'
-    if (-not (Test-Path -LiteralPath $credentialPath -PathType Leaf)) { throw 'Desktop Bridge is not connected to an account.' }
-    $credential = Get-Content -Raw -LiteralPath $credentialPath | ConvertFrom-Json
-    $token = Unprotect-CogentSpecValue ([string]$credential.token)
+    $token = Read-DesktopToken
     $popupHelper = Join-Path $PSScriptRoot 'open-chatgpt-popup.ps1'
 }
 
 if (-not (Test-Path -LiteralPath $popupHelper -PathType Leaf)) { throw 'The verified ChatGPT Popout helper is missing.' }
 $query = '?pluginId=' + [Uri]::EscapeDataString($PluginId) + '&pluginVersion=' + [Uri]::EscapeDataString($PluginVersion)
 $polls = 0
+$consecutiveFailures = 0
 
 try {
     while ($true) {
         try {
             $listing = Invoke-PopoutApi -Method Get -Path "/api/plugin/desktop-popout-actions$query" -Token $token
-            Write-ReadyMarker -ServerAcknowledged $true
+            $consecutiveFailures = 0
+            Write-ReadyMarker -ServerAcknowledged $true -Status 'ready'
             $request = $listing.request
             if ($request) {
                 $claimed = Invoke-PopoutApi -Method Patch -Path "/api/plugin/desktop-popout-actions$query" -Token $token -Body @{
@@ -131,12 +150,24 @@ try {
                 }
             }
         } catch {
-            $statusCode = if ($_.Exception.Response) { [int]$_.Exception.Response.StatusCode } else { 0 }
-            if ($statusCode -eq 401 -or $statusCode -eq 403) { break }
+            $consecutiveFailures++
+            $statusCode = Get-HttpStatusCode -Failure $_
+            $authorizationFailure = $statusCode -eq 401 -or $statusCode -eq 403
+            $errorKind = if ($authorizationFailure) { 'authorization_failure' }
+                elseif ($statusCode -gt 0) { "http_$statusCode" }
+                else { 'transport_failure' }
+            Write-ReadyMarker -ServerAcknowledged $false -Status 'retrying' -LastError $errorKind
+            if ($authorizationFailure -and -not $TestToken) {
+                try { $token = Read-DesktopToken } catch { }
+            }
         }
         $polls++
         if ($MaxPolls -gt 0 -and $polls -ge $MaxPolls) { break }
-        Start-Sleep -Milliseconds $PollMilliseconds
+        $retryExponent = [Math]::Min(5, [Math]::Max(0, $consecutiveFailures - 1))
+        $retryMilliseconds = if ($consecutiveFailures -gt 0) {
+            [Math]::Min($MaximumRetryMilliseconds, [int]($PollMilliseconds * [Math]::Pow(2, $retryExponent)))
+        } else { $PollMilliseconds }
+        Start-Sleep -Milliseconds $retryMilliseconds
     }
 } finally {
     $token = $null
