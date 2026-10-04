@@ -633,7 +633,7 @@ namespace CogentSpec {
 '@
 }
 
-function Find-VerifiedChatGptPopupWindow([int[]]$ProcessIds, [bool]$AllowNativeRetainedFallback = $false) {
+function Find-VerifiedChatGptPopupWindow([int[]]$ProcessIds) {
     Add-Type -AssemblyName UIAutomationClient -ErrorAction Stop
     $composerCondition = Get-ChatGptComposerCondition
     $dismissCondition = [System.Windows.Automation.AndCondition]::new(
@@ -658,12 +658,6 @@ function Find-VerifiedChatGptPopupWindow([int[]]$ProcessIds, [bool]$AllowNativeR
         } catch { $false }
     })
     if ($verified.Count -eq 1) { return [IntPtr]$verified[0] }
-    # An occluded retained popout can temporarily stop exposing its UI Automation
-    # descendants. One visible, exact-title top-level window from the already
-    # publisher-verified ChatGPT process is sufficient to activate without toggling it.
-    if ($AllowNativeRetainedFallback -and $nativeCandidates.Count -eq 1) {
-        return [IntPtr]$nativeCandidates[0]
-    }
     return [IntPtr]::Zero
 }
 
@@ -725,7 +719,7 @@ function Set-ChatGptComposerFromClipboard([IntPtr]$Window) {
 }
 
 $chatGptProcessIds = [int[]]@($chatGptProcesses | ForEach-Object { [int]$_.Id })
-$popupWindow = Find-VerifiedChatGptPopupWindow -ProcessIds $chatGptProcessIds -AllowNativeRetainedFallback ([bool]$UseRetainedChat)
+$popupWindow = Find-VerifiedChatGptPopupWindow -ProcessIds $chatGptProcessIds
 $popupWasVisible = $null
 $shortcutSent = $false
 $shortcutAttempts = 0
@@ -901,6 +895,17 @@ if ($popupWindow -ne [IntPtr]::Zero) {
     }
 }
 
+if ($UseRetainedChat -and -not $activatedExisting) {
+    # The standalone Popout workflow must never fall through to the global
+    # Ctrl+Shift+Space shortcut when no verified Popout is visible. Depending
+    # on the current ChatGPT host state, that shortcut can foreground the full
+    # Desktop UI instead of restoring the retained Popout. Keep the CogentSpec
+    # work area in place and require the user to open the Popout manually.
+    [void](Restore-ChatGptPopupTopmost -PopupWindow $temporaryTopmostWindow -Required $temporaryTopmost)
+    Write-Failure -Status 'retained_popup_not_visible' -Reason 'CogentSpec left this work area open. Open ChatGPT Popout manually with Ctrl + Shift + Space, then paste the prepared request into that Popout.'
+    return
+}
+
 $taskOwner = [ordered]@{ ready = $false; window = [IntPtr]::Zero; stableMilliseconds = 0 }
 if (-not $UseRetainedChat) {
     $taskOwner = Wait-ForChatGptTaskOwner -ProcessIds $chatGptProcessIds
@@ -922,7 +927,7 @@ if (-not $activatedExisting) {
         $popupDeadline = [DateTime]::UtcNow.AddSeconds(3)
         do {
             Start-Sleep -Milliseconds 100
-            $popupWindow = Find-VerifiedChatGptPopupWindow -ProcessIds $chatGptProcessIds -AllowNativeRetainedFallback ([bool]$UseRetainedChat)
+            $popupWindow = Find-VerifiedChatGptPopupWindow -ProcessIds $chatGptProcessIds
             $popupVisible = [CogentSpec.ChatGptPopupNative]::IsVisible($popupWindow)
         } while (($popupWindow -eq [IntPtr]::Zero -or -not $popupVisible) -and [DateTime]::UtcNow -lt $popupDeadline)
 

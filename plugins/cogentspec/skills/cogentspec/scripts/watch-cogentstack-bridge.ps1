@@ -112,7 +112,7 @@ function Invoke-ActionHelper($Request) {
             if ($desktopUiRequest -or [string]$Request.targetRequestId -in @('chatgpt-desktop-popup:connect', 'chatgpt-desktop-popup:update')) {
                 $arguments += '-PasteClipboard'
             }
-            if ([string]$Request.targetRequestId -eq 'chatgpt-desktop-popup:connect') {
+            if ([string]$Request.targetRequestId -in @('chatgpt-desktop-popup:connect', 'chatgpt-desktop-popup:update')) {
                 $arguments += '-UseRetainedChat'
             }
         }

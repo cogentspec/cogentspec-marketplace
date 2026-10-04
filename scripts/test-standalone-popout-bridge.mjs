@@ -7,6 +7,7 @@ import { spawn } from "node:child_process";
 
 const repositoryRoot = resolve(import.meta.dirname, "..");
 const watcher = join(repositoryRoot, "plugins", "cogentspec", "skills", "cogentspec", "scripts", "watch-cogentspec-popout-bridge.ps1");
+const projectWatcher = join(repositoryRoot, "plugins", "cogentspec", "skills", "cogentspec", "scripts", "watch-cogentstack-bridge.ps1");
 const productionHelper = join(repositoryRoot, "plugins", "cogentspec", "skills", "cogentspec", "scripts", "open-chatgpt-popup.ps1");
 const fixtureRoot = await mkdtemp(join(tmpdir(), "cogentspec-popout-worker-test-"));
 const helper = join(fixtureRoot, "open-chatgpt-popup.ps1");
@@ -14,6 +15,7 @@ const helperArguments = join(fixtureRoot, "helper-arguments.json");
 const readyPath = join(fixtureRoot, "ready.json");
 
 const productionHelperSource = await readFile(productionHelper, "utf8");
+const projectWatcherSource = await readFile(projectWatcher, "utf8");
 const popupWindowFinder = productionHelperSource.slice(
   productionHelperSource.indexOf("public static IntPtr[] FindPopupWindows"),
   productionHelperSource.indexOf("public static IntPtr[] FindMainWindows"),
@@ -31,6 +33,17 @@ assert.doesNotMatch(composerConditionSource, /ControlTypeProperty/);
 assert.match(productionHelperSource, /Temporarily pin the verified window before looking for its composer;/);
 assert.match(productionHelperSource, /\$temporaryTopmostRestored = Restore-ChatGptPopupTopmost/);
 assert.match(productionHelperSource, /Ctrl\+Shift\+Space is a toggle/);
+assert.doesNotMatch(productionHelperSource, /AllowNativeRetainedFallback/);
+assert.match(productionHelperSource, /if \(\$UseRetainedChat -and -not \$activatedExisting\)/);
+const retainedSafetyStart = productionHelperSource.indexOf("if ($UseRetainedChat -and -not $activatedExisting)");
+const retainedSafetySource = productionHelperSource.slice(
+  retainedSafetyStart,
+  productionHelperSource.indexOf("$taskOwner =", retainedSafetyStart),
+);
+assert.match(retainedSafetySource, /retained_popup_not_visible/);
+assert.match(retainedSafetySource, /Open ChatGPT Popout manually/);
+assert.doesNotMatch(retainedSafetySource, /SendControlShiftSpace/);
+assert.match(projectWatcherSource, /targetRequestId -in @\('chatgpt-desktop-popup:connect', 'chatgpt-desktop-popup:update'\)[\s\S]*?-UseRetainedChat/);
 assert.doesNotMatch(productionHelperSource, /\$verifiedRetainedPopup = Find-VerifiedChatGptPopupWindow -ProcessIds \$chatGptProcessIds -AllowNativeRetainedFallback \$false/);
 assert.match(productionHelperSource, /if \(-not \$activatedExisting -and -not \(Invoke-PopupActivation -PopupWindow \$popupWindow\)\)/);
 const composerFailureSource = productionHelperSource.slice(
