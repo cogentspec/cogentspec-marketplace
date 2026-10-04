@@ -15,6 +15,7 @@ const helperArguments = join(fixtureRoot, "helper-arguments.json");
 const readyPath = join(fixtureRoot, "ready.json");
 
 const productionHelperSource = await readFile(productionHelper, "utf8");
+const watcherSource = await readFile(watcher, "utf8");
 const projectWatcherSource = await readFile(projectWatcher, "utf8");
 const popupWindowFinder = productionHelperSource.slice(
   productionHelperSource.indexOf("public static IntPtr[] FindPopupWindows"),
@@ -34,8 +35,8 @@ assert.match(productionHelperSource, /Temporarily pin the verified window before
 assert.match(productionHelperSource, /\$temporaryTopmostRestored = Restore-ChatGptPopupTopmost/);
 assert.match(productionHelperSource, /Ctrl\+Shift\+Space is a toggle/);
 assert.doesNotMatch(productionHelperSource, /AllowNativeRetainedFallback/);
-assert.match(productionHelperSource, /if \(\$UseRetainedChat -and -not \$activatedExisting\)/);
-const retainedSafetyStart = productionHelperSource.indexOf("if ($UseRetainedChat -and -not $activatedExisting)");
+assert.match(productionHelperSource, /if \(\$UseRetainedChat -and -not \$activatedExisting -and -not \$OpenWithShortcut\)/);
+const retainedSafetyStart = productionHelperSource.indexOf("if ($UseRetainedChat -and -not $activatedExisting -and -not $OpenWithShortcut)");
 const retainedSafetySource = productionHelperSource.slice(
   retainedSafetyStart,
   productionHelperSource.indexOf("$taskOwner =", retainedSafetyStart),
@@ -43,7 +44,10 @@ const retainedSafetySource = productionHelperSource.slice(
 assert.match(retainedSafetySource, /retained_popup_not_visible/);
 assert.match(retainedSafetySource, /Open ChatGPT Popout manually/);
 assert.doesNotMatch(retainedSafetySource, /SendControlShiftSpace/);
-assert.match(projectWatcherSource, /targetRequestId -in @\('chatgpt-desktop-popup:connect', 'chatgpt-desktop-popup:update'\)[\s\S]*?-UseRetainedChat/);
+assert.match(watcherSource, /\$target -eq 'chatgpt-desktop-popup:connect'[\s\S]*?-UseRetainedChat -OpenWithShortcut -PasteClipboard/);
+assert.match(watcherSource, /\$target -eq 'chatgpt-desktop-popup:update'[\s\S]*?-UseRetainedChat -PasteClipboard/);
+assert.match(projectWatcherSource, /targetRequestId -eq 'chatgpt-desktop-popup:connect'[\s\S]*?'-UseRetainedChat', '-OpenWithShortcut'/);
+assert.match(projectWatcherSource, /targetRequestId -eq 'chatgpt-desktop-popup:update'[\s\S]*?\$arguments \+= '-UseRetainedChat'/);
 assert.doesNotMatch(productionHelperSource, /\$verifiedRetainedPopup = Find-VerifiedChatGptPopupWindow -ProcessIds \$chatGptProcessIds -AllowNativeRetainedFallback \$false/);
 assert.match(productionHelperSource, /if \(-not \$activatedExisting -and -not \(Invoke-PopupActivation -PopupWindow \$popupWindow\)\)/);
 const composerFailureSource = productionHelperSource.slice(
@@ -57,8 +61,8 @@ assert.doesNotMatch(popupWindowFinder, /className\.ToString\(\), "Chrome_WidgetW
 assert.doesNotMatch(popupWindowFinder, /bool isPopupToolWindow/);
 
 await writeFile(helper, `
-param([string]$Mode, [switch]$UseRetainedChat, [switch]$PasteClipboard)
-[ordered]@{ mode = $Mode; useRetainedChat = [bool]$UseRetainedChat; pasteClipboard = [bool]$PasteClipboard } |
+param([string]$Mode, [switch]$UseRetainedChat, [switch]$OpenWithShortcut, [switch]$PasteClipboard)
+[ordered]@{ mode = $Mode; useRetainedChat = [bool]$UseRetainedChat; openWithShortcut = [bool]$OpenWithShortcut; pasteClipboard = [bool]$PasteClipboard } |
   ConvertTo-Json -Compress | Set-Content -LiteralPath '${helperArguments.replaceAll("'", "''")}' -Encoding UTF8
 [ordered]@{ status = 'opened'; opened = $true; composerPopulated = [bool]$PasteClipboard } | ConvertTo-Json -Compress
 `, "utf8");
@@ -155,7 +159,7 @@ try {
   assert.equal(calls.some((call) => call.method === "PATCH" && JSON.parse(call.body).action === "claim"), true);
   assert.equal(calls.some((call) => call.method === "PATCH" && JSON.parse(call.body).action === "complete"), true);
   const helperResult = JSON.parse((await readFile(helperArguments, "utf8")).replace(/^\uFEFF/, ""));
-  assert.deepEqual(helperResult, { mode: "open", useRetainedChat: true, pasteClipboard: true });
+  assert.deepEqual(helperResult, { mode: "open", useRetainedChat: true, openWithShortcut: true, pasteClipboard: true });
   const ready = JSON.parse((await readFile(readyPath, "utf8")).replace(/^\uFEFF/, ""));
   assert.equal(ready.serverAcknowledged, true);
   assert.equal(ready.pluginId, "cogentspec");

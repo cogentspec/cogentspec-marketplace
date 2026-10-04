@@ -124,7 +124,9 @@ try {
                             throw 'Standalone Popout Bridge rejected an unsupported target.'
                         }
                         $composerRequired = $target -ne 'chatgpt-desktop-popup'
-                        $helperOutput = if ($composerRequired) {
+                        $helperOutput = if ($target -eq 'chatgpt-desktop-popup:connect') {
+                            @(& $popupHelper -Mode open -UseRetainedChat -OpenWithShortcut -PasteClipboard 2>&1)
+                        } elseif ($target -eq 'chatgpt-desktop-popup:update') {
                             @(& $popupHelper -Mode open -UseRetainedChat -PasteClipboard 2>&1)
                         } else {
                             @(& $popupHelper -Mode open -UseRetainedChat 2>&1)

@@ -255,7 +255,7 @@ for ($heartbeat = 0; $heartbeat -lt 15; $heartbeat += 1) {
     Assert-BridgeLauncherTest ($popupHelperText.Contains("`$normalizedExistingText -eq '`$cogentspec'")) 'The ChatGPT popout helper does not safely replace its own previous connection command.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains('if ($popupWasVisible -and $UseRetainedChat)')) 'The explicit connection flow still dismisses a visible retained popout before reconnecting it.'
     Assert-BridgeLauncherTest (-not $popupHelperText.Contains('AllowNativeRetainedFallback')) 'The retained-popout lookup can still mistake the full ChatGPT Desktop UI for an unverified Popout.'
-    Assert-BridgeLauncherTest ($popupHelperText.Contains('if ($UseRetainedChat -and -not $activatedExisting)')) 'The retained-popout path can still fall through to the global shortcut when no verified Popout is visible.'
+    Assert-BridgeLauncherTest ($popupHelperText.Contains('if ($UseRetainedChat -and -not $activatedExisting -and -not $OpenWithShortcut)')) 'The retained-popout update path can still fall through to the global shortcut without an explicit connection opt-in.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains("Write-Failure -Status 'retained_popup_not_visible'")) 'The retained-popout path does not fail safely into the manual Popout flow.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains('for ($attempt = 1; $attempt -le 2; $attempt++)')) 'The ChatGPT popout helper does not make one bounded retry when the host only foregrounds itself on the first shortcut.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains('shortcutAttempts = $shortcutAttempts')) 'The ChatGPT popout helper does not report how many shortcut attempts were required.'
@@ -292,6 +292,9 @@ for ($heartbeat = 0; $heartbeat -lt 15; $heartbeat += 1) {
     Assert-BridgeLauncherTest ($watcherText.Contains("'-ThreadId', `$ThreadId")) 'The Bridge does not bind ChatGPT actions to the invoking task identity.'
     Assert-BridgeLauncherTest ($watcherText.Contains("`$arguments += '-PasteClipboard'")) 'The Bridge does not request update-composer population.'
     Assert-BridgeLauncherTest ($watcherText.Contains("`$arguments += '-UseRetainedChat'")) 'The Bridge does not request explicit reconnection of the retained popout chat.'
+    Assert-BridgeLauncherTest ($watcherText.Contains("if ([string]`$Request.targetRequestId -eq 'chatgpt-desktop-popup:connect')")) 'The Bridge does not isolate the Popout connection action from the update action.'
+    Assert-BridgeLauncherTest ($watcherText.Contains("`$arguments += @('-UseRetainedChat', '-OpenWithShortcut')")) 'The Popout connection action does not opt into the Ctrl+Shift+Space shortcut.'
+    Assert-BridgeLauncherTest ($watcherText.Contains("} elseif ([string]`$Request.targetRequestId -eq 'chatgpt-desktop-popup:update') {")) 'The Popout update action is not kept on its fail-closed retained-window path.'
     Assert-BridgeLauncherTest ($watcherText.Contains('ChatGPT popout shown and its verified composer populated with the copied update request.')) 'The Bridge does not report verified update-composer population.'
     Assert-BridgeLauncherTest ($watcherText.Contains('ChatGPT popout shown with $cogentspec ready to send in the retained chat.')) 'The Bridge does not report the explicit connection command preload.'
 

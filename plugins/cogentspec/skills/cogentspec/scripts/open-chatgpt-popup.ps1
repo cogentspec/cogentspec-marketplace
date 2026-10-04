@@ -4,6 +4,7 @@ param(
     [string]$Mode = 'open',
     [switch]$PasteClipboard,
     [switch]$UseRetainedChat,
+    [switch]$OpenWithShortcut,
     [ValidatePattern('^$|^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')]
     [string]$ThreadId = ''
 )
@@ -895,12 +896,10 @@ if ($popupWindow -ne [IntPtr]::Zero) {
     }
 }
 
-if ($UseRetainedChat -and -not $activatedExisting) {
-    # The standalone Popout workflow must never fall through to the global
-    # Ctrl+Shift+Space shortcut when no verified Popout is visible. Depending
-    # on the current ChatGPT host state, that shortcut can foreground the full
-    # Desktop UI instead of restoring the retained Popout. Keep the CogentSpec
-    # work area in place and require the user to open the Popout manually.
+if ($UseRetainedChat -and -not $activatedExisting -and -not $OpenWithShortcut) {
+    # Retained update requests must never fall through to the global shortcut.
+    # Only an explicit Popout connect request opts into Ctrl+Shift+Space so the
+    # verified Popout can be opened before its composer is populated.
     [void](Restore-ChatGptPopupTopmost -PopupWindow $temporaryTopmostWindow -Required $temporaryTopmost)
     Write-Failure -Status 'retained_popup_not_visible' -Reason 'CogentSpec left this work area open. Open ChatGPT Popout manually with Ctrl + Shift + Space, then paste the prepared request into that Popout.'
     return
