@@ -131,9 +131,11 @@ for ($heartbeat = 0; $heartbeat -lt 15; $heartbeat += 1) {
     Assert-BridgeLauncherTest ([string]$result.bridge -eq 'started') 'The Bridge launcher did not start the fixture worker.'
     Assert-BridgeLauncherTest ([bool]$result.presenceVerified) 'The Bridge launcher reported ready before server presence was verified.'
     Assert-BridgeLauncherTest ([string]$result.mcpState -eq 'ready') 'The secure project-data connection was not ready.'
+    $fixtureLauncherText = Get-Content -Raw -LiteralPath (Join-Path $fixtureScripts 'start-cogentstack-bridge.ps1')
+    Assert-BridgeLauncherTest ($fixtureLauncherText.Contains('-TimeoutMilliseconds 8000')) 'The Bridge presence wait is not bounded to eight seconds.'
     Assert-BridgeLauncherTest (
-        [int]$result.launcherElapsedMs -ge 500 -and [int]$result.launcherElapsedMs -lt 8000
-    ) ("The Bridge launcher did not wait for the delayed server acknowledgement within its eight-second in-process limit. Observed launcherElapsedMs={0}." -f [int]$result.launcherElapsedMs)
+        [int]$result.launcherElapsedMs -ge 500 -and [int]$result.launcherElapsedMs -lt 9500
+    ) ("The Bridge launcher did not complete the delayed acknowledgement and post-ready Popout check within its overall process envelope. Observed launcherElapsedMs={0}." -f [int]$result.launcherElapsedMs)
     Assert-BridgeLauncherTest ($timer.ElapsedMilliseconds -lt 10000) 'The Bridge launcher exceeded the ten-second cold-process fixture limit.'
     Assert-BridgeLauncherTest ([string]$result.webWorkspaceUrl -match '#desktop-web=') 'The web workspace handoff is missing.'
     Assert-BridgeLauncherTest ([string]$result.chatgptWorkspaceUrl -match '#desktop-chatgpt=') 'The ChatGPT workspace handoff is missing.'
@@ -347,6 +349,10 @@ for ($heartbeat = 0; $heartbeat -lt 15; $heartbeat += 1) {
     Assert-BridgeLauncherTest ($launcherText.Contains("chatFingerprint = `$chatFingerprint")) 'The task Bridge does not bind confirmation to the active Popout chat fingerprint.'
     Assert-BridgeLauncherTest (($launcherText.Split('Confirm-StandalonePopoutConnection').Count - 1) -ge 3) 'The Popout confirmation is not applied to both reused and newly started task Bridge workers.'
     Assert-BridgeLauncherTest ($launcherText.Contains('popoutConnectionConfirmed = $popoutConnectionConfirmed')) 'The task Bridge does not report whether it confirmed a waiting Popout connection.'
+    $cogentSpecSkillText = Get-Content -Raw -LiteralPath (Join-Path $repositoryRoot 'plugins\cogentspec\skills\cogentspec\SKILL.md')
+    Assert-BridgeLauncherTest ($cogentSpecSkillText.Contains('Only `popoutConnectionConfirmed: true` confirms')) 'The CogentSpec workflow can still mistake a visible Popout for a connected chat.'
+    $cogentStackSkillText = Get-Content -Raw -LiteralPath (Join-Path $repositoryRoot 'plugins\cogentstack\skills\cogentstack\SKILL.md')
+    Assert-BridgeLauncherTest ($cogentStackSkillText.Contains('Only `popoutConnectionConfirmed: true` confirms')) 'The CogentStack workflow can still mistake a visible Popout for a connected chat.'
     $desktopUiWatcherText = Get-Content -Raw -LiteralPath (Join-Path $repositoryRoot 'plugins\cogentspec\skills\cogentspec\scripts\watch-cogentspec-desktop-ui-bridge.ps1')
     Assert-BridgeLauncherTest ($desktopUiWatcherText.Contains('/api/plugin/desktop-ui-actions')) 'The independent Desktop UI worker does not poll its account-level queue.'
     Assert-BridgeLauncherTest ($desktopUiWatcherText.Contains("@('chatgpt-desktop-ui:connect', 'chatgpt-desktop-ui:update')")) 'The Desktop UI worker does not restrict its two supported requests.'
