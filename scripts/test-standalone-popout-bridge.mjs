@@ -29,7 +29,8 @@ const composerConditionSource = productionHelperSource.slice(
 assert.doesNotMatch(composerConditionSource, /ControlTypeProperty/);
 assert.match(productionHelperSource, /Temporarily pin the verified window before looking for its composer;/);
 assert.match(productionHelperSource, /\$temporaryTopmostRestored = Restore-ChatGptPopupTopmost/);
-assert.match(productionHelperSource, /\$verifiedRetainedPopup = Find-VerifiedChatGptPopupWindow -ProcessIds \$chatGptProcessIds -AllowNativeRetainedFallback \$false/);
+assert.match(productionHelperSource, /Ctrl\+Shift\+Space is a toggle/);
+assert.doesNotMatch(productionHelperSource, /\$verifiedRetainedPopup = Find-VerifiedChatGptPopupWindow -ProcessIds \$chatGptProcessIds -AllowNativeRetainedFallback \$false/);
 assert.match(productionHelperSource, /if \(-not \$UseRetainedChat -and -not \(Invoke-PopupActivation -PopupWindow \$popupWindow\)\)/);
 assert.doesNotMatch(productionHelperSource, /found the retained ChatGPT popout but could not make it ready for reconnection/);
 assert.doesNotMatch(popupWindowFinder, /className\.ToString\(\), "Chrome_WidgetWin_1"/);

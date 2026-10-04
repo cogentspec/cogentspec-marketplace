@@ -879,30 +879,12 @@ if ($popupWindow -ne [IntPtr]::Zero) {
             $temporaryTopmostWindow = $popupWindow
             Start-Sleep -Milliseconds 150
         }
-        $verifiedRetainedPopup = Find-VerifiedChatGptPopupWindow -ProcessIds $chatGptProcessIds -AllowNativeRetainedFallback $false
-        for ($attempt = 1; $verifiedRetainedPopup -eq [IntPtr]::Zero -and $attempt -le 2; $attempt++) {
-            if (-not [CogentSpec.ChatGptPopupNative]::SendControlShiftSpace()) {
-                [void](Restore-ChatGptPopupTopmost -PopupWindow $temporaryTopmostWindow -Required $temporaryTopmost)
-                Write-Failure -Status 'shortcut_failed' -Reason 'CogentSpec could not send the popout shortcut. Press Ctrl + Shift + Space.'
-                return
-            }
-            $shortcutSent = $true
-            $shortcutAttempts = $attempt
-            $retainedDeadline = [DateTime]::UtcNow.AddSeconds(3)
-            do {
-                Start-Sleep -Milliseconds 100
-                $verifiedRetainedPopup = Find-VerifiedChatGptPopupWindow -ProcessIds $chatGptProcessIds -AllowNativeRetainedFallback $false
-            } while (($verifiedRetainedPopup -eq [IntPtr]::Zero -or -not [CogentSpec.ChatGptPopupNative]::IsVisible($verifiedRetainedPopup)) -and [DateTime]::UtcNow -lt $retainedDeadline)
-            if ($verifiedRetainedPopup -ne [IntPtr]::Zero -and [CogentSpec.ChatGptPopupNative]::IsVisible($verifiedRetainedPopup)) { break }
-        }
-        if ($verifiedRetainedPopup -ne [IntPtr]::Zero) {
-            $popupWindow = $verifiedRetainedPopup
-            if ($temporaryTopmost) { $temporaryTopmostWindow = $popupWindow }
-            [void](Invoke-PopupActivation -PopupWindow $popupWindow)
-            $activatedExisting = $true
-        } else {
-            $popupWindow = [IntPtr]::Zero
-        }
+        # Ctrl+Shift+Space is a toggle. Once a retained Popout is visible,
+        # never send it as a composer-discovery fallback because that docks the
+        # existing Popout back into ChatGPT Desktop. Keep and activate the
+        # already publisher-verified native Popout instead.
+        [void](Invoke-PopupActivation -PopupWindow $popupWindow)
+        $activatedExisting = $true
     } elseif ($popupWasVisible) {
         [void][CogentSpec.ChatGptPopupNative]::SendControlShiftSpace()
         $dismissDeadline = [DateTime]::UtcNow.AddSeconds(3)
