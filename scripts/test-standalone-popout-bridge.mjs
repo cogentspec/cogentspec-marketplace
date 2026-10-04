@@ -26,6 +26,12 @@ assert.match(productionHelperSource, /'Dismiss Popout Window'/);
 assert.match(productionHelperSource, /function Find-ChatGptPopupWindowMatch/);
 assert.match(productionHelperSource, /'Work with ChatGPT', 'Ask ChatGPT anything locally'/);
 assert.match(productionHelperSource, /\$MainWindowHandles -contains \$window\.ToInt64\(\)/);
+const mainWindowBoundarySource = productionHelperSource.slice(
+  productionHelperSource.indexOf("$chatGptMainWindowHandles ="),
+  productionHelperSource.indexOf("$popupMatch =", productionHelperSource.indexOf("$chatGptMainWindowHandles =")),
+);
+assert.match(mainWindowBoundarySource, /FindMainWindows\(\$chatGptProcessIds\)/);
+assert.doesNotMatch(mainWindowBoundarySource, /\.MainWindowHandle\b/);
 assert.match(productionHelperSource, /verification = 'popup_specific_composer'/);
 assert.match(productionHelperSource, /popup_detected_not_verified/);
 assert.match(productionHelperSource, /ChatGPT Popout opened, but Desktop Bridge could not verify one safe composer window/);
@@ -37,13 +43,19 @@ const composerConditionSource = productionHelperSource.slice(
   productionHelperSource.indexOf("function Set-ChatGptComposerFocus"),
 );
 assert.doesNotMatch(composerConditionSource, /ControlTypeProperty/);
-assert.match(productionHelperSource, /Temporarily pin the verified window before looking for its composer;/);
+assert.match(productionHelperSource, /Working-screen[\s\S]*?Popout requests keep that pin/);
 assert.match(productionHelperSource, /\$temporaryTopmostRestored = Restore-ChatGptPopupTopmost/);
+assert.match(productionHelperSource, /\[switch\]\$KeepPinned/);
+assert.match(productionHelperSource, /if \(-not \$KeepPinned\) \{[\s\S]*?\$temporaryTopmost = \$true/);
+assert.match(productionHelperSource, /pinRequested = \[bool\]\$KeepPinned/);
+assert.match(productionHelperSource, /pinned = \$popupPinned/);
+assert.match(productionHelperSource, /\$popupPinned -ne \$shouldPin/);
+assert.match(productionHelperSource, /the ChatGPT popout remained pinned/);
 assert.match(productionHelperSource, /Ctrl\+Shift\+Space is a toggle/);
 assert.match(productionHelperSource, /if \(-not \$activatedExisting -and -not \$popupCandidateDetected\)/);
 assert.match(productionHelperSource, /-or \[bool\]\$popupMatch\.candidateDetected\) \{ break \}/);
 assert.match(productionHelperSource, /A newly exposed Popout may omit its dismiss control while unpinned/);
-assert.match(productionHelperSource, /CogentSpec opened the ChatGPT Popout but Windows could not temporarily pin it for composer input/);
+assert.match(productionHelperSource, /CogentSpec opened the ChatGPT Popout but Windows could not pin it for composer input/);
 assert.match(productionHelperSource, /popupVerification = \$popupVerification/);
 assert.doesNotMatch(productionHelperSource, /AllowNativeRetainedFallback/);
 assert.match(productionHelperSource, /if \(\$UseRetainedChat -and -not \$activatedExisting -and -not \$OpenWithShortcut\)/);
@@ -55,10 +67,12 @@ const retainedSafetySource = productionHelperSource.slice(
 assert.match(retainedSafetySource, /retained_popup_not_visible/);
 assert.match(retainedSafetySource, /Open ChatGPT Popout manually/);
 assert.doesNotMatch(retainedSafetySource, /SendControlShiftSpace/);
-assert.match(watcherSource, /\$target -eq 'chatgpt-desktop-popup:connect'[\s\S]*?-UseRetainedChat -OpenWithShortcut -PasteClipboard/);
-assert.match(watcherSource, /\$target -eq 'chatgpt-desktop-popup:update'[\s\S]*?-UseRetainedChat -PasteClipboard/);
+assert.match(watcherSource, /\$target -eq 'chatgpt-desktop-popup:connect'[\s\S]*?-UseRetainedChat -OpenWithShortcut -KeepPinned -PasteClipboard/);
+assert.match(watcherSource, /\$target -eq 'chatgpt-desktop-popup:update'[\s\S]*?-UseRetainedChat -KeepPinned -PasteClipboard/);
+assert.match(watcherSource, /-Mode open -UseRetainedChat -KeepPinned/);
 assert.match(projectWatcherSource, /targetRequestId -eq 'chatgpt-desktop-popup:connect'[\s\S]*?'-UseRetainedChat', '-OpenWithShortcut'/);
 assert.match(projectWatcherSource, /targetRequestId -eq 'chatgpt-desktop-popup:update'[\s\S]*?\$arguments \+= '-UseRetainedChat'/);
+assert.match(projectWatcherSource, /if \(-not \$desktopUiRequest\) \{[\s\S]*?\$arguments \+= '-KeepPinned'/);
 assert.doesNotMatch(productionHelperSource, /\$verifiedRetainedPopup = Find-VerifiedChatGptPopupWindow -ProcessIds \$chatGptProcessIds -AllowNativeRetainedFallback \$false/);
 assert.match(productionHelperSource, /if \(-not \$activatedExisting -and -not \(Invoke-PopupActivation -PopupWindow \$popupWindow\)\)/);
 const composerFailureSource = productionHelperSource.slice(
@@ -72,8 +86,8 @@ assert.doesNotMatch(popupWindowFinder, /className\.ToString\(\), "Chrome_WidgetW
 assert.doesNotMatch(popupWindowFinder, /bool isPopupToolWindow/);
 
 await writeFile(helper, `
-param([string]$Mode, [switch]$UseRetainedChat, [switch]$OpenWithShortcut, [switch]$PasteClipboard)
-[ordered]@{ mode = $Mode; useRetainedChat = [bool]$UseRetainedChat; openWithShortcut = [bool]$OpenWithShortcut; pasteClipboard = [bool]$PasteClipboard } |
+param([string]$Mode, [switch]$UseRetainedChat, [switch]$OpenWithShortcut, [switch]$KeepPinned, [switch]$PasteClipboard)
+[ordered]@{ mode = $Mode; useRetainedChat = [bool]$UseRetainedChat; openWithShortcut = [bool]$OpenWithShortcut; keepPinned = [bool]$KeepPinned; pasteClipboard = [bool]$PasteClipboard } |
   ConvertTo-Json -Compress | Set-Content -LiteralPath '${helperArguments.replaceAll("'", "''")}' -Encoding UTF8
 [ordered]@{ status = 'opened'; opened = $true; composerPopulated = [bool]$PasteClipboard } | ConvertTo-Json -Compress
 `, "utf8");
@@ -170,7 +184,7 @@ try {
   assert.equal(calls.some((call) => call.method === "PATCH" && JSON.parse(call.body).action === "claim"), true);
   assert.equal(calls.some((call) => call.method === "PATCH" && JSON.parse(call.body).action === "complete"), true);
   const helperResult = JSON.parse((await readFile(helperArguments, "utf8")).replace(/^\uFEFF/, ""));
-  assert.deepEqual(helperResult, { mode: "open", useRetainedChat: true, openWithShortcut: true, pasteClipboard: true });
+  assert.deepEqual(helperResult, { mode: "open", useRetainedChat: true, openWithShortcut: true, keepPinned: true, pasteClipboard: true });
   const ready = JSON.parse((await readFile(readyPath, "utf8")).replace(/^\uFEFF/, ""));
   assert.equal(ready.serverAcknowledged, true);
   assert.equal(ready.pluginId, "cogentspec");

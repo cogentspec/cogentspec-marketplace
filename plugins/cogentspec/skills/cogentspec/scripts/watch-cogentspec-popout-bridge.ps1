@@ -125,11 +125,11 @@ try {
                         }
                         $composerRequired = $target -ne 'chatgpt-desktop-popup'
                         $helperOutput = if ($target -eq 'chatgpt-desktop-popup:connect') {
-                            @(& $popupHelper -Mode open -UseRetainedChat -OpenWithShortcut -PasteClipboard 2>&1)
+                            @(& $popupHelper -Mode open -UseRetainedChat -OpenWithShortcut -KeepPinned -PasteClipboard 2>&1)
                         } elseif ($target -eq 'chatgpt-desktop-popup:update') {
-                            @(& $popupHelper -Mode open -UseRetainedChat -PasteClipboard 2>&1)
+                            @(& $popupHelper -Mode open -UseRetainedChat -KeepPinned -PasteClipboard 2>&1)
                         } else {
-                            @(& $popupHelper -Mode open -UseRetainedChat 2>&1)
+                            @(& $popupHelper -Mode open -UseRetainedChat -KeepPinned 2>&1)
                         }
                         $helperJson = @($helperOutput | ForEach-Object { [string]$_ } | Where-Object { $_.Trim().StartsWith('{') } | Select-Object -Last 1)
                         if (-not $helperJson) { throw 'The verified ChatGPT Popout helper returned no result.' }
@@ -137,8 +137,8 @@ try {
                         $completed = [string]$result.status -eq 'opened' -and [bool]$result.opened -and
                             (-not $composerRequired -or [bool]$result.composerPopulated)
                         $message = if ($completed) {
-                            if ($composerRequired) { 'Standalone ChatGPT Popout opened with the composer filled.' }
-                            else { 'Standalone ChatGPT Popout opened.' }
+                            if ($composerRequired) { 'Standalone ChatGPT Popout opened, pinned, and filled.' }
+                            else { 'Standalone ChatGPT Popout opened and pinned.' }
                         } elseif ($result.reason) { [string]$result.reason }
                         else { 'The standalone ChatGPT Popout could not be opened.' }
                     } catch {

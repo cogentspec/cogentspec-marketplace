@@ -109,6 +109,9 @@ function Invoke-ActionHelper($Request) {
         'open_chatgpt_popup' {
             $desktopUiRequest = [string]$Request.targetRequestId -in @('chatgpt-desktop-ui:connect', 'chatgpt-desktop-ui:update')
             $arguments += @('-Mode', $(if ($desktopUiRequest) { 'desktop' } else { 'open' }), '-ThreadId', $ThreadId)
+            if (-not $desktopUiRequest) {
+                $arguments += '-KeepPinned'
+            }
             if ($desktopUiRequest -or [string]$Request.targetRequestId -in @('chatgpt-desktop-popup:connect', 'chatgpt-desktop-popup:update')) {
                 $arguments += '-PasteClipboard'
             }
@@ -211,12 +214,12 @@ try {
                             }
                         } elseif ($result.PSObject.Properties['composerPopulated'] -and [bool]$result.composerPopulated) {
                             if ([string]$claimed.request.targetRequestId -eq 'chatgpt-desktop-popup:connect') {
-                                'ChatGPT popout shown with $cogentspec ready to send in the retained chat.'
+                                'ChatGPT popout pinned with $cogentspec ready to send in the retained chat.'
                             } else {
-                                'ChatGPT popout shown and its verified composer populated with the copied update request.'
+                                'ChatGPT popout pinned and its verified composer populated with the copied update request.'
                             }
                         } else {
-                            'ChatGPT popout shown with its composer ready after verifying the signed ChatGPT Desktop application.'
+                            'ChatGPT popout pinned with its composer ready after verifying the signed ChatGPT Desktop application.'
                         }
                     }
                     'set_chatgpt_popup_topmost' {

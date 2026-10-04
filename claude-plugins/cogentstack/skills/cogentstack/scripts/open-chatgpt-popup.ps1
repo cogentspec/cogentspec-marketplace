@@ -5,6 +5,7 @@ param(
     [switch]$PasteClipboard,
     [switch]$UseRetainedChat,
     [switch]$OpenWithShortcut,
+    [switch]$KeepPinned,
     [ValidatePattern('^$|^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')]
     [string]$ThreadId = ''
 )
@@ -773,8 +774,11 @@ function Set-ChatGptComposerFromClipboard([IntPtr]$Window) {
 }
 
 $chatGptProcessIds = [int[]]@($chatGptProcesses | ForEach-Object { [int]$_.Id })
-$chatGptMainWindowHandles = [long[]]@($chatGptProcesses | ForEach-Object {
-    if ($_.MainWindowHandle -ne [IntPtr]::Zero) { $_.MainWindowHandle.ToInt64() }
+# Process.MainWindowHandle can switch to the pinned Popout. Enumerate native
+# non-tool ChatGPT windows instead so a persistent Popout remains distinguishable
+# from the actual full Desktop task after it becomes always-on-top.
+$chatGptMainWindowHandles = [long[]]@([CogentSpec.ChatGptPopupNative]::FindMainWindows($chatGptProcessIds) | ForEach-Object {
+    ([IntPtr]$_).ToInt64()
 })
 $popupMatch = Find-ChatGptPopupWindowMatch -ProcessIds $chatGptProcessIds -MainWindowHandles $chatGptMainWindowHandles
 $popupWindow = [IntPtr]$popupMatch.window
@@ -788,6 +792,7 @@ $activatedExisting = $false
 $restoredHidden = $false
 $temporaryTopmost = $false
 $temporaryTopmostWindow = [IntPtr]::Zero
+$workflowPinApplied = $false
 
 if ($Mode -eq 'inspect') {
     Write-CompactJson ([ordered]@{
@@ -905,13 +910,29 @@ if ($Mode -in @('pin', 'unpin')) {
         Write-Failure -Status 'popup_pin_failed' -Reason 'Windows did not accept the ChatGPT popout pin change.' -Opened $true
         return
     }
+    $pinStateDeadline = [DateTime]::UtcNow.AddSeconds(1)
+    do {
+        $popupPinned = [CogentSpec.ChatGptPopupNative]::IsTopmost($popupWindow)
+        if ($popupPinned -eq $shouldPin) { break }
+        Start-Sleep -Milliseconds 50
+    } while ([DateTime]::UtcNow -lt $pinStateDeadline)
+    if ($popupPinned -ne $shouldPin) {
+        Write-Failure -Status 'popup_pin_failed' -Reason $(
+            if ($shouldPin) {
+                'Windows accepted the request but did not keep the ChatGPT popout pinned.'
+            } else {
+                'Windows accepted the request but the ChatGPT popout remained pinned.'
+            }
+        ) -Opened $true
+        return
+    }
     Write-CompactJson ([ordered]@{
         status = if ($shouldPin) { 'pinned' } else { 'unpinned' }
         opened = $true
         processId = [int]$chatGpt.Id
         publisherVerified = $true
         popupVerified = $true
-        pinned = [CogentSpec.ChatGptPopupNative]::IsTopmost($popupWindow)
+        pinned = $popupPinned
     })
     return
 }
@@ -926,15 +947,19 @@ if ($popupWindow -ne [IntPtr]::Zero) {
     $popupWasVisible = [CogentSpec.ChatGptPopupNative]::IsVisible($popupWindow)
     if ($popupWasVisible -and $UseRetainedChat) {
         # Clicking the web LED leaves the retained popout behind the browser.
-        # Temporarily pin the verified window before looking for its composer;
-        # restore the user's original pin state after the request is populated.
+        # Pin the verified window before looking for its composer. Working-screen
+        # Popout requests keep that pin so the composer stays above the browser;
+        # other callers retain the prior temporary-pin behavior.
         if (-not [CogentSpec.ChatGptPopupNative]::IsTopmost($popupWindow)) {
             if (-not [CogentSpec.ChatGptPopupNative]::SetPopupTopmost($popupWindow, $true)) {
                 Write-Failure -Status 'popup_pin_failed' -Reason 'Windows did not make the retained ChatGPT popout available for reconnection.' -Opened $true
                 return
             }
-            $temporaryTopmost = $true
-            $temporaryTopmostWindow = $popupWindow
+            $workflowPinApplied = $true
+            if (-not $KeepPinned) {
+                $temporaryTopmost = $true
+                $temporaryTopmostWindow = $popupWindow
+            }
             Start-Sleep -Milliseconds 150
         }
         # Ctrl+Shift+Space is a toggle. Once a retained Popout is visible,
@@ -1006,15 +1031,18 @@ if (-not $activatedExisting -and -not $popupCandidateDetected) {
 
 if (-not $activatedExisting -and $popupWindow -ne [IntPtr]::Zero -and $popupVisible -and
     -not [CogentSpec.ChatGptPopupNative]::IsTopmost($popupWindow)) {
-    # A newly exposed Popout may omit its dismiss control while unpinned. Pin
-    # it only for activation, composer focus, and verified paste, then restore
-    # the user's original unpinned state on every following exit path.
+    # A newly exposed Popout may omit its dismiss control while unpinned. Pin it
+    # immediately before activation and composer work. Working-screen requests
+    # keep the pin; other callers restore the original unpinned state.
     if (-not [CogentSpec.ChatGptPopupNative]::SetPopupTopmost($popupWindow, $true)) {
-        Write-Failure -Status 'popup_pin_failed' -Reason 'CogentSpec opened the ChatGPT Popout but Windows could not temporarily pin it for composer input.' -Opened $true -PopupDetected $true -PopupVerification $popupVerification
+        Write-Failure -Status 'popup_pin_failed' -Reason 'CogentSpec opened the ChatGPT Popout but Windows could not pin it for composer input.' -Opened $true -PopupDetected $true -PopupVerification $popupVerification
         return
     }
-    $temporaryTopmost = $true
-    $temporaryTopmostWindow = $popupWindow
+    $workflowPinApplied = $true
+    if (-not $KeepPinned) {
+        $temporaryTopmost = $true
+        $temporaryTopmostWindow = $popupWindow
+    }
     Start-Sleep -Milliseconds 150
 }
 
@@ -1112,6 +1140,11 @@ if (-not $temporaryTopmostRestored) {
     Write-Failure -Status 'popup_pin_restore_failed' -Reason 'CogentSpec populated the ChatGPT composer but Windows did not restore the previous popout pin state.' -Opened $true
     return
 }
+$popupPinned = [CogentSpec.ChatGptPopupNative]::IsTopmost($popupWindow)
+if ($KeepPinned -and -not $popupPinned) {
+    Write-Failure -Status 'popup_pin_failed' -Reason 'CogentSpec populated the ChatGPT composer but Windows did not keep the Popout pinned above the working screen.' -Opened $true -PopupDetected $true -PopupVerification $popupVerification
+    return
+}
 
 Write-CompactJson ([ordered]@{
     status = 'opened'
@@ -1141,6 +1174,9 @@ Write-CompactJson ([ordered]@{
     topmostRestored = $topmostRestored
     temporaryTopmost = $temporaryTopmost
     temporaryTopmostRestored = $temporaryTopmostRestored
+    pinRequested = [bool]$KeepPinned
+    pinApplied = $workflowPinApplied
+    pinned = $popupPinned
     composerPreloaded = $composerPopulated
     composerPopulated = $composerPopulated
     composerFocused = [bool]$composer.focused
