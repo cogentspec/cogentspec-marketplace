@@ -564,6 +564,13 @@ namespace CogentSpec {
             return window != IntPtr.Zero && GetForegroundWindow() == window;
         }
 
+        public static int GetProcessId(IntPtr window) {
+            if (window == IntPtr.Zero) return 0;
+            uint processId;
+            GetWindowThreadProcessId(window, out processId);
+            return unchecked((int)processId);
+        }
+
         public static bool IsTopmost(IntPtr window) {
             return window != IntPtr.Zero && (GetWindowLongPtr(window, GWL_EXSTYLE).ToInt64() & WS_EX_TOPMOST) != 0;
         }
@@ -807,7 +814,11 @@ if ($Mode -eq 'inspect') {
         popupAmbiguous = $popupCandidateAmbiguous
         popupVisible = [CogentSpec.ChatGptPopupNative]::IsVisible($popupWindow)
         popupTopmost = [CogentSpec.ChatGptPopupNative]::IsTopmost($popupWindow)
+        popupWindowHandle = $popupWindow.ToInt64()
+        popupProcessId = [CogentSpec.ChatGptPopupNative]::GetProcessId($popupWindow)
+        popupForeground = [CogentSpec.ChatGptPopupNative]::IsForeground($popupWindow)
         manualShortcut = 'Ctrl+Shift+Space'
+        pinShortcut = 'Ctrl+Shift+P'
     })
     return
 }

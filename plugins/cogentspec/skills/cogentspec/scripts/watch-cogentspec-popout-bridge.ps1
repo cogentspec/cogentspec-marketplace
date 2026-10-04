@@ -27,6 +27,8 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+$script:PinHotkeyReady = $false
+$script:PinHotkeyError = ''
 
 function Write-ReadyMarker([bool]$ServerAcknowledged, [string]$Status = 'ready', [string]$LastError = '') {
     if (-not $ReadyPath) { return }
@@ -40,6 +42,10 @@ function Write-ReadyMarker([bool]$ServerAcknowledged, [string]$Status = 'ready',
         acknowledgedAt = [DateTime]::UtcNow.ToString('o')
         status = $Status
         lastError = $LastError
+        pinHotkey = 'Ctrl+Shift+P'
+        pinHotkeyReady = [bool]$script:PinHotkeyReady
+        pinHotkeyScope = 'verified_foreground_chatgpt_popout'
+        pinHotkeyError = [string]$script:PinHotkeyError
     } | ConvertTo-Json | Set-Content -LiteralPath $ReadyPath -Encoding UTF8
 }
 
@@ -86,6 +92,272 @@ function Get-HttpStatusCode($Failure) {
     try { return [int]$statusProperty.Value } catch { return 0 }
 }
 
+function Initialize-PopupPinHotkey {
+    if ($TestToken) { return }
+    try {
+        if ($null -eq ('CogentSpec.ChatGptPopupPinHotkey' -as [type])) {
+            Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+using System.Threading;
+
+namespace CogentSpec {
+    public static class ChatGptPopupPinHotkey {
+        private const int WH_KEYBOARD_LL = 13;
+        private const uint WM_KEYDOWN = 0x0100;
+        private const uint WM_KEYUP = 0x0101;
+        private const uint WM_SYSKEYDOWN = 0x0104;
+        private const uint WM_SYSKEYUP = 0x0105;
+        private const uint WM_QUIT = 0x0012;
+        private const int VK_CONTROL = 0x11;
+        private const int VK_SHIFT = 0x10;
+        private const int VK_MENU = 0x12;
+        private const int VK_P = 0x50;
+        private const int VK_LWIN = 0x5B;
+        private const int VK_RWIN = 0x5C;
+        private const int GWL_EXSTYLE = -20;
+        private const long WS_EX_TOPMOST = 0x00000008L;
+        private const uint SWP_NOSIZE = 0x0001;
+        private const uint SWP_NOMOVE = 0x0002;
+        private const uint SWP_NOACTIVATE = 0x0010;
+        private static readonly IntPtr HWND_TOPMOST = new IntPtr(-1);
+        private static readonly IntPtr HWND_NOTOPMOST = new IntPtr(-2);
+
+        private delegate IntPtr LowLevelKeyboardProc(int code, IntPtr wParam, IntPtr lParam);
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct KeyboardData {
+            public uint virtualKey;
+            public uint scanCode;
+            public uint flags;
+            public uint time;
+            public UIntPtr extraInfo;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct Point {
+            public int x;
+            public int y;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct Message {
+            public IntPtr window;
+            public uint message;
+            public UIntPtr wParam;
+            public IntPtr lParam;
+            public uint time;
+            public Point point;
+        }
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern IntPtr SetWindowsHookEx(int hookId, LowLevelKeyboardProc callback, IntPtr module, uint threadId);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern bool UnhookWindowsHookEx(IntPtr hook);
+
+        [DllImport("user32.dll")]
+        private static extern IntPtr CallNextHookEx(IntPtr hook, int code, IntPtr wParam, IntPtr lParam);
+
+        [DllImport("user32.dll")]
+        private static extern short GetAsyncKeyState(int virtualKey);
+
+        [DllImport("user32.dll")]
+        private static extern IntPtr GetForegroundWindow();
+
+        [DllImport("user32.dll")]
+        private static extern bool IsWindow(IntPtr window);
+
+        [DllImport("user32.dll")]
+        private static extern bool IsWindowVisible(IntPtr window);
+
+        [DllImport("user32.dll")]
+        private static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);
+
+        [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")]
+        private static extern IntPtr GetWindowLongPtr(IntPtr window, int index);
+
+        [DllImport("user32.dll")]
+        private static extern bool SetWindowPos(IntPtr window, IntPtr insertAfter, int x, int y, int width, int height, uint flags);
+
+        [DllImport("user32.dll")]
+        private static extern int GetMessage(out Message message, IntPtr window, uint minimum, uint maximum);
+
+        [DllImport("user32.dll")]
+        private static extern bool TranslateMessage(ref Message message);
+
+        [DllImport("user32.dll")]
+        private static extern IntPtr DispatchMessage(ref Message message);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern bool PostThreadMessage(uint threadId, uint message, IntPtr wParam, IntPtr lParam);
+
+        [DllImport("kernel32.dll")]
+        private static extern IntPtr GetModuleHandle(string moduleName);
+
+        [DllImport("kernel32.dll")]
+        private static extern uint GetCurrentThreadId();
+
+        private static readonly object Sync = new object();
+        private static ManualResetEvent ready;
+        private static Thread hookThread;
+        private static LowLevelKeyboardProc callback;
+        private static IntPtr hook;
+        private static uint hookThreadId;
+        private static long verifiedPopupWindow;
+        private static int verifiedProcessId;
+        private static int capturedP;
+        private static int started;
+        private static string lastToggleStatus = "idle";
+        private static int lastTogglePinned;
+        private static long lastToggleUtcTicks;
+
+        public static bool Start() {
+            lock (Sync) {
+                if (started != 0) return hook != IntPtr.Zero;
+                started = 1;
+                ready = new ManualResetEvent(false);
+                hookThread = new Thread(HookThreadMain);
+                hookThread.IsBackground = true;
+                hookThread.Name = "CogentSpec ChatGPT Popout pin hotkey";
+                hookThread.SetApartmentState(ApartmentState.STA);
+                hookThread.Start();
+            }
+            ready.WaitOne(3000);
+            if (hook != IntPtr.Zero) return true;
+            Stop();
+            return false;
+        }
+
+        public static void Stop() {
+            Thread thread;
+            uint threadId;
+            lock (Sync) {
+                thread = hookThread;
+                threadId = hookThreadId;
+            }
+            SetVerifiedPopup(0, 0);
+            if (threadId != 0) PostThreadMessage(threadId, WM_QUIT, IntPtr.Zero, IntPtr.Zero);
+            if (thread != null && thread != Thread.CurrentThread) thread.Join(2000);
+            lock (Sync) {
+                hookThread = null;
+                hookThreadId = 0;
+                started = 0;
+                capturedP = 0;
+            }
+        }
+
+        public static void SetVerifiedPopup(long windowHandle, int processId) {
+            Interlocked.Exchange(ref verifiedPopupWindow, 0);
+            Interlocked.Exchange(ref verifiedProcessId, processId);
+            Interlocked.Exchange(ref verifiedPopupWindow, windowHandle);
+        }
+
+        public static bool IsRunning { get { return hook != IntPtr.Zero; } }
+        public static string LastToggleStatus { get { return lastToggleStatus; } }
+        public static bool LastTogglePinned { get { return lastTogglePinned != 0; } }
+        public static long LastToggleUtcTicks { get { return Interlocked.Read(ref lastToggleUtcTicks); } }
+
+        private static void HookThreadMain() {
+            callback = HookCallback;
+            hookThreadId = GetCurrentThreadId();
+            hook = SetWindowsHookEx(WH_KEYBOARD_LL, callback, GetModuleHandle(null), 0);
+            ready.Set();
+            if (hook == IntPtr.Zero) return;
+            Message message;
+            while (GetMessage(out message, IntPtr.Zero, 0, 0) > 0) {
+                TranslateMessage(ref message);
+                DispatchMessage(ref message);
+            }
+            UnhookWindowsHookEx(hook);
+            hook = IntPtr.Zero;
+        }
+
+        private static bool IsPressed(int virtualKey) {
+            return (GetAsyncKeyState(virtualKey) & 0x8000) != 0;
+        }
+
+        private static bool IsTopmost(IntPtr window) {
+            return window != IntPtr.Zero && (GetWindowLongPtr(window, GWL_EXSTYLE).ToInt64() & WS_EX_TOPMOST) != 0;
+        }
+
+        private static bool IsVerifiedForegroundPopup(IntPtr window) {
+            long expectedWindow = Interlocked.Read(ref verifiedPopupWindow);
+            int expectedProcess = Interlocked.CompareExchange(ref verifiedProcessId, 0, 0);
+            if (expectedWindow == 0 || expectedProcess <= 0 || window.ToInt64() != expectedWindow) return false;
+            if (!IsWindow(window) || !IsWindowVisible(window)) return false;
+            uint processId;
+            GetWindowThreadProcessId(window, out processId);
+            return processId == (uint)expectedProcess;
+        }
+
+        private static void ToggleTopmost(IntPtr window) {
+            bool shouldPin = !IsTopmost(window);
+            IntPtr position = shouldPin ? HWND_TOPMOST : HWND_NOTOPMOST;
+            uint flags = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE;
+            bool applied = SetWindowPos(window, position, 0, 0, 0, 0, flags);
+            bool finalPinned = IsTopmost(window);
+            lastTogglePinned = finalPinned ? 1 : 0;
+            lastToggleStatus = applied && finalPinned == shouldPin
+                ? (finalPinned ? "pinned" : "unpinned")
+                : "pin_failed";
+            Interlocked.Exchange(ref lastToggleUtcTicks, DateTime.UtcNow.Ticks);
+        }
+
+        private static IntPtr HookCallback(int code, IntPtr wParam, IntPtr lParam) {
+            if (code >= 0) {
+                KeyboardData data = (KeyboardData)Marshal.PtrToStructure(lParam, typeof(KeyboardData));
+                uint message = unchecked((uint)wParam.ToInt64());
+                bool keyDown = message == WM_KEYDOWN || message == WM_SYSKEYDOWN;
+                bool keyUp = message == WM_KEYUP || message == WM_SYSKEYUP;
+                if (data.virtualKey == VK_P && (keyDown || keyUp)) {
+                    if (keyUp && Interlocked.Exchange(ref capturedP, 0) != 0) return new IntPtr(1);
+                    if (keyDown && Interlocked.CompareExchange(ref capturedP, 0, 0) != 0) return new IntPtr(1);
+                    if (keyDown && IsPressed(VK_CONTROL) && IsPressed(VK_SHIFT) &&
+                        !IsPressed(VK_MENU) && !IsPressed(VK_LWIN) && !IsPressed(VK_RWIN)) {
+                        IntPtr foreground = GetForegroundWindow();
+                        if (IsVerifiedForegroundPopup(foreground)) {
+                            Interlocked.Exchange(ref capturedP, 1);
+                            ToggleTopmost(foreground);
+                            return new IntPtr(1);
+                        }
+                    }
+                }
+            }
+            return CallNextHookEx(hook, code, wParam, lParam);
+        }
+    }
+}
+'@ -ErrorAction Stop
+        }
+        $script:PinHotkeyReady = [CogentSpec.ChatGptPopupPinHotkey]::Start()
+        if (-not $script:PinHotkeyReady) { $script:PinHotkeyError = 'keyboard_hook_unavailable' }
+    } catch {
+        $script:PinHotkeyReady = $false
+        $script:PinHotkeyError = 'keyboard_hook_initialization_failed'
+    }
+}
+
+function Update-PopupPinHotkeyTarget {
+    if (-not $script:PinHotkeyReady) { return }
+    try {
+        $inspectionOutput = @(& $popupHelper -Mode inspect 2>&1)
+        $inspectionJson = @($inspectionOutput | ForEach-Object { [string]$_ } | Where-Object { $_.Trim().StartsWith('{') } | Select-Object -Last 1)
+        if (-not $inspectionJson) { throw 'The verified ChatGPT Popout helper returned no inspection result.' }
+        $inspection = $inspectionJson | ConvertFrom-Json
+        $verified = [string]$inspection.status -eq 'ready' -and [bool]$inspection.publisherVerified -and
+            [bool]$inspection.popupVerified -and [bool]$inspection.popupVisible -and
+            [long]$inspection.popupWindowHandle -ne 0 -and [int]$inspection.popupProcessId -gt 0
+        if ($verified) {
+            [CogentSpec.ChatGptPopupPinHotkey]::SetVerifiedPopup([long]$inspection.popupWindowHandle, [int]$inspection.popupProcessId)
+        } else {
+            [CogentSpec.ChatGptPopupPinHotkey]::SetVerifiedPopup(0, 0)
+        }
+    } catch {
+        [CogentSpec.ChatGptPopupPinHotkey]::SetVerifiedPopup(0, 0)
+    }
+}
+
 if ($TestToken) {
     if ($ServiceUrl -notmatch '^https?://(localhost|127\.0\.0\.1)(:\d+)?$' -or -not $TestHelperPath) {
         throw 'Test tokens are restricted to a loopback service and an explicit helper.'
@@ -102,6 +374,8 @@ if (-not (Test-Path -LiteralPath $popupHelper -PathType Leaf)) { throw 'The veri
 $query = '?pluginId=' + [Uri]::EscapeDataString($PluginId) + '&pluginVersion=' + [Uri]::EscapeDataString($PluginVersion)
 $polls = 0
 $consecutiveFailures = 0
+Initialize-PopupPinHotkey
+Update-PopupPinHotkeyTarget
 
 try {
     while ($true) {
@@ -144,6 +418,7 @@ try {
                     } catch {
                         $message = $_.Exception.Message
                     }
+                    Update-PopupPinHotkeyTarget
                     [void](Invoke-PopoutApi -Method Patch -Path "/api/plugin/desktop-popout-actions$query" -Token $token -Body @{
                         requestId = [string]$request.id
                         action = if ($completed) { 'complete' } else { 'fail' }
@@ -169,8 +444,18 @@ try {
         $retryMilliseconds = if ($consecutiveFailures -gt 0) {
             [Math]::Min($MaximumRetryMilliseconds, [int]($PollMilliseconds * [Math]::Pow(2, $retryExponent)))
         } else { $PollMilliseconds }
-        Start-Sleep -Milliseconds $retryMilliseconds
+        $waitDeadline = [DateTime]::UtcNow.AddMilliseconds($retryMilliseconds)
+        do {
+            $remainingMilliseconds = [int][Math]::Max(0, ($waitDeadline - [DateTime]::UtcNow).TotalMilliseconds)
+            if ($remainingMilliseconds -le 0) { break }
+            Start-Sleep -Milliseconds ([Math]::Min(1500, $remainingMilliseconds))
+            Update-PopupPinHotkeyTarget
+        } while ([DateTime]::UtcNow -lt $waitDeadline)
     }
 } finally {
+    if ($script:PinHotkeyReady) {
+        [CogentSpec.ChatGptPopupPinHotkey]::Stop()
+        $script:PinHotkeyReady = $false
+    }
     $token = $null
 }

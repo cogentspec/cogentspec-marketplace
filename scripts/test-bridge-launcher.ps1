@@ -252,6 +252,9 @@ for ($heartbeat = 0; $heartbeat -lt 15; $heartbeat += 1) {
     Assert-BridgeLauncherTest ($popupHelperText.Contains('pinned = $popupPinned')) 'The ChatGPT popout helper does not report the verified final pin state.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains('$popupPinned -ne $shouldPin')) 'The ChatGPT popout helper can report success without verifying the requested pin state.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains('the ChatGPT popout remained pinned')) 'The ChatGPT popout helper does not distinguish an ineffective unpin request.'
+    Assert-BridgeLauncherTest ($popupHelperText.Contains('popupWindowHandle = $popupWindow.ToInt64()')) 'The ChatGPT popout inspector does not expose the verified native handle to the scoped hotkey worker.'
+    Assert-BridgeLauncherTest ($popupHelperText.Contains('popupProcessId = [CogentSpec.ChatGptPopupNative]::GetProcessId($popupWindow)')) 'The ChatGPT popout inspector does not expose the process that owns the verified Popout.'
+    Assert-BridgeLauncherTest ($popupHelperText.Contains("pinShortcut = 'Ctrl+Shift+P'")) 'The ChatGPT popout inspector does not advertise the pin toggle shortcut.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains('Set-ChatGptComposerFromClipboard')) 'The ChatGPT popout helper cannot populate the verified update composer.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains('The ChatGPT composer already contains unsent text.')) 'The ChatGPT popout helper can overwrite an unrelated draft.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains('composerPreloaded = $composerPopulated')) 'The ChatGPT popout helper does not report verified update preloading.'
@@ -293,6 +296,23 @@ for ($heartbeat = 0; $heartbeat -lt 15; $heartbeat += 1) {
     foreach ($relativePath in $popupParityPaths) {
         $candidateText = Get-Content -Raw -LiteralPath (Join-Path $repositoryRoot $relativePath)
         Assert-BridgeLauncherTest ($candidateText -ceq $popupHelperText) "The ChatGPT popout helper is inconsistent at $relativePath."
+    }
+    $standaloneWatcherText = Get-Content -Raw -LiteralPath (Join-Path $repositoryRoot 'plugins\cogentspec\skills\cogentspec\scripts\watch-cogentspec-popout-bridge.ps1')
+    Assert-BridgeLauncherTest ($standaloneWatcherText.Contains('class ChatGptPopupPinHotkey')) 'The standalone Popout Bridge does not host the pin hotkey listener.'
+    Assert-BridgeLauncherTest ($standaloneWatcherText.Contains('WH_KEYBOARD_LL')) 'The pin hotkey listener cannot pass Ctrl+Shift+P through outside the Popout.'
+    Assert-BridgeLauncherTest (-not $standaloneWatcherText.Contains('RegisterHotKey')) 'The pin shortcut is globally registered and can steal Ctrl+Shift+P from other applications.'
+    Assert-BridgeLauncherTest ($standaloneWatcherText.Contains('IsVerifiedForegroundPopup(foreground)')) 'The pin hotkey is not scoped to the verified foreground ChatGPT Popout.'
+    Assert-BridgeLauncherTest ($standaloneWatcherText.Contains('window.ToInt64() != expectedWindow')) 'The pin hotkey does not bind its action to the verified native Popout handle.'
+    Assert-BridgeLauncherTest ($standaloneWatcherText.Contains('processId == (uint)expectedProcess')) 'The pin hotkey does not bind its action to the verified signed ChatGPT process.'
+    Assert-BridgeLauncherTest ($standaloneWatcherText.Contains('[int]$inspection.popupProcessId')) 'The pin hotkey cache can bind to an unrelated ChatGPT helper process.'
+    Assert-BridgeLauncherTest ($standaloneWatcherText.Contains('Interlocked.Exchange(ref capturedP, 1)')) 'The pin hotkey does not debounce repeated P key-down events.'
+    Assert-BridgeLauncherTest ($standaloneWatcherText.Contains('SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE')) 'The pin hotkey can move, resize, or focus the Popout.'
+    Assert-BridgeLauncherTest ($standaloneWatcherText.Contains("pinHotkeyScope = 'verified_foreground_chatgpt_popout'")) 'The standalone Bridge readiness marker does not expose the hotkey safety boundary.'
+    foreach ($relativePath in @(
+        'plugins\cogentstack\skills\cogentstack\scripts\watch-cogentspec-popout-bridge.ps1'
+    )) {
+        $candidateText = Get-Content -Raw -LiteralPath (Join-Path $repositoryRoot $relativePath)
+        Assert-BridgeLauncherTest ($candidateText -ceq $standaloneWatcherText) "The standalone Popout Bridge is inconsistent at $relativePath."
     }
     foreach ($scriptName in @('open-chatgpt-desktop-ui.ps1', 'start-cogentspec-desktop-ui-bridge.ps1', 'watch-cogentspec-desktop-ui-bridge.ps1')) {
         $canonicalDesktopUiText = Get-Content -Raw -LiteralPath (Join-Path $repositoryRoot "plugins\cogentspec\skills\cogentspec\scripts\$scriptName")
