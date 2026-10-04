@@ -16,11 +16,19 @@ function Write-CompactJson($Value) {
     $Value | ConvertTo-Json -Depth 5 -Compress | Write-Output
 }
 
-function Write-Failure([string]$Status, [string]$Reason, [bool]$Opened = $false) {
+function Write-Failure(
+    [string]$Status,
+    [string]$Reason,
+    [bool]$Opened = $false,
+    [bool]$PopupDetected = $false,
+    [string]$PopupVerification = 'none'
+) {
     Write-CompactJson ([ordered]@{
         status = $Status
         opened = $Opened
         reason = $Reason
+        popupDetected = $PopupDetected
+        popupVerification = $PopupVerification
         manualShortcut = 'Ctrl+Shift+Space'
     })
 }
@@ -634,7 +642,7 @@ namespace CogentSpec {
 '@
 }
 
-function Find-VerifiedChatGptPopupWindow([int[]]$ProcessIds) {
+function Find-ChatGptPopupWindowMatch([int[]]$ProcessIds, [long[]]$MainWindowHandles) {
     Add-Type -AssemblyName UIAutomationClient -ErrorAction Stop
     $composerCondition = Get-ChatGptComposerCondition
     $dismissCondition = [System.Windows.Automation.AndCondition]::new(
@@ -648,18 +656,63 @@ function Find-VerifiedChatGptPopupWindow([int[]]$ProcessIds) {
         )
     )
     $nativeCandidates = @([CogentSpec.ChatGptPopupNative]::FindPopupWindows($ProcessIds))
-    $verified = @($nativeCandidates | Where-Object {
+    $evidence = @($nativeCandidates | ForEach-Object {
         try {
-            $root = [System.Windows.Automation.AutomationElement]::FromHandle($_)
+            $window = [IntPtr]$_
+            $root = [System.Windows.Automation.AutomationElement]::FromHandle($window)
             $matches = @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $composerCondition) | Where-Object {
                 Test-IsChatGptComposer -Element $_
             })
             $dismissButton = $root.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $dismissCondition)
-            $matches.Count -eq 1 -and $null -ne $dismissButton
-        } catch { $false }
+            $composerName = if ($matches.Count -eq 1) {
+                (([string]$matches[0].Current.Name) -replace '[\u200B-\u200D\uFEFF]', '').Trim()
+            } else { '' }
+            $isMainWindow = $MainWindowHandles -contains $window.ToInt64()
+            [pscustomobject]@{
+                window = $window
+                strict = $matches.Count -eq 1 -and $null -ne $dismissButton
+                popupSpecific = $matches.Count -eq 1 -and -not $isMainWindow -and
+                    $composerName -in @('Work with ChatGPT', 'Ask ChatGPT anything locally')
+            }
+        } catch { }
     })
-    if ($verified.Count -eq 1) { return [IntPtr]$verified[0] }
-    return [IntPtr]::Zero
+    $strictMatches = @($evidence | Where-Object { $_.strict })
+    if ($strictMatches.Count -eq 1) {
+        return [ordered]@{
+            window = [IntPtr]$strictMatches[0].window
+            verification = 'dismiss_and_composer'
+            candidateDetected = $true
+            ambiguous = $false
+        }
+    }
+    if ($strictMatches.Count -gt 1) {
+        return [ordered]@{
+            window = [IntPtr]::Zero
+            verification = 'ambiguous_strict_candidates'
+            candidateDetected = $true
+            ambiguous = $true
+        }
+    }
+
+    # The unpinned Popout can expose its dedicated composer without exposing
+    # the Dismiss Popout Window control. Accept exactly one such non-main
+    # ChatGPT window; the publisher, native window, unique composer, focus,
+    # paste, and read-back checks remain required before success is reported.
+    $popupSpecificMatches = @($evidence | Where-Object { $_.popupSpecific })
+    if ($popupSpecificMatches.Count -eq 1) {
+        return [ordered]@{
+            window = [IntPtr]$popupSpecificMatches[0].window
+            verification = 'popup_specific_composer'
+            candidateDetected = $true
+            ambiguous = $false
+        }
+    }
+    return [ordered]@{
+        window = [IntPtr]::Zero
+        verification = if ($popupSpecificMatches.Count -gt 1) { 'ambiguous_popup_candidates' } else { 'none' }
+        candidateDetected = $popupSpecificMatches.Count -gt 0
+        ambiguous = $popupSpecificMatches.Count -gt 1
+    }
 }
 
 function Find-VerifiedChatGptComposer([IntPtr]$Window) {
@@ -720,7 +773,14 @@ function Set-ChatGptComposerFromClipboard([IntPtr]$Window) {
 }
 
 $chatGptProcessIds = [int[]]@($chatGptProcesses | ForEach-Object { [int]$_.Id })
-$popupWindow = Find-VerifiedChatGptPopupWindow -ProcessIds $chatGptProcessIds
+$chatGptMainWindowHandles = [long[]]@($chatGptProcesses | ForEach-Object {
+    if ($_.MainWindowHandle -ne [IntPtr]::Zero) { $_.MainWindowHandle.ToInt64() }
+})
+$popupMatch = Find-ChatGptPopupWindowMatch -ProcessIds $chatGptProcessIds -MainWindowHandles $chatGptMainWindowHandles
+$popupWindow = [IntPtr]$popupMatch.window
+$popupVerification = [string]$popupMatch.verification
+$popupCandidateDetected = [bool]$popupMatch.candidateDetected
+$popupCandidateAmbiguous = [bool]$popupMatch.ambiguous
 $popupWasVisible = $null
 $shortcutSent = $false
 $shortcutAttempts = 0
@@ -736,7 +796,10 @@ if ($Mode -eq 'inspect') {
         processId = [int]$chatGpt.Id
         windowTitle = [string]$chatGpt.MainWindowTitle
         publisherVerified = $true
-        popupDetected = ($popupWindow -ne [IntPtr]::Zero)
+        popupDetected = $popupCandidateDetected
+        popupVerified = ($popupWindow -ne [IntPtr]::Zero)
+        popupVerification = $popupVerification
+        popupAmbiguous = $popupCandidateAmbiguous
         popupVisible = [CogentSpec.ChatGptPopupNative]::IsVisible($popupWindow)
         popupTopmost = [CogentSpec.ChatGptPopupNative]::IsTopmost($popupWindow)
         manualShortcut = 'Ctrl+Shift+Space'
@@ -914,7 +977,7 @@ if (-not $UseRetainedChat) {
     }
 }
 
-if (-not $activatedExisting) {
+if (-not $activatedExisting -and -not $popupCandidateDetected) {
     for ($attempt = 1; $attempt -le 2; $attempt++) {
         if (-not [CogentSpec.ChatGptPopupNative]::SendControlShiftSpace()) {
             Write-Failure -Status 'shortcut_failed' -Reason 'CogentSpec could not send the popout shortcut. Press Ctrl + Shift + Space.'
@@ -926,14 +989,33 @@ if (-not $activatedExisting) {
         $popupDeadline = [DateTime]::UtcNow.AddSeconds(3)
         do {
             Start-Sleep -Milliseconds 100
-            $popupWindow = Find-VerifiedChatGptPopupWindow -ProcessIds $chatGptProcessIds
+            $popupMatch = Find-ChatGptPopupWindowMatch -ProcessIds $chatGptProcessIds -MainWindowHandles $chatGptMainWindowHandles
+            $popupWindow = [IntPtr]$popupMatch.window
+            $popupVerification = [string]$popupMatch.verification
+            $popupCandidateDetected = $popupCandidateDetected -or [bool]$popupMatch.candidateDetected
+            $popupCandidateAmbiguous = $popupCandidateAmbiguous -or [bool]$popupMatch.ambiguous
             $popupVisible = [CogentSpec.ChatGptPopupNative]::IsVisible($popupWindow)
-        } while (($popupWindow -eq [IntPtr]::Zero -or -not $popupVisible) -and [DateTime]::UtcNow -lt $popupDeadline)
+        } while (($popupWindow -eq [IntPtr]::Zero -or -not $popupVisible) -and
+            -not [bool]$popupMatch.candidateDetected -and [DateTime]::UtcNow -lt $popupDeadline)
 
-        if ($popupWindow -ne [IntPtr]::Zero -and $popupVisible) { break }
+        if (($popupWindow -ne [IntPtr]::Zero -and $popupVisible) -or [bool]$popupMatch.candidateDetected) { break }
     }
 } else {
     $popupVisible = [CogentSpec.ChatGptPopupNative]::IsVisible($popupWindow)
+}
+
+if (-not $activatedExisting -and $popupWindow -ne [IntPtr]::Zero -and $popupVisible -and
+    -not [CogentSpec.ChatGptPopupNative]::IsTopmost($popupWindow)) {
+    # A newly exposed Popout may omit its dismiss control while unpinned. Pin
+    # it only for activation, composer focus, and verified paste, then restore
+    # the user's original unpinned state on every following exit path.
+    if (-not [CogentSpec.ChatGptPopupNative]::SetPopupTopmost($popupWindow, $true)) {
+        Write-Failure -Status 'popup_pin_failed' -Reason 'CogentSpec opened the ChatGPT Popout but Windows could not temporarily pin it for composer input.' -Opened $true -PopupDetected $true -PopupVerification $popupVerification
+        return
+    }
+    $temporaryTopmost = $true
+    $temporaryTopmostWindow = $popupWindow
+    Start-Sleep -Milliseconds 150
 }
 
 if (-not $activatedExisting -and $popupWindow -ne [IntPtr]::Zero -and $popupVisible) {
@@ -944,12 +1026,16 @@ if (-not $activatedExisting -and $popupWindow -ne [IntPtr]::Zero -and $popupVisi
 
 if ($popupWindow -eq [IntPtr]::Zero -or -not $popupVisible) {
     [void](Restore-ChatGptPopupTopmost -PopupWindow $temporaryTopmostWindow -Required $temporaryTopmost)
-    Write-Failure -Status 'popup_not_opened' -Reason 'The connected ChatGPT task did not expose its popout window. Press Ctrl + Shift + Space from that task.'
+    if ($popupCandidateDetected) {
+        Write-Failure -Status 'popup_detected_not_verified' -Reason 'ChatGPT Popout opened, but Desktop Bridge could not verify one safe composer window, so the prepared request was not inserted.' -Opened $true -PopupDetected $true -PopupVerification $popupVerification
+    } else {
+        Write-Failure -Status 'popup_not_opened' -Reason 'The connected ChatGPT task did not expose its popout window. Press Ctrl + Shift + Space from that task.'
+    }
     return
 }
 if (-not $activatedExisting -and -not (Invoke-PopupActivation -PopupWindow $popupWindow)) {
     [void](Restore-ChatGptPopupTopmost -PopupWindow $temporaryTopmostWindow -Required $temporaryTopmost)
-    Write-Failure -Status 'popup_not_opened' -Reason 'The connected ChatGPT task did not expose its popout window. Press Ctrl + Shift + Space from that task.'
+    Write-Failure -Status 'popup_activation_failed' -Reason 'ChatGPT Popout opened, but Desktop Bridge could not make its composer ready for keyboard input.' -Opened $true -PopupDetected $true -PopupVerification $popupVerification
     return
 }
 $restoredHidden = ($null -ne $popupWasVisible -and -not $popupWasVisible)
@@ -1045,6 +1131,9 @@ Write-CompactJson ([ordered]@{
     existingPopupDismissed = $existingPopupDismissed
     restoredHidden = $restoredHidden
     popupVerified = $true
+    popupVerification = $popupVerification
+    popupCandidateDetected = $popupCandidateDetected
+    popupCandidateAmbiguous = $popupCandidateAmbiguous
     foregroundVerified = [CogentSpec.ChatGptPopupNative]::IsForeground($popupWindow)
     interactionReset = [bool]$interaction.reset
     dismissHoverCleared = $dismissHoverCleared
