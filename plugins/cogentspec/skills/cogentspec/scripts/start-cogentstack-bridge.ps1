@@ -106,9 +106,23 @@ function Confirm-StandalonePopoutConnection([string]$SurfaceName, [string]$Conne
     try {
         $token = Read-DesktopBridgeToken
         if (-not $token) { return $false }
+        $popupHelperPath = Join-Path $PSScriptRoot 'open-chatgpt-popup.ps1'
+        if (-not (Test-Path -LiteralPath $popupHelperPath -PathType Leaf)) { return $false }
+        $inspectionOutput = @(& $popupHelperPath -Mode inspect 2>&1)
+        $inspectionJson = @($inspectionOutput | ForEach-Object { [string]$_ } |
+            Where-Object { $_.Trim().StartsWith('{') } | Select-Object -Last 1)
+        if (-not $inspectionJson) { return $false }
+        $inspection = $inspectionJson | ConvertFrom-Json
+        $chatFingerprint = if ($inspection.PSObject.Properties['chatFingerprint']) {
+            [string]$inspection.chatFingerprint
+        } else { '' }
+        if ([string]$inspection.status -ne 'ready' -or -not [bool]$inspection.publisherVerified -or
+            -not [bool]$inspection.popupVerified -or -not [bool]$inspection.popupVisible -or
+            $chatFingerprint -notmatch '^[a-f0-9]{64}$') { return $false }
         $body = @{
             contextKey = $ConnectedContextKey
             threadId = $ConnectedThreadId
+            chatFingerprint = $chatFingerprint
         } | ConvertTo-Json -Compress
         $requestParameters = @{
             Method = 'Post'
