@@ -22,6 +22,7 @@ assert.match(popupWindowFinder, /if \(!IsWindowVisible\(window\)\) return true;/
 assert.match(productionHelperSource, /'Dismiss Popout Window'/);
 assert.match(productionHelperSource, /return \[System\.Windows\.Automation\.Condition\]::TrueCondition/);
 assert.match(productionHelperSource, /\$Element\.Current\.IsEnabled -and \$Element\.Current\.IsKeyboardFocusable/);
+assert.match(productionHelperSource, /'Do anything'/);
 const composerConditionSource = productionHelperSource.slice(
   productionHelperSource.indexOf("function Get-ChatGptComposerCondition"),
   productionHelperSource.indexOf("function Set-ChatGptComposerFocus"),
@@ -31,7 +32,13 @@ assert.match(productionHelperSource, /Temporarily pin the verified window before
 assert.match(productionHelperSource, /\$temporaryTopmostRestored = Restore-ChatGptPopupTopmost/);
 assert.match(productionHelperSource, /Ctrl\+Shift\+Space is a toggle/);
 assert.doesNotMatch(productionHelperSource, /\$verifiedRetainedPopup = Find-VerifiedChatGptPopupWindow -ProcessIds \$chatGptProcessIds -AllowNativeRetainedFallback \$false/);
-assert.match(productionHelperSource, /if \(-not \$UseRetainedChat -and -not \(Invoke-PopupActivation -PopupWindow \$popupWindow\)\)/);
+assert.match(productionHelperSource, /if \(-not \$activatedExisting -and -not \(Invoke-PopupActivation -PopupWindow \$popupWindow\)\)/);
+const composerFailureSource = productionHelperSource.slice(
+  productionHelperSource.lastIndexOf("if ($PasteClipboard)"),
+  productionHelperSource.lastIndexOf("$temporaryTopmostRestored ="),
+);
+assert.doesNotMatch(composerFailureSource, /SendControlShiftSpace|RequestClosePopup|restoreDeadline/);
+assert.match(composerFailureSource, /A Popout connection failure must fail in the Popout/);
 assert.doesNotMatch(productionHelperSource, /found the retained ChatGPT popout but could not make it ready for reconnection/);
 assert.doesNotMatch(popupWindowFinder, /className\.ToString\(\), "Chrome_WidgetWin_1"/);
 assert.doesNotMatch(popupWindowFinder, /bool isPopupToolWindow/);

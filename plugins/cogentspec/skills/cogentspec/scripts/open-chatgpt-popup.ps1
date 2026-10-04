@@ -27,7 +27,7 @@ function Write-Failure([string]$Status, [string]$Reason, [bool]$Opened = $false)
 function Test-IsChatGptComposer($Element) {
     if ($null -eq $Element) { return $false }
     $name = (([string]$Element.Current.Name) -replace '[\u200B-\u200D\uFEFF]', '').Trim()
-    return $name -in @('Work with ChatGPT', 'Ask ChatGPT anything locally', 'Ask ChatGPT anything') -and
+    return $name -in @('Work with ChatGPT', 'Ask ChatGPT anything locally', 'Ask ChatGPT anything', 'Do anything') -and
         $Element.Current.IsEnabled -and $Element.Current.IsKeyboardFocusable
 }
 
@@ -943,7 +943,7 @@ if ($popupWindow -eq [IntPtr]::Zero -or -not $popupVisible) {
     Write-Failure -Status 'popup_not_opened' -Reason 'The connected ChatGPT task did not expose its popout window. Press Ctrl + Shift + Space from that task.'
     return
 }
-if (-not $UseRetainedChat -and -not (Invoke-PopupActivation -PopupWindow $popupWindow)) {
+if (-not $activatedExisting -and -not (Invoke-PopupActivation -PopupWindow $popupWindow)) {
     [void](Restore-ChatGptPopupTopmost -PopupWindow $temporaryTopmostWindow -Required $temporaryTopmost)
     Write-Failure -Status 'popup_not_opened' -Reason 'The connected ChatGPT task did not expose its popout window. Press Ctrl + Shift + Space from that task.'
     return
@@ -996,7 +996,7 @@ if (-not $composer.focused) {
     return
 }
 
-if (-not $UseRetainedChat -and -not (Invoke-PopupActivation -PopupWindow $popupWindow)) {
+if (-not $activatedExisting -and -not (Invoke-PopupActivation -PopupWindow $popupWindow)) {
     [void](Restore-ChatGptPopupTopmost -PopupWindow $temporaryTopmostWindow -Required $temporaryTopmost)
     Write-Failure -Status 'popup_activation_failed' -Reason 'CogentSpec opened the ChatGPT popout but could not make it ready for keyboard input. Click the composer once to continue.' -Opened $true
     return
@@ -1008,15 +1008,9 @@ if ($PasteClipboard) {
         $composerPopulated = Set-ChatGptComposerFromClipboard -Window $popupWindow
     } catch {
         $failureReason = $_.Exception.Message
-        if (-not $activatedExisting) {
-            [void][CogentSpec.ChatGptPopupNative]::SendControlShiftSpace()
-            $restoreDeadline = [DateTime]::UtcNow.AddSeconds(3)
-            do { Start-Sleep -Milliseconds 100 } while ([CogentSpec.ChatGptPopupNative]::IsVisible($popupWindow) -and [DateTime]::UtcNow -lt $restoreDeadline)
-            if ([CogentSpec.ChatGptPopupNative]::IsVisible($popupWindow)) {
-                [void][CogentSpec.ChatGptPopupNative]::RequestClosePopup($popupWindow)
-                Start-Sleep -Milliseconds 250
-            }
-        }
+        # A Popout connection failure must fail in the Popout. Closing a newly
+        # opened Popout here exposes ChatGPT's main Desktop UI and makes the
+        # standalone workflow appear to redirect into the separate UI flow.
         [void](Restore-ChatGptPopupTopmost -PopupWindow $temporaryTopmostWindow -Required $temporaryTopmost)
         Write-Failure -Status 'composer_not_populated' -Reason $failureReason -Opened ([CogentSpec.ChatGptPopupNative]::IsVisible($popupWindow))
         return
