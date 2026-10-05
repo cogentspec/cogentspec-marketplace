@@ -754,8 +754,18 @@ function Get-ChatGptConversationObservation([IntPtr]$Window) {
         for ($index = 0; $index -lt ($textElements.Count - 1); $index++) {
             $speaker = (([string]$textElements.Item($index).Current.Name) -replace '[\u200B-\u200D\uFEFF]', '').Trim()
             if ($speaker -cne 'You said:') { continue }
-            $message = (([string]$textElements.Item($index + 1).Current.Name) -replace '[\u200B-\u200D\uFEFF]', '').Trim()
-            $runtimeId = @($textElements.Item($index + 1).GetRuntimeId())
+            $messageParts = [Collections.Generic.List[string]]::new()
+            $messageElement = $null
+            for ($messageIndex = $index + 1; $messageIndex -lt $textElements.Count; $messageIndex++) {
+                $part = (([string]$textElements.Item($messageIndex).Current.Name) -replace '[\u200B-\u200D\uFEFF]', '').Trim()
+                if ($part -ceq 'You said:' -or $part -match '^\d{1,2}:\d{2}\s(?:AM|PM)$') { break }
+                if (-not $part) { continue }
+                if ($null -eq $messageElement) { $messageElement = $textElements.Item($messageIndex) }
+                $messageParts.Add($part)
+            }
+            if ($null -eq $messageElement) { continue }
+            $message = (($messageParts -join '') -replace '\s+', '').Trim()
+            $runtimeId = @($messageElement.GetRuntimeId())
             if ($runtimeId.Count -eq 0) { continue }
             $runtimeIdText = $runtimeId -join '.'
             $latestUserMessageRuntimeId = $runtimeIdText
