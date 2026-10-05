@@ -7,7 +7,8 @@ param(
     [switch]$OpenWithShortcut,
     [switch]$KeepPinned,
     [ValidatePattern('^$|^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')]
-    [string]$ThreadId = ''
+    [string]$ThreadId = '',
+    [long]$PreferredWindowHandle = 0
 )
 
 Set-StrictMode -Version Latest
@@ -649,7 +650,71 @@ namespace CogentSpec {
 '@
 }
 
-function Find-ChatGptPopupWindowMatch([int[]]$ProcessIds, [long[]]$MainWindowHandles) {
+function Select-ChatGptPopupWindowMatch([object[]]$Evidence, [long]$PreferredWindowHandle = 0) {
+    $eligibleMatches = @($Evidence | Where-Object { [bool]$_.strict -or [bool]$_.popupSpecific })
+    if ($eligibleMatches.Count -eq 0) {
+        return [ordered]@{
+            window = [IntPtr]::Zero
+            verification = 'none'
+            candidateDetected = $false
+            ambiguous = $false
+        }
+    }
+
+    # A visible Popout is the conversation the person is currently using. It
+    # must outrank an older hidden Popout that still exposes stricter controls.
+    $visibleMatches = @($eligibleMatches | Where-Object { [bool]$_.visible })
+    $selected = $null
+    if ($visibleMatches.Count -eq 1) {
+        $selected = $visibleMatches[0]
+    } elseif ($visibleMatches.Count -gt 1) {
+        $foregroundMatches = @($visibleMatches | Where-Object { [bool]$_.foreground })
+        if ($foregroundMatches.Count -eq 1) {
+            $selected = $foregroundMatches[0]
+        } else {
+            return [ordered]@{
+                window = [IntPtr]::Zero
+                verification = 'ambiguous_visible_candidates'
+                candidateDetected = $true
+                ambiguous = $true
+            }
+        }
+    } elseif ($PreferredWindowHandle -ne 0) {
+        # Visibility is not connection identity. When the current Popout is
+        # hidden, keep inspecting that exact native window instead of falling
+        # back to a different retained chat.
+        $preferredMatches = @($eligibleMatches | Where-Object {
+            ([IntPtr]$_.window).ToInt64() -eq $PreferredWindowHandle
+        })
+        if ($preferredMatches.Count -eq 1) { $selected = $preferredMatches[0] }
+    }
+
+    if ($null -eq $selected) {
+        if ($eligibleMatches.Count -eq 1) {
+            $selected = $eligibleMatches[0]
+        } else {
+            return [ordered]@{
+                window = [IntPtr]::Zero
+                verification = 'ambiguous_hidden_candidates'
+                candidateDetected = $true
+                ambiguous = $true
+            }
+        }
+    }
+
+    return [ordered]@{
+        window = [IntPtr]$selected.window
+        verification = if ([bool]$selected.strict) { 'dismiss_and_composer' } else { 'popup_specific_composer' }
+        candidateDetected = $true
+        ambiguous = $false
+    }
+}
+
+function Find-ChatGptPopupWindowMatch(
+    [int[]]$ProcessIds,
+    [long[]]$MainWindowHandles,
+    [long]$PreferredWindowHandle = 0
+) {
     Add-Type -AssemblyName UIAutomationClient -ErrorAction Stop
     $composerCondition = Get-ChatGptComposerCondition
     $dismissCondition = [System.Windows.Automation.AndCondition]::new(
@@ -680,46 +745,12 @@ function Find-ChatGptPopupWindowMatch([int[]]$ProcessIds, [long[]]$MainWindowHan
                 strict = $matches.Count -eq 1 -and $null -ne $dismissButton
                 popupSpecific = $matches.Count -eq 1 -and -not $isMainWindow -and
                     $composerName -in @('Work with ChatGPT', 'Ask ChatGPT anything locally')
+                visible = [CogentSpec.ChatGptPopupNative]::IsVisible($window)
+                foreground = [CogentSpec.ChatGptPopupNative]::IsForeground($window)
             }
         } catch { }
     })
-    $strictMatches = @($evidence | Where-Object { $_.strict })
-    if ($strictMatches.Count -eq 1) {
-        return [ordered]@{
-            window = [IntPtr]$strictMatches[0].window
-            verification = 'dismiss_and_composer'
-            candidateDetected = $true
-            ambiguous = $false
-        }
-    }
-    if ($strictMatches.Count -gt 1) {
-        return [ordered]@{
-            window = [IntPtr]::Zero
-            verification = 'ambiguous_strict_candidates'
-            candidateDetected = $true
-            ambiguous = $true
-        }
-    }
-
-    # The unpinned Popout can expose its dedicated composer without exposing
-    # the Dismiss Popout Window control. Accept exactly one such non-main
-    # ChatGPT window; the publisher, native window, unique composer, focus,
-    # paste, and read-back checks remain required before success is reported.
-    $popupSpecificMatches = @($evidence | Where-Object { $_.popupSpecific })
-    if ($popupSpecificMatches.Count -eq 1) {
-        return [ordered]@{
-            window = [IntPtr]$popupSpecificMatches[0].window
-            verification = 'popup_specific_composer'
-            candidateDetected = $true
-            ambiguous = $false
-        }
-    }
-    return [ordered]@{
-        window = [IntPtr]::Zero
-        verification = if ($popupSpecificMatches.Count -gt 1) { 'ambiguous_popup_candidates' } else { 'none' }
-        candidateDetected = $popupSpecificMatches.Count -gt 0
-        ambiguous = $popupSpecificMatches.Count -gt 1
-    }
+    return Select-ChatGptPopupWindowMatch -Evidence $evidence -PreferredWindowHandle $PreferredWindowHandle
 }
 
 function Find-VerifiedChatGptComposer([IntPtr]$Window) {
@@ -867,7 +898,8 @@ $chatGptProcessIds = [int[]]@($chatGptProcesses | ForEach-Object { [int]$_.Id })
 $chatGptMainWindowHandles = [long[]]@([CogentSpec.ChatGptPopupNative]::FindMainWindows($chatGptProcessIds) | ForEach-Object {
     ([IntPtr]$_).ToInt64()
 })
-$popupMatch = Find-ChatGptPopupWindowMatch -ProcessIds $chatGptProcessIds -MainWindowHandles $chatGptMainWindowHandles
+$popupMatch = Find-ChatGptPopupWindowMatch -ProcessIds $chatGptProcessIds -MainWindowHandles $chatGptMainWindowHandles `
+    -PreferredWindowHandle $PreferredWindowHandle
 $popupWindow = [IntPtr]$popupMatch.window
 $popupVerification = [string]$popupMatch.verification
 $popupCandidateDetected = [bool]$popupMatch.candidateDetected
@@ -1111,7 +1143,8 @@ if (-not $activatedExisting -and -not $popupCandidateDetected) {
         $popupDeadline = [DateTime]::UtcNow.AddSeconds(3)
         do {
             Start-Sleep -Milliseconds 100
-            $popupMatch = Find-ChatGptPopupWindowMatch -ProcessIds $chatGptProcessIds -MainWindowHandles $chatGptMainWindowHandles
+            $popupMatch = Find-ChatGptPopupWindowMatch -ProcessIds $chatGptProcessIds -MainWindowHandles $chatGptMainWindowHandles `
+                -PreferredWindowHandle $PreferredWindowHandle
             $popupWindow = [IntPtr]$popupMatch.window
             $popupVerification = [string]$popupMatch.verification
             $popupCandidateDetected = $popupCandidateDetected -or [bool]$popupMatch.candidateDetected

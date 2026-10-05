@@ -33,6 +33,7 @@ $script:VerifiedPopupVisible = $false
 $script:CurrentConversationState = 'unknown'
 $script:CurrentConversationKey = ''
 $script:ActiveChatFingerprint = ''
+$script:CurrentPopupWindowHandle = 0
 
 function Write-ReadyMarker([bool]$ServerAcknowledged, [string]$Status = 'ready', [string]$LastError = '') {
     if (-not $ReadyPath) { return }
@@ -54,6 +55,7 @@ function Write-ReadyMarker([bool]$ServerAcknowledged, [string]$Status = 'ready',
         conversationState = [string]$script:CurrentConversationState
         currentConversationKey = [string]$script:CurrentConversationKey
         connectedChatMarkerFound = [bool]$script:ActiveChatFingerprint
+        popupWindowHandle = [long]$script:CurrentPopupWindowHandle
     } | ConvertTo-Json | Set-Content -LiteralPath $ReadyPath -Encoding UTF8
 }
 
@@ -348,7 +350,11 @@ namespace CogentSpec {
 
 function Update-PopupPinHotkeyTarget {
     try {
-        $inspectionOutput = @(& $popupHelper -Mode inspect 2>&1)
+        $inspectionArguments = @{ Mode = 'inspect' }
+        if ($script:CurrentPopupWindowHandle -ne 0) {
+            $inspectionArguments.PreferredWindowHandle = [long]$script:CurrentPopupWindowHandle
+        }
+        $inspectionOutput = @(& $popupHelper @inspectionArguments 2>&1)
         $inspectionJson = @($inspectionOutput | ForEach-Object { [string]$_ } | Where-Object { $_.Trim().StartsWith('{') } | Select-Object -Last 1)
         if (-not $inspectionJson) { throw 'The verified ChatGPT Popout helper returned no inspection result.' }
         $inspection = $inspectionJson | ConvertFrom-Json
@@ -366,6 +372,7 @@ function Update-PopupPinHotkeyTarget {
         $script:CurrentConversationState = $conversationState
         $script:CurrentConversationKey = $currentConversationKey
         $script:ActiveChatFingerprint = if ($verified) { $fingerprint } else { '' }
+        $script:CurrentPopupWindowHandle = if ($verified) { [long]$inspection.popupWindowHandle } else { 0 }
         if ($script:PinHotkeyReady) {
             if ($visible) {
                 [CogentSpec.ChatGptPopupPinHotkey]::SetVerifiedPopup([long]$inspection.popupWindowHandle, [int]$inspection.popupProcessId)
@@ -378,6 +385,7 @@ function Update-PopupPinHotkeyTarget {
         $script:CurrentConversationState = 'unknown'
         $script:CurrentConversationKey = ''
         $script:ActiveChatFingerprint = ''
+        $script:CurrentPopupWindowHandle = 0
         if ($script:PinHotkeyReady) { [CogentSpec.ChatGptPopupPinHotkey]::SetVerifiedPopup(0, 0) }
     }
 }

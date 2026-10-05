@@ -212,6 +212,74 @@ for ($heartbeat = 0; $heartbeat -lt 15; $heartbeat += 1) {
     Assert-BridgeLauncherTest ($popupHelperText.Contains('[DateTime]::UtcNow.AddSeconds(1)')) 'The ChatGPT popout activation retry is not bounded.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains('FindPopupWindows(int[] processIds)')) 'The ChatGPT popout helper cannot inspect every signed ChatGPT tool window.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains('function Find-ChatGptPopupWindowMatch')) 'The ChatGPT popout helper does not select the exact accessible composer window.'
+    Assert-BridgeLauncherTest ($popupHelperText.Contains('function Select-ChatGptPopupWindowMatch')) 'The ChatGPT popout helper does not isolate current-window selection from native discovery.'
+    $parseTokens = $null
+    $parseErrors = $null
+    $popupHelperAst = [Management.Automation.Language.Parser]::ParseInput(
+        $popupHelperText,
+        [ref]$parseTokens,
+        [ref]$parseErrors
+    )
+    Assert-BridgeLauncherTest ($parseErrors.Count -eq 0) 'The ChatGPT popout helper contains a PowerShell parse error.'
+    $selectorAst = $popupHelperAst.Find({
+        param($node)
+        $node -is [Management.Automation.Language.FunctionDefinitionAst] -and
+            $node.Name -eq 'Select-ChatGptPopupWindowMatch'
+    }, $true)
+    Assert-BridgeLauncherTest ($null -ne $selectorAst) 'The current ChatGPT popout selector could not be loaded for permutation tests.'
+    Invoke-Expression ([string]$selectorAst.Extent.Text)
+
+    $hiddenConnectedPopup = [pscustomobject]@{
+        window = [IntPtr]3408070
+        strict = $true
+        popupSpecific = $true
+        visible = $false
+        foreground = $false
+    }
+    $visibleBlankPopup = [pscustomobject]@{
+        window = [IntPtr]263048
+        strict = $false
+        popupSpecific = $true
+        visible = $true
+        foreground = $true
+    }
+    $visibleSelection = Select-ChatGptPopupWindowMatch -Evidence @($hiddenConnectedPopup, $visibleBlankPopup)
+    Assert-BridgeLauncherTest (([IntPtr]$visibleSelection.window).ToInt64() -eq 263048) 'A hidden connected chat can still override the currently visible blank Popout.'
+
+    $hiddenBlankPopup = [pscustomobject]@{
+        window = [IntPtr]263048
+        strict = $false
+        popupSpecific = $true
+        visible = $false
+        foreground = $false
+    }
+    $preferredHiddenSelection = Select-ChatGptPopupWindowMatch `
+        -Evidence @($hiddenConnectedPopup, $hiddenBlankPopup) -PreferredWindowHandle 263048
+    Assert-BridgeLauncherTest (([IntPtr]$preferredHiddenSelection.window).ToInt64() -eq 263048) 'Hiding the current blank Popout can switch inspection back to an older connected chat.'
+
+    $ambiguousHiddenSelection = Select-ChatGptPopupWindowMatch -Evidence @($hiddenConnectedPopup, $hiddenBlankPopup)
+    Assert-BridgeLauncherTest ([bool]$ambiguousHiddenSelection.ambiguous -and
+        ([IntPtr]$ambiguousHiddenSelection.window).ToInt64() -eq 0) 'Multiple hidden chats without a retained current handle do not fail closed.'
+
+    $soleHiddenSelection = Select-ChatGptPopupWindowMatch -Evidence @($hiddenConnectedPopup)
+    Assert-BridgeLauncherTest (([IntPtr]$soleHiddenSelection.window).ToInt64() -eq 3408070) 'A sole hidden connected Popout is incorrectly treated as disconnected.'
+
+    $visibleBackgroundPopup = [pscustomobject]@{
+        window = [IntPtr]1101
+        strict = $true
+        popupSpecific = $true
+        visible = $true
+        foreground = $false
+    }
+    $visibleForegroundPopup = [pscustomobject]@{
+        window = [IntPtr]1102
+        strict = $false
+        popupSpecific = $true
+        visible = $true
+        foreground = $true
+    }
+    $foregroundSelection = Select-ChatGptPopupWindowMatch -Evidence @($visibleBackgroundPopup, $visibleForegroundPopup)
+    Assert-BridgeLauncherTest (([IntPtr]$foregroundSelection.window).ToInt64() -eq 1102) 'The selector does not resolve multiple visible candidates to the exact foreground Popout.'
     Assert-BridgeLauncherTest (-not $popupHelperText.Contains('RevealPopupWindow')) 'The ChatGPT popout helper can expose a host-dismissed native window without reopening it through ChatGPT.'
     $desktopUiHelperText = Get-Content -Raw -LiteralPath (Join-Path $repositoryRoot 'plugins\cogentspec\skills\cogentspec\scripts\open-chatgpt-desktop-ui.ps1')
     Assert-BridgeLauncherTest ($desktopUiHelperText.Contains('function Start-ChatGptDesktop')) 'The independent Desktop UI helper cannot launch ChatGPT Desktop.'
@@ -271,7 +339,7 @@ for ($heartbeat = 0; $heartbeat -lt 15; $heartbeat += 1) {
     Assert-BridgeLauncherTest ($popupHelperText.Contains("'Work with ChatGPT', 'Ask ChatGPT anything locally'")) 'The ChatGPT popout helper does not recognize the dedicated unpinned Popout composer.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains('$MainWindowHandles -contains $window.ToInt64()')) 'The unpinned Popout fallback can mistake the main ChatGPT task window for a Popout.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains('FindMainWindows($chatGptProcessIds)')) 'Persistent pinning can make the Popout become Process.MainWindowHandle, so the helper must enumerate the actual native task window.'
-    Assert-BridgeLauncherTest ($popupHelperText.Contains("verification = 'popup_specific_composer'")) 'The ChatGPT popout helper does not report its unpinned-composer verification route.'
+    Assert-BridgeLauncherTest ($popupHelperText.Contains("'popup_specific_composer'")) 'The ChatGPT popout helper does not report its unpinned-composer verification route.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains("Write-Failure -Status 'popup_detected_not_verified'")) 'A visible but ambiguous Popout is still misreported as not opened.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains('if (-not $activatedExisting -and -not $popupCandidateDetected)')) 'The shortcut can be toggled again after a visible Popout candidate appears.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains('A newly exposed Popout may omit its dismiss control while unpinned.')) 'A newly opened unpinned Popout is not pinned before verified composer input.'
@@ -320,6 +388,8 @@ for ($heartbeat = 0; $heartbeat -lt 15; $heartbeat += 1) {
     Assert-BridgeLauncherTest ($standaloneWatcherText.Contains('$script:ActiveChatFingerprint')) 'The standalone Bridge does not retain the connected-chat fingerprint.'
     Assert-BridgeLauncherTest ($standaloneWatcherText.Contains('$script:CurrentConversationState')) 'The standalone Bridge does not retain whether the current conversation is blank, identified, or unknown.'
     Assert-BridgeLauncherTest ($standaloneWatcherText.Contains('$script:CurrentConversationKey')) 'The standalone Bridge does not retain the current conversation independently from Popout visibility.'
+    Assert-BridgeLauncherTest ($standaloneWatcherText.Contains('$script:CurrentPopupWindowHandle')) 'The standalone Bridge does not retain the exact current Popout while it is hidden.'
+    Assert-BridgeLauncherTest ($standaloneWatcherText.Contains('inspectionArguments.PreferredWindowHandle = [long]$script:CurrentPopupWindowHandle')) 'The standalone Bridge can fall back to a different hidden ChatGPT conversation.'
     Assert-BridgeLauncherTest ($standaloneWatcherText.Contains("'&popupVisible='")) 'The standalone Bridge does not report whether the verified Popout is visible.'
     Assert-BridgeLauncherTest ($standaloneWatcherText.Contains("'&conversationState='")) 'The standalone Bridge does not report the current conversation state.'
     Assert-BridgeLauncherTest ($standaloneWatcherText.Contains("'&currentConversationKey='")) 'The standalone Bridge does not report the current conversation identity.'

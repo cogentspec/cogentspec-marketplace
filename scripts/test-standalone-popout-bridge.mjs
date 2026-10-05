@@ -25,6 +25,10 @@ assert.doesNotMatch(popupWindowFinder, /if \(!IsWindowVisible\(window\)\) return
 assert.match(popupWindowFinder, /className\.ToString\(\), "Chrome_WidgetWin_1"/);
 assert.match(productionHelperSource, /'Dismiss Popout Window'/);
 assert.match(productionHelperSource, /function Find-ChatGptPopupWindowMatch/);
+assert.match(productionHelperSource, /function Select-ChatGptPopupWindowMatch/);
+assert.match(productionHelperSource, /\$visibleMatches\.Count -eq 1/);
+assert.match(productionHelperSource, /\$PreferredWindowHandle -ne 0/);
+assert.match(productionHelperSource, /verification = 'ambiguous_hidden_candidates'/);
 assert.match(productionHelperSource, /'Work with ChatGPT', 'Ask ChatGPT anything locally'/);
 assert.match(productionHelperSource, /\$MainWindowHandles -contains \$window\.ToInt64\(\)/);
 const mainWindowBoundarySource = productionHelperSource.slice(
@@ -33,7 +37,7 @@ const mainWindowBoundarySource = productionHelperSource.slice(
 );
 assert.match(mainWindowBoundarySource, /FindMainWindows\(\$chatGptProcessIds\)/);
 assert.doesNotMatch(mainWindowBoundarySource, /\.MainWindowHandle\b/);
-assert.match(productionHelperSource, /verification = 'popup_specific_composer'/);
+assert.match(productionHelperSource, /'popup_specific_composer'/);
 assert.match(productionHelperSource, /popup_detected_not_verified/);
 assert.match(productionHelperSource, /ChatGPT Popout opened, but Desktop Bridge could not verify one safe composer window/);
 assert.match(productionHelperSource, /return \[System\.Windows\.Automation\.Condition\]::TrueCondition/);
@@ -99,6 +103,8 @@ assert.match(watcherSource, /if \(\$TestToken\) \{ return \}/);
 assert.match(watcherSource, /\$script:ActiveChatFingerprint/);
 assert.match(watcherSource, /\$script:CurrentConversationState/);
 assert.match(watcherSource, /\$script:CurrentConversationKey/);
+assert.match(watcherSource, /\$script:CurrentPopupWindowHandle/);
+assert.match(watcherSource, /\$inspectionArguments\.PreferredWindowHandle = \[long\]\$script:CurrentPopupWindowHandle/);
 assert.match(watcherSource, /popupVisible=' \+ \$script:VerifiedPopupVisible/);
 assert.match(watcherSource, /conversationState=' \+ \[Uri\]::EscapeDataString/);
 assert.match(watcherSource, /currentConversationKey=' \+ \[Uri\]::EscapeDataString/);
@@ -118,7 +124,7 @@ assert.doesNotMatch(productionHelperSource, /found the retained ChatGPT popout b
 assert.doesNotMatch(popupWindowFinder, /bool isPopupToolWindow/);
 
 await writeFile(helper, `
-param([string]$Mode, [switch]$UseRetainedChat, [switch]$OpenWithShortcut, [switch]$KeepPinned, [switch]$PasteClipboard)
+param([string]$Mode, [switch]$UseRetainedChat, [switch]$OpenWithShortcut, [switch]$KeepPinned, [switch]$PasteClipboard, [long]$PreferredWindowHandle = 0)
 if ($Mode -eq 'inspect') {
   [ordered]@{ status = 'ready'; publisherVerified = $true; popupVerified = $true; popupVisible = $false; popupWindowHandle = 1234; popupProcessId = 5678; conversationState = 'identified'; currentConversationKey = '${"a".repeat(64)}'; chatFingerprint = '${"a".repeat(64)}' } | ConvertTo-Json -Compress
   return
@@ -220,7 +226,7 @@ try {
   assert.equal(calls.some((call) => call.method === "GET" && call.url.includes("popupVisible=false")
     && call.url.includes("conversationState=identified")
     && call.url.includes(`currentConversationKey=${"a".repeat(64)}`)
-    && call.url.includes(`chatFingerprint=${"a".repeat(64)}`)), true);
+    && call.url.includes(`chatFingerprint=${"a".repeat(64)}`)), true, JSON.stringify(calls));
   assert.equal(calls.some((call) => call.method === "PATCH" && JSON.parse(call.body).action === "claim"), true);
   assert.equal(calls.some((call) => call.method === "PATCH" && JSON.parse(call.body).action === "complete"), true);
   const helperResult = JSON.parse((await readFile(helperArguments, "utf8")).replace(/^\uFEFF/, ""));
