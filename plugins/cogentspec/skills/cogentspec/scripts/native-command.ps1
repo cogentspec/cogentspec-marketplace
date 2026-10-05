@@ -1,5 +1,24 @@
 Set-StrictMode -Version Latest
 
+function Test-CogentSpecSandboxIdentity([string]$IdentityName) {
+    return ($IdentityName.Split('\')[-1] -match '^CodexSandbox')
+}
+
+function Get-CogentSpecExecutionPermissionFailure {
+    # CurrentUser DPAPI belongs to the installing Windows user, not the
+    # dedicated Codex sandbox account. Do not attempt credential access here.
+    if (Test-CogentSpecSandboxIdentity ([Security.Principal.WindowsIdentity]::GetCurrent().Name)) {
+        return [ordered]@{
+            status = 'execution_permission_required'
+            reason = 'windows_user_execution_required'
+            userMessage = 'CogentSpec needs permission to run its connection helper as your Windows user with service access. Your Bridge installation has not been changed.'
+            credentialRead = $false
+            networkAttempted = $false
+        }
+    }
+    return $null
+}
+
 function Invoke-CogentSpecNativeCommand {
     [CmdletBinding()]
     param(

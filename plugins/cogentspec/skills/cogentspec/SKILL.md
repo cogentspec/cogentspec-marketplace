@@ -11,6 +11,14 @@ Resolve the current ChatGPT Project or Codex work area with `scripts/project-con
 
 Run helpers from the invoking task's workspace directory, never from the plugin cache or marketplace checkout.
 
+## Windows execution permissions
+
+Before the one-shot connection helpers, select the host-approved execution scope. The update check needs outbound service access; Bridge startup and the connection helper additionally need the installing Windows user's CurrentUser-protected credential and desktop session. A dedicated Codex sandbox account cannot decrypt that credential. Do not diagnose this as a revoked or broken installation.
+
+In Codex, invoke the exact verified helper through `exec_command` with `sandbox_permissions: require_escalated` and a narrowly scoped justification for that helper's service and Windows-user access. Use the host's approval mechanism, not script self-elevation. Preserve the invoking workspace, thread identity, context key, and helper arguments. `project-context.ps1` can run in the normal sandbox. Marketplace refresh and the protected updater also require approved execution when network or Windows-user access is restricted. This execution approval is separate from approval to update the package; never bypass a required host approval.
+
+Choose this scope before running a helper, rather than attempting it in the sandbox and automatically retrying. If approval is denied or unavailable, stop and explain the permission requirement. If a helper returns `execution_permission_required`, show its plain `userMessage`; do not reinterpret it as `signed_out`, continue the connection, recommend reinstalling, or claim that the LED should be green. Never disable the sandbox globally, change account permissions, copy or expose credentials, or launch a broker or scheduled task to bypass approval.
+
 ## Connect the current AI project
 
 Treat `$cogentspec`, `@cogentspec`, a CogentSpec plugin mention, and a natural-language request to connect or open CogentSpec as the same request.

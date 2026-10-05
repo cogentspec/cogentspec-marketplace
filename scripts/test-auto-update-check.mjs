@@ -51,6 +51,7 @@ try {
   const sourceScript = join(repositoryRoot, "plugins", "cogentspec", "skills", "cogentspec", "scripts", "check-cogentspec-update.ps1");
   const fixtureScript = join(scriptDirectory, "check-cogentspec-update.ps1");
   await cp(sourceScript, fixtureScript);
+  await cp(join(dirname(sourceScript), "native-command.ps1"), join(scriptDirectory, "native-command.ps1"));
   const manifestPath = join(pluginRoot, ".codex-plugin", "plugin.json");
   await mkdir(dirname(manifestPath), { recursive: true });
   await writeFile(manifestPath, JSON.stringify({ name: "cogentspec", version: "0.6.5" }));

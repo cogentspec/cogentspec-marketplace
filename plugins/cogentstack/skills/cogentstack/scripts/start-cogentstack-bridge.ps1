@@ -16,6 +16,12 @@ function Write-CompactJson($Value) {
     $Value | ConvertTo-Json -Depth 6 -Compress | Write-Output
 }
 
+$executionFailure = Get-CogentSpecExecutionPermissionFailure
+if ($executionFailure) {
+    Write-CompactJson $executionFailure
+    exit 0
+}
+
 function Get-TextSha256([string]$Value) {
     $algorithm = [Security.Cryptography.SHA256]::Create()
     try {
@@ -266,6 +272,10 @@ $connectionOutput = @(& $connectionScript -Mode status -Surface $Surface -Contex
 $connectionJson = @($connectionOutput | ForEach-Object { $_.ToString() } | Where-Object { $_.Trim().StartsWith('{') } | Select-Object -Last 1)
 if (-not $connectionJson) { throw 'Desktop Bridge could not verify the account-bound installation.' }
 $connection = $connectionJson | ConvertFrom-Json
+if ([string]$connection.status -eq 'execution_permission_required') {
+    Write-CompactJson $connection
+    exit 0
+}
 if ([string]$connection.status -ne 'connected') {
     Write-CompactJson ([ordered]@{
         status = 'signed_out'

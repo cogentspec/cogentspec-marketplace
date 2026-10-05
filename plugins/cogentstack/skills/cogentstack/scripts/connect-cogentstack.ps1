@@ -18,6 +18,13 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+. (Join-Path $PSScriptRoot 'native-command.ps1')
+$executionFailure = Get-CogentSpecExecutionPermissionFailure
+if ($executionFailure) {
+    $executionFailure | ConvertTo-Json -Compress | Write-Output
+    return
+}
+
 if ($null -eq ('System.Security.Cryptography.ProtectedData' -as [type])) {
     try {
         Add-Type -AssemblyName System.Security.Cryptography.ProtectedData -ErrorAction Stop

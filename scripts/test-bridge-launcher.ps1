@@ -339,7 +339,7 @@ Start-Sleep -Milliseconds 5500
     Assert-BridgeLauncherTest ($followerSettleIndex -gt $shortcutLoopIndex -and $popupComposerIndex -gt $followerSettleIndex) 'The ChatGPT popout helper can focus the follower composer before its owner snapshot settles.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains('popup_owner_refresh_failed')) 'The ChatGPT popout helper can still reuse an unreleased popout owner.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains('$restoredHidden = ($null -ne $popupWasVisible -and -not $popupWasVisible)')) 'The ChatGPT popout helper does not report a hidden popout reopened through the host shortcut.'
-    Assert-BridgeLauncherTest ($popupHelperText.Contains("ValidateSet('inspect', 'open', 'desktop', 'dismiss', 'pin', 'unpin')")) 'The ChatGPT helper does not expose separate desktop, popout, dismiss, and pin modes.'
+    Assert-BridgeLauncherTest ($popupHelperText.Contains("ValidateSet('inspect', 'open', 'desktop', 'recover', 'dismiss', 'pin', 'unpin')")) 'The ChatGPT helper does not expose separate desktop, popout, recovery, dismiss, and pin modes.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains('SetPopupTopmost(IntPtr window, bool enabled)')) 'The ChatGPT popout helper does not use verified native always-on-top control.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains('SWP_NOACTIVATE')) 'The ChatGPT popout pin can steal keyboard focus.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains('uint flags = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE;')) 'The ChatGPT popout pin incorrectly forces a hidden window visible.'

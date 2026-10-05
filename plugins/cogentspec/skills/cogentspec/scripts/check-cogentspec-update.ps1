@@ -7,6 +7,14 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+. (Join-Path $PSScriptRoot 'native-command.ps1')
+$executionFailure = Get-CogentSpecExecutionPermissionFailure
+if ($executionFailure) {
+    $executionFailure.protocol = 'cogentspec-update-check-v1'
+    $executionFailure | ConvertTo-Json -Compress | Write-Output
+    exit 0
+}
+
 function Write-CompactJson($Value) {
     $Value | ConvertTo-Json -Depth 5 -Compress | Write-Output
 }
@@ -74,4 +82,3 @@ try {
         exactReason = [string]$_.Exception.Message
     })
 }
-
