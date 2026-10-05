@@ -102,19 +102,30 @@ function Read-DesktopBridgeToken {
 }
 
 function Confirm-StandalonePopoutConnection([string]$SurfaceName, [string]$ConnectedContextKey, [string]$ConnectedThreadId) {
-    if ($SurfaceName -ne 'chatgpt') { return $false }
+    if ($SurfaceName -ne 'chatgpt') { return [ordered]@{ confirmed = $false; reason = 'not_applicable' } }
     $token = ''
     try {
         $token = Read-DesktopBridgeToken
-        if (-not $token) { return $false }
+        if (-not $token) { return [ordered]@{ confirmed = $false; reason = 'desktop_credential_unavailable' } }
         $popupHelperPath = Join-Path $PSScriptRoot 'open-chatgpt-popup.ps1'
-        if (-not (Test-Path -LiteralPath $popupHelperPath -PathType Leaf)) { return $false }
-        $inspectionResult = Invoke-CogentSpecNativeCommand -FilePath $popupHelperPath -ArgumentList @('-Mode', 'inspect') -TimeoutSeconds 5
-        if ($inspectionResult.TimedOut -or $inspectionResult.ExitCode -ne 0) { return $false }
+        if (-not (Test-Path -LiteralPath $popupHelperPath -PathType Leaf)) {
+            return [ordered]@{ confirmed = $false; reason = 'inspection_helper_missing' }
+        }
+        # UI Automation has a measurable cold-start cost. Keep this bounded well
+        # below the one-minute workflow target without killing a valid first run.
+        $inspectionResult = Invoke-CogentSpecNativeCommand -FilePath $popupHelperPath -ArgumentList @('-Mode', 'inspect') -TimeoutSeconds 15
+        if ($inspectionResult.TimedOut) {
+            return [ordered]@{ confirmed = $false; reason = 'popout_inspection_timed_out' }
+        }
+        if ($inspectionResult.ExitCode -ne 0) {
+            return [ordered]@{ confirmed = $false; reason = 'popout_inspection_failed' }
+        }
         $inspectionOutput = @($inspectionResult.Output -split "`r?`n")
         $inspectionJson = @($inspectionOutput | ForEach-Object { [string]$_ } |
             Where-Object { $_.Trim().StartsWith('{') } | Select-Object -Last 1)
-        if (-not $inspectionJson) { return $false }
+        if (-not $inspectionJson) {
+            return [ordered]@{ confirmed = $false; reason = 'popout_inspection_unavailable' }
+        }
         $inspection = $inspectionJson | ConvertFrom-Json
         $chatFingerprint = if ($inspection.PSObject.Properties['chatFingerprint']) {
             [string]$inspection.chatFingerprint
@@ -128,7 +139,9 @@ function Confirm-StandalonePopoutConnection([string]$SurfaceName, [string]$Conne
         if ([string]$inspection.status -ne 'ready' -or -not [bool]$inspection.publisherVerified -or
             -not [bool]$inspection.popupVerified -or $conversationState -ne 'identified' -or
             $chatFingerprint -notmatch '^[a-f0-9]{64}$' -or
-            $currentConversationKey -cne $chatFingerprint) { return $false }
+            $currentConversationKey -cne $chatFingerprint) {
+            return [ordered]@{ confirmed = $false; reason = 'current_popout_conversation_not_verified' }
+        }
         $body = @{
             contextKey = $ConnectedContextKey
             threadId = $ConnectedThreadId
@@ -143,11 +156,15 @@ function Confirm-StandalonePopoutConnection([string]$SurfaceName, [string]$Conne
             TimeoutSec = 5
         }
         $response = Invoke-RestMethod @requestParameters
-        return [bool]$response.confirmed
+        if ([bool]$response.confirmed) {
+            return [ordered]@{ confirmed = $true; reason = 'confirmed' }
+        }
+        return [ordered]@{ confirmed = $false; reason = 'server_rejected_confirmation' }
     } catch {
         # The normal task connection must not fail when no standalone Popout
-        # reconnection is waiting to be confirmed.
-        return $false
+        # reconnection is waiting to be confirmed, but the result must expose
+        # that exact-chat confirmation did not complete.
+        return [ordered]@{ confirmed = $false; reason = 'connection_confirmation_failed' }
     } finally {
         $token = $null
     }
@@ -339,7 +356,7 @@ if (Test-Path -LiteralPath $statePath -PathType Leaf) {
                 -ExpectedThreadId $threadId `
                 -TimeoutMilliseconds 3000
             if ($presenceReady) {
-                $popoutConnectionConfirmed = Confirm-StandalonePopoutConnection `
+                $popoutConnection = Confirm-StandalonePopoutConnection `
                     -SurfaceName $Surface `
                     -ConnectedContextKey $resolvedContext `
                     -ConnectedThreadId $threadId
@@ -358,7 +375,8 @@ if (Test-Path -LiteralPath $statePath -PathType Leaf) {
                     mcpState = $mcpState
                     pluginId = $pluginId
                     pluginVersion = $pluginVersion
-                    popoutConnectionConfirmed = $popoutConnectionConfirmed
+                    popoutConnectionConfirmed = [bool]$popoutConnection.confirmed
+                    popoutConnectionReason = [string]$popoutConnection.reason
                     launcherElapsedMs = [int]$launcherTimer.ElapsedMilliseconds
                 })
                 return
@@ -396,7 +414,7 @@ if (-not $presenceReady) {
     Remove-Item -LiteralPath $readyPath -Force -ErrorAction SilentlyContinue
     throw 'Desktop Bridge started, but CogentSpec did not verify this AI task.'
 }
-$popoutConnectionConfirmed = Confirm-StandalonePopoutConnection `
+$popoutConnection = Confirm-StandalonePopoutConnection `
     -SurfaceName $Surface `
     -ConnectedContextKey $resolvedContext `
     -ConnectedThreadId $threadId
@@ -431,6 +449,7 @@ Write-CompactJson ([ordered]@{
     mcpState = $mcpState
     pluginId = $pluginId
     pluginVersion = $pluginVersion
-    popoutConnectionConfirmed = $popoutConnectionConfirmed
+    popoutConnectionConfirmed = [bool]$popoutConnection.confirmed
+    popoutConnectionReason = [string]$popoutConnection.reason
     launcherElapsedMs = [int]$launcherTimer.ElapsedMilliseconds
 })

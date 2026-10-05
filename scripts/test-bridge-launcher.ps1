@@ -94,6 +94,37 @@ for ($heartbeat = 0; $heartbeat -lt 15; $heartbeat += 1) {
 '@
     Set-Content -LiteralPath (Join-Path $fixtureScripts 'watch-cogentstack-bridge.ps1') -Value $watcherFixture -Encoding UTF8
 
+    # Keep the launcher fixture isolated from the user's real Popout and
+    # credential. The live exact-chat path is accepted separately after install.
+    $popupInspectionFixture = @'
+param([string]$Mode)
+if ($Mode -ne 'inspect') { throw 'The launcher requested an unexpected Popout operation.' }
+[ordered]@{
+    status = 'ready'
+    publisherVerified = $true
+    popupVerified = $true
+    conversationState = 'blank'
+    currentConversationKey = ''
+    chatFingerprint = ''
+} | ConvertTo-Json -Compress
+'@
+    Set-Content -LiteralPath (Join-Path $fixtureScripts 'open-chatgpt-popup.ps1') -Value $popupInspectionFixture -Encoding UTF8
+
+    # Regression proof: the 0.6.80 five-second allowance killed a valid cold
+    # inspection. A deliberately slower-than-five-second subprocess must finish
+    # inside the new bounded allowance.
+    $coldInspectionFixturePath = Join-Path $fixtureRoot 'cold-popout-inspection.ps1'
+    @'
+Start-Sleep -Milliseconds 5500
+[ordered]@{ status = 'ready' } | ConvertTo-Json -Compress
+'@ | Set-Content -LiteralPath $coldInspectionFixturePath -Encoding UTF8
+    . (Join-Path $fixtureScripts 'native-command.ps1')
+    $coldInspection = Invoke-CogentSpecNativeCommand `
+        -FilePath $coldInspectionFixturePath `
+        -TimeoutSeconds 15
+    Assert-BridgeLauncherTest (-not [bool]$coldInspection.TimedOut -and [int]$coldInspection.ExitCode -eq 0) 'A valid cold Popout inspection was terminated at the former five-second boundary.'
+    Assert-BridgeLauncherTest ($coldInspection.Output.Contains('"status":"ready"')) 'The cold Popout inspection result was not preserved.'
+
     $env:COGENTSPEC_LAUNCHER_TEST_CONNECTOR_PROCESS_PATH = $connectorProcessPath
     $env:CODEX_THREAD_ID = $fixtureThreadId
     $powerShellExecutable = (Get-Process -Id $PID).Path
@@ -423,13 +454,15 @@ for ($heartbeat = 0; $heartbeat -lt 15; $heartbeat += 1) {
 
     $launcherText = Get-Content -Raw -LiteralPath (Join-Path $repositoryRoot 'plugins\cogentspec\skills\cogentspec\scripts\start-cogentstack-bridge.ps1')
     Assert-BridgeLauncherTest ($launcherText.Contains('function Confirm-StandalonePopoutConnection')) 'A successful $cogentspec invocation cannot confirm the retained Popout chat.'
-    Assert-BridgeLauncherTest ($launcherText.Contains("Invoke-CogentSpecNativeCommand -FilePath `$popupHelperPath -ArgumentList @('-Mode', 'inspect') -TimeoutSeconds 5")) 'The task Bridge does not inspect the current Popout conversation within a bounded subprocess.'
+    Assert-BridgeLauncherTest ($launcherText.Contains("Invoke-CogentSpecNativeCommand -FilePath `$popupHelperPath -ArgumentList @('-Mode', 'inspect') -TimeoutSeconds 15")) 'The task Bridge does not allow a bounded fifteen-second cold Popout inspection.'
     Assert-BridgeLauncherTest ($launcherText.Contains('TimeoutSec = 5')) 'The Popout connection confirmation request is not bounded to five seconds.'
+    Assert-BridgeLauncherTest ($launcherText.Contains("reason = 'popout_inspection_timed_out'")) 'The task Bridge hides a Popout inspection timeout.'
+    Assert-BridgeLauncherTest ($launcherText.Contains('popoutConnectionReason = [string]$popoutConnection.reason')) 'The task Bridge does not expose the exact-chat confirmation outcome.'
     Assert-BridgeLauncherTest ($launcherText.Contains("`$conversationState -ne 'identified'")) 'The task Bridge can confirm a blank or unidentified Popout conversation.'
     Assert-BridgeLauncherTest ($launcherText.Contains("`$currentConversationKey -cne `$chatFingerprint")) 'The task Bridge can confirm a connection receipt for a different conversation.'
     Assert-BridgeLauncherTest ($launcherText.Contains("chatFingerprint = `$chatFingerprint")) 'The task Bridge does not bind confirmation to the active Popout chat fingerprint.'
     Assert-BridgeLauncherTest (($launcherText.Split('Confirm-StandalonePopoutConnection').Count - 1) -ge 3) 'The Popout confirmation is not applied to both reused and newly started task Bridge workers.'
-    Assert-BridgeLauncherTest ($launcherText.Contains('popoutConnectionConfirmed = $popoutConnectionConfirmed')) 'The task Bridge does not report whether it confirmed a waiting Popout connection.'
+    Assert-BridgeLauncherTest ($launcherText.Contains('popoutConnectionConfirmed = [bool]$popoutConnection.confirmed')) 'The task Bridge does not report whether it confirmed a waiting Popout connection.'
     $cogentSpecSkillText = Get-Content -Raw -LiteralPath (Join-Path $repositoryRoot 'plugins\cogentspec\skills\cogentspec\SKILL.md')
     Assert-BridgeLauncherTest ($cogentSpecSkillText.Contains('Only `currentConversationConnected: true` confirms')) 'The CogentSpec workflow can still mistake Popout visibility for a connected conversation.'
     $cogentStackSkillText = Get-Content -Raw -LiteralPath (Join-Path $repositoryRoot 'plugins\cogentstack\skills\cogentstack\SKILL.md')
