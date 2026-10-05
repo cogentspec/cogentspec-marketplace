@@ -47,7 +47,16 @@ function Get-ChatGptComposerCondition {
     # Document, and Custom controls across Desktop releases. The signed process,
     # verified Popout window, exact normalized name, and focusability are the
     # stable identity boundaries; the host's transient UIA role is not.
-    return [System.Windows.Automation.Condition]::TrueCondition
+    # Filter in the UIA provider. Fetching every descendant and reading each
+    # node's Name/IsEnabled/focusability across processes can exceed the
+    # connection deadline while a long conversation is rendering.
+    $names = @('Work with ChatGPT', 'Ask ChatGPT anything locally', 'Ask ChatGPT anything', 'Do anything')
+    $conditions = [System.Windows.Automation.Condition[]]@($names | ForEach-Object {
+        [System.Windows.Automation.PropertyCondition]::new(
+            [System.Windows.Automation.AutomationElement]::NameProperty, $_
+        )
+    })
+    return [System.Windows.Automation.OrCondition]::new($conditions)
 }
 
 function Set-ChatGptComposerFocus($Composer) {

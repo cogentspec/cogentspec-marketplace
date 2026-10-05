@@ -26,6 +26,10 @@ const readyPath = join(fixtureRoot, "ready.json");
 const productionHelperSource = await readFile(productionHelper, "utf8");
 const watcherSource = await readFile(watcher, "utf8");
 const projectWatcherSource = await readFile(projectWatcher, "utf8");
+const popoutStartupSource = await readFile(join(repositoryRoot, "plugins", "cogentspec", "skills", "cogentspec", "scripts", "start-cogentspec-popout-bridge.ps1"), "utf8");
+assert.match(popoutStartupSource, /\(\[DateTime\]\$marker\.acknowledgedAt\)\.ToUniversalTime\(\)/);
+assert.match(popoutStartupSource, /\$age\.TotalSeconds -ge 0/);
+assert.doesNotMatch(popoutStartupSource, /DateTime\]::Parse\(\[string\]\$marker\.acknowledgedAt/);
 const popupWindowFinder = productionHelperSource.slice(
   productionHelperSource.indexOf("public static IntPtr[] FindPopupWindows"),
   productionHelperSource.indexOf("public static IntPtr[] FindMainWindows"),
@@ -49,7 +53,7 @@ assert.doesNotMatch(mainWindowBoundarySource, /\.MainWindowHandle\b/);
 assert.match(productionHelperSource, /'popup_specific_composer'/);
 assert.match(productionHelperSource, /popup_detected_not_verified/);
 assert.match(productionHelperSource, /ChatGPT Popout opened, but Desktop Bridge could not verify one safe composer window/);
-assert.match(productionHelperSource, /return \[System\.Windows\.Automation\.Condition\]::TrueCondition/);
+assert.match(productionHelperSource, /return \[System\.Windows\.Automation\.OrCondition\]::new\(\$conditions\)/);
 assert.match(productionHelperSource, /\$Element\.Current\.IsEnabled -and \$Element\.Current\.IsKeyboardFocusable/);
 assert.match(productionHelperSource, /'Do anything'/);
 const composerConditionSource = productionHelperSource.slice(

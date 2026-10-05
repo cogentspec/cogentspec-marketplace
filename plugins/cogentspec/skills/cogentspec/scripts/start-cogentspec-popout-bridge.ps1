@@ -67,8 +67,8 @@ if (Test-Path -LiteralPath $statePath -PathType Leaf) {
             ([string]$process.CommandLine).IndexOf('watch-cogentspec-popout-bridge.ps1', [StringComparison]::OrdinalIgnoreCase) -ge 0
         if ($sameWorker -and (Test-Path -LiteralPath $readyPath -PathType Leaf)) {
             $marker = Get-Content -Raw -LiteralPath $readyPath | ConvertFrom-Json
-            $age = [DateTime]::UtcNow - [DateTime]::Parse([string]$marker.acknowledgedAt).ToUniversalTime()
-            if ([bool]$marker.serverAcknowledged -and $age.TotalSeconds -le 12) {
+            $age = [DateTime]::UtcNow - ([DateTime]$marker.acknowledgedAt).ToUniversalTime()
+            if ([bool]$marker.serverAcknowledged -and $age.TotalSeconds -ge 0 -and $age.TotalSeconds -le 12) {
                 Write-CompactJson ([ordered]@{ status = 'ready'; bridge = 'already_running'; processId = $existingProcessId; pluginId = $pluginId; pluginVersion = $pluginVersion })
                 return
             }

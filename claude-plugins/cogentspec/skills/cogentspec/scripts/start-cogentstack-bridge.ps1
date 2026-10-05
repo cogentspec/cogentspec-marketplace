@@ -107,6 +107,37 @@ function Read-DesktopBridgeToken {
     return [Text.Encoding]::UTF8.GetString($bytes)
 }
 
+function Read-FreshPopoutInspection([string]$HelperPath) {
+    try {
+        $root = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'CogentSpec'
+        $state = Get-Content -Raw -LiteralPath (Join-Path $root 'popout-bridge\worker.json') | ConvertFrom-Json
+        $marker = Get-Content -Raw -LiteralPath (Join-Path $root 'popout-bridge\ready.json') | ConvertFrom-Json
+        $expectedWatcher = Join-Path $root "popout-runtime\$pluginId-$pluginVersion\watch-cogentspec-popout-bridge.ps1"
+        $age = ([DateTime]::UtcNow - ([DateTime]$marker.acknowledgedAt).ToUniversalTime()).TotalSeconds
+        if ($age -lt 0 -or $age -gt 3 -or -not [bool]$marker.serverAcknowledged -or
+            [string]$marker.status -ne 'ready' -or [string]$marker.pluginId -cne $pluginId -or
+            [string]$marker.pluginVersion -cne $pluginVersion -or
+            [int]$marker.processId -ne [int]$state.processId -or [int]$state.processId -le 0 -or
+            [string]$state.watcherScript -ine $expectedWatcher -or
+            [string]$marker.conversationState -ne 'identified' -or -not [bool]$marker.connectedChatMarkerFound -or
+            [string]$marker.currentConversationKey -notmatch '^[a-f0-9]{64}$' -or
+            [long]$marker.popupWindowHandle -eq 0) { return $null }
+        $process = Get-CimInstance Win32_Process -Filter "ProcessId=$([int]$state.processId)" -ErrorAction Stop
+        if (-not $process -or [string]$process.CommandLine -notmatch '(?i)-EncodedCommand\s+([A-Za-z0-9+/=]+)') { return $null }
+        $command = [Text.Encoding]::Unicode.GetString([Convert]::FromBase64String($Matches[1]))
+        if (-not $command.Contains($expectedWatcher.Replace("'", "''"))) { return $null }
+        # Never consume a snapshot from another or stale package implementation.
+        $runtimeHelper = Join-Path (Split-Path -Parent $expectedWatcher) 'open-chatgpt-popup.ps1'
+        if ((Get-FileHash -LiteralPath $runtimeHelper -Algorithm SHA256).Hash -cne
+            (Get-FileHash -LiteralPath $HelperPath -Algorithm SHA256).Hash) { return $null }
+        return [pscustomobject]@{
+            status = 'ready'; publisherVerified = $true; popupVerified = $true
+            conversationState = 'identified'; currentConversationKey = [string]$marker.currentConversationKey
+            chatFingerprint = [string]$marker.currentConversationKey
+        }
+    } catch { return $null }
+}
+
 function Confirm-StandalonePopoutConnection([string]$SurfaceName, [string]$ConnectedContextKey, [string]$ConnectedThreadId) {
     if ($SurfaceName -ne 'chatgpt') { return [ordered]@{ confirmed = $false; reason = 'not_applicable' } }
     $token = ''
@@ -119,6 +150,8 @@ function Confirm-StandalonePopoutConnection([string]$SurfaceName, [string]$Conne
         }
         # UI Automation has a measurable cold-start cost. Keep this bounded well
         # below the one-minute workflow target without killing a valid first run.
+        $inspection = Read-FreshPopoutInspection -HelperPath $popupHelperPath
+        if ($null -eq $inspection) {
         $inspectionResult = Invoke-CogentSpecNativeCommand -FilePath $popupHelperPath -ArgumentList @('-Mode', 'inspect') -TimeoutSeconds 15
         if ($inspectionResult.TimedOut) {
             return [ordered]@{ confirmed = $false; reason = 'popout_inspection_timed_out' }
@@ -133,6 +166,7 @@ function Confirm-StandalonePopoutConnection([string]$SurfaceName, [string]$Conne
             return [ordered]@{ confirmed = $false; reason = 'popout_inspection_unavailable' }
         }
         $inspection = $inspectionJson | ConvertFrom-Json
+        }
         $chatFingerprint = if ($inspection.PSObject.Properties['chatFingerprint']) {
             [string]$inspection.chatFingerprint
         } else { '' }
@@ -386,6 +420,8 @@ if (Test-Path -LiteralPath $statePath -PathType Leaf) {
                     pluginId = $pluginId
                     pluginVersion = $pluginVersion
                     popoutConnectionConfirmed = [bool]$popoutConnection.confirmed
+                    currentConversationConnected = [bool]$popoutConnection.confirmed
+                    popoutUserMessage = if ($popoutConnection.confirmed) { 'The current Popout conversation is connected.' } else { 'The project-data Bridge is ready, but the current Popout conversation could not be verified. The workspace remains disconnected.' }
                     popoutConnectionReason = [string]$popoutConnection.reason
                     launcherElapsedMs = [int]$launcherTimer.ElapsedMilliseconds
                 })
@@ -460,6 +496,8 @@ Write-CompactJson ([ordered]@{
     pluginId = $pluginId
     pluginVersion = $pluginVersion
     popoutConnectionConfirmed = [bool]$popoutConnection.confirmed
+    currentConversationConnected = [bool]$popoutConnection.confirmed
+    popoutUserMessage = if ($popoutConnection.confirmed) { 'The current Popout conversation is connected.' } else { 'The project-data Bridge is ready, but the current Popout conversation could not be verified. The workspace remains disconnected.' }
     popoutConnectionReason = [string]$popoutConnection.reason
     launcherElapsedMs = [int]$launcherTimer.ElapsedMilliseconds
 })

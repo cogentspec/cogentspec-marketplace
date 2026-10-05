@@ -162,6 +162,8 @@ Start-Sleep -Milliseconds 5500
     Assert-BridgeLauncherTest ([string]$result.bridge -eq 'started') 'The Bridge launcher did not start the fixture worker.'
     Assert-BridgeLauncherTest ([bool]$result.presenceVerified) 'The Bridge launcher reported ready before server presence was verified.'
     Assert-BridgeLauncherTest ([string]$result.mcpState -eq 'ready') 'The secure project-data connection was not ready.'
+    Assert-BridgeLauncherTest (-not [bool]$result.currentConversationConnected) 'An unverified inspection must not claim the current chat is connected.'
+    Assert-BridgeLauncherTest ($result.popoutUserMessage.Contains('workspace remains disconnected')) 'Bridge readiness must preserve the explicit disconnected outcome.'
     $fixtureLauncherText = Get-Content -Raw -LiteralPath (Join-Path $fixtureScripts 'start-cogentstack-bridge.ps1')
     Assert-BridgeLauncherTest ($fixtureLauncherText.Contains('-TimeoutMilliseconds 8000')) 'The Bridge presence wait is not bounded to eight seconds.'
     Assert-BridgeLauncherTest (
@@ -463,6 +465,8 @@ Start-Sleep -Milliseconds 5500
     Assert-BridgeLauncherTest ($launcherText.Contains("chatFingerprint = `$chatFingerprint")) 'The task Bridge does not bind confirmation to the active Popout chat fingerprint.'
     Assert-BridgeLauncherTest (($launcherText.Split('Confirm-StandalonePopoutConnection').Count - 1) -ge 3) 'The Popout confirmation is not applied to both reused and newly started task Bridge workers.'
     Assert-BridgeLauncherTest ($launcherText.Contains('popoutConnectionConfirmed = [bool]$popoutConnection.confirmed')) 'The task Bridge does not report whether it confirmed a waiting Popout connection.'
+    Assert-BridgeLauncherTest ($launcherText.Contains('currentConversationConnected = [bool]$popoutConnection.confirmed')) 'The launcher must return the authoritative exact-chat gate, not just project-data readiness.'
+    Assert-BridgeLauncherTest ($launcherText.Contains('The workspace remains disconnected.')) 'An unverified Popout must have an explicit disconnected user message.'
     $cogentSpecSkillText = Get-Content -Raw -LiteralPath (Join-Path $repositoryRoot 'plugins\cogentspec\skills\cogentspec\SKILL.md')
     Assert-BridgeLauncherTest ($cogentSpecSkillText.Contains('Only `currentConversationConnected: true` confirms')) 'The CogentSpec workflow can still mistake Popout visibility for a connected conversation.'
     $cogentStackSkillText = Get-Content -Raw -LiteralPath (Join-Path $repositoryRoot 'plugins\cogentstack\skills\cogentstack\SKILL.md')
