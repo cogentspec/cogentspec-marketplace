@@ -10,6 +10,15 @@ const watcher = join(repositoryRoot, "plugins", "cogentspec", "skills", "cogents
 const projectWatcher = join(repositoryRoot, "plugins", "cogentspec", "skills", "cogentspec", "scripts", "watch-cogentstack-bridge.ps1");
 const productionHelper = join(repositoryRoot, "plugins", "cogentspec", "skills", "cogentspec", "scripts", "open-chatgpt-popup.ps1");
 const fixtureRoot = await mkdtemp(join(tmpdir(), "cogentspec-popout-worker-test-"));
+await new Promise((resolveProcess, rejectProcess) => {
+  const child = spawn("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+    join(repositoryRoot, "scripts", "test-popout-turn-identity.ps1")], { windowsHide: true });
+  let output = "";
+  child.stdout.on("data", (chunk) => { output += chunk; });
+  child.stderr.on("data", (chunk) => { output += chunk; });
+  child.on("error", rejectProcess);
+  child.on("exit", (code) => code === 0 ? resolveProcess() : rejectProcess(new Error(output)));
+});
 const helper = join(fixtureRoot, "open-chatgpt-popup.ps1");
 const helperArguments = join(fixtureRoot, "helper-arguments.json");
 const readyPath = join(fixtureRoot, "ready.json");

@@ -765,6 +765,23 @@ function Find-VerifiedChatGptComposer([IntPtr]$Window) {
     return $null
 }
 
+function Get-ChatGptUserTurnRuntimeId($Element, $Walker = $null) {
+    if ($null -eq $Walker) { $Walker = [System.Windows.Automation.TreeWalker]::RawViewWalker }
+    # The text/paragraph nodes are rebuilt after streaming completes. The
+    # enclosing user turn survives those updates; never key a chat to its text.
+    $ancestor = $Element
+    for ($depth = 0; $depth -lt 12 -and $null -ne $ancestor; $depth++) {
+        if ([string]$ancestor.Current.ClassName -match '(?:^|\s)bg-user-message(?:\s|$)') {
+            $turn = $Walker.GetParent($ancestor)
+            if ($null -eq $turn) { return '' }
+            return (@($turn.GetRuntimeId()) -join '.')
+        }
+        $ancestor = $Walker.GetParent($ancestor)
+    }
+    # Unknown host layout is not proof of an exact connected chat.
+    return ''
+}
+
 function Get-ChatGptConversationObservation([IntPtr]$Window) {
     if ($Window -eq [IntPtr]::Zero) {
         return [ordered]@{ state = 'unknown'; currentConversationKey = ''; chatFingerprint = ''; commandMarkerFound = $false }
@@ -789,16 +806,15 @@ function Get-ChatGptConversationObservation([IntPtr]$Window) {
             $messageElement = $null
             for ($messageIndex = $index + 1; $messageIndex -lt $textElements.Count; $messageIndex++) {
                 $part = (([string]$textElements.Item($messageIndex).Current.Name) -replace '[\u200B-\u200D\uFEFF]', '').Trim()
-                if ($part -ceq 'You said:' -or $part -match '^\d{1,2}:\d{2}\s(?:AM|PM)$') { break }
+                if ($part -ceq 'You said:' -or $part -ceq 'ChatGPT said:' -or $part -match '^\d{1,2}:\d{2}\s(?:AM|PM)$') { break }
                 if (-not $part) { continue }
                 if ($null -eq $messageElement) { $messageElement = $textElements.Item($messageIndex) }
                 $messageParts.Add($part)
             }
             if ($null -eq $messageElement) { continue }
             $message = (($messageParts -join '') -replace '\s+', '').Trim()
-            $runtimeId = @($messageElement.GetRuntimeId())
-            if ($runtimeId.Count -eq 0) { continue }
-            $runtimeIdText = $runtimeId -join '.'
+            $runtimeIdText = Get-ChatGptUserTurnRuntimeId -Element $messageElement
+            if (-not $runtimeIdText) { continue }
             $latestUserMessageRuntimeId = $runtimeIdText
             if ($message -ceq '$cogentspec') { $markerRuntimeId = $runtimeIdText }
         }
