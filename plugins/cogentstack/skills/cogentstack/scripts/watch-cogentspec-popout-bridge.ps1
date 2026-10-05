@@ -47,7 +47,7 @@ function Write-ReadyMarker([bool]$ServerAcknowledged, [string]$Status = 'ready',
         acknowledgedAt = [DateTime]::UtcNow.ToString('o')
         status = $Status
         lastError = $LastError
-        pinHotkey = 'Ctrl+Shift+P'
+        pinHotkey = 'Ctrl+Shift+Y'
         pinHotkeyReady = [bool]$script:PinHotkeyReady
         pinHotkeyScope = 'verified_foreground_chatgpt_popout'
         pinHotkeyError = [string]$script:PinHotkeyError
@@ -122,7 +122,7 @@ namespace CogentSpec {
         private const int VK_CONTROL = 0x11;
         private const int VK_SHIFT = 0x10;
         private const int VK_MENU = 0x12;
-        private const int VK_P = 0x50;
+        private const int VK_Y = 0x59;
         private const int VK_LWIN = 0x5B;
         private const int VK_RWIN = 0x5C;
         private const int GWL_EXSTYLE = -20;
@@ -216,7 +216,7 @@ namespace CogentSpec {
         private static uint hookThreadId;
         private static long verifiedPopupWindow;
         private static int verifiedProcessId;
-        private static int capturedP;
+        private static int capturedY;
         private static int started;
         private static string lastToggleStatus = "idle";
         private static int lastTogglePinned;
@@ -253,7 +253,7 @@ namespace CogentSpec {
                 hookThread = null;
                 hookThreadId = 0;
                 started = 0;
-                capturedP = 0;
+                capturedY = 0;
             }
         }
 
@@ -320,14 +320,14 @@ namespace CogentSpec {
                 uint message = unchecked((uint)wParam.ToInt64());
                 bool keyDown = message == WM_KEYDOWN || message == WM_SYSKEYDOWN;
                 bool keyUp = message == WM_KEYUP || message == WM_SYSKEYUP;
-                if (data.virtualKey == VK_P && (keyDown || keyUp)) {
-                    if (keyUp && Interlocked.Exchange(ref capturedP, 0) != 0) return new IntPtr(1);
-                    if (keyDown && Interlocked.CompareExchange(ref capturedP, 0, 0) != 0) return new IntPtr(1);
+                if (data.virtualKey == VK_Y && (keyDown || keyUp)) {
+                    if (keyUp && Interlocked.Exchange(ref capturedY, 0) != 0) return new IntPtr(1);
+                    if (keyDown && Interlocked.CompareExchange(ref capturedY, 0, 0) != 0) return new IntPtr(1);
                     if (keyDown && IsPressed(VK_CONTROL) && IsPressed(VK_SHIFT) &&
                         !IsPressed(VK_MENU) && !IsPressed(VK_LWIN) && !IsPressed(VK_RWIN)) {
                         IntPtr foreground = GetForegroundWindow();
                         if (IsVerifiedForegroundPopup(foreground)) {
-                            Interlocked.Exchange(ref capturedP, 1);
+                            Interlocked.Exchange(ref capturedY, 1);
                             ToggleTopmost(foreground);
                             return new IntPtr(1);
                         }

@@ -14,6 +14,7 @@ function Assert-McpConnectionTest {
 
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $helper = Join-Path $repositoryRoot 'plugins\cogentspec\skills\cogentspec\scripts\ensure-cogentspec-mcp.ps1'
+$nativeHelper = Join-Path $repositoryRoot 'plugins\cogentspec\skills\cogentspec\scripts\native-command.ps1'
 $fixtureRoot = Join-Path ([IO.Path]::GetTempPath()) ("cogentspec-mcp-connection-" + [Guid]::NewGuid().ToString('N'))
 $fakeCodex = Join-Path $fixtureRoot 'codex-fixture.ps1'
 $authorizationState = Join-Path $fixtureRoot 'authorized.txt'
@@ -52,11 +53,22 @@ exit 1
     Assert-McpConnectionTest ([string]$second.connection -eq 'already_connected') 'The existing connection tried to authorize again.'
     Assert-McpConnectionTest ([string]$second.userMessage -notmatch 'MCP|OAuth|plugin|tool') 'The user message exposed an implementation detail.'
 
+    $hangingCommand = Join-Path $fixtureRoot 'hanging-command.ps1'
+    'Start-Sleep -Seconds 10' | Set-Content -LiteralPath $hangingCommand -Encoding UTF8
+    . $nativeHelper
+    $timeoutTimer = [Diagnostics.Stopwatch]::StartNew()
+    $timeoutResult = Invoke-CogentSpecNativeCommand -FilePath $hangingCommand -TimeoutSeconds 1
+    $timeoutTimer.Stop()
+    Assert-McpConnectionTest ([bool]$timeoutResult.TimedOut) 'The native command deadline did not report a timeout.'
+    Assert-McpConnectionTest ($timeoutTimer.ElapsedMilliseconds -lt 5000) 'The native command deadline did not terminate the hanging process promptly.'
+
     [ordered]@{
         status = 'valid'
         firstConnection = [string]$first.connection
         repeatedConnection = [string]$second.connection
         userMessage = [string]$second.userMessage
+        timeoutBounded = [bool]$timeoutResult.TimedOut
+        timeoutElapsedMs = [int]$timeoutTimer.ElapsedMilliseconds
     } | ConvertTo-Json -Compress
 } finally {
     if ($null -eq $originalCodexPath) { Remove-Item Env:\CODEX_CLI_PATH -ErrorAction SilentlyContinue } else { $env:CODEX_CLI_PATH = $originalCodexPath }

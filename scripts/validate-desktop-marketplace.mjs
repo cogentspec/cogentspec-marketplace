@@ -187,7 +187,7 @@ for (const [name, source] of [["canonical skill", canonicalSkill], ["compatibili
 }
 for (const [name, source] of [["starter", canonicalStarter], ["connector", canonicalConnector]]) {
   for (const marker of name === "starter"
-    ? ["-ContextKey $resolvedContext", "-WorkspaceGrant", "-RequestTimeoutSeconds 8", "Get-HostPowerShellExecutable", "launcherElapsedMs", "https://cogentspec.app/stack", "#desktop-web=", "#desktop-chatgpt=", "pluginVersion = $pluginVersion"]
+    ? ["-ContextKey $resolvedContext", "-WorkspaceGrant", "-RequestTimeoutSeconds 6", "Get-HostPowerShellExecutable", "launcherElapsedMs", "https://cogentspec.app/stack", "#desktop-web=", "#desktop-chatgpt=", "pluginVersion = $pluginVersion"]
     : ["[int]$RequestTimeoutSeconds = 20", "-TimeoutSec $RequestTimeoutSeconds", "contextKey = $GrantContextKey", "surface = $GrantSurface", "/api/device-authorization/browser-grant"]) {
     if (!source.includes(marker)) fail(`the Desktop Bridge ${name} is missing bound workspace marker: ${marker}`);
   }

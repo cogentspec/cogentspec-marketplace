@@ -10,6 +10,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $launcherTimer = [Diagnostics.Stopwatch]::StartNew()
 . (Join-Path $PSScriptRoot 'project-context.ps1')
+. (Join-Path $PSScriptRoot 'native-command.ps1')
 
 function Write-CompactJson($Value) {
     $Value | ConvertTo-Json -Depth 6 -Compress | Write-Output
@@ -108,7 +109,9 @@ function Confirm-StandalonePopoutConnection([string]$SurfaceName, [string]$Conne
         if (-not $token) { return $false }
         $popupHelperPath = Join-Path $PSScriptRoot 'open-chatgpt-popup.ps1'
         if (-not (Test-Path -LiteralPath $popupHelperPath -PathType Leaf)) { return $false }
-        $inspectionOutput = @(& $popupHelperPath -Mode inspect 2>&1)
+        $inspectionResult = Invoke-CogentSpecNativeCommand -FilePath $popupHelperPath -ArgumentList @('-Mode', 'inspect') -TimeoutSeconds 5
+        if ($inspectionResult.TimedOut -or $inspectionResult.ExitCode -ne 0) { return $false }
+        $inspectionOutput = @($inspectionResult.Output -split "`r?`n")
         $inspectionJson = @($inspectionOutput | ForEach-Object { [string]$_ } |
             Where-Object { $_.Trim().StartsWith('{') } | Select-Object -Last 1)
         if (-not $inspectionJson) { return $false }
@@ -137,7 +140,7 @@ function Confirm-StandalonePopoutConnection([string]$SurfaceName, [string]$Conne
             Headers = @{ Accept = 'application/json'; Authorization = "Bearer $token" }
             ContentType = 'application/json'
             Body = $body
-            TimeoutSec = 8
+            TimeoutSec = 5
         }
         $response = Invoke-RestMethod @requestParameters
         return [bool]$response.confirmed
@@ -242,7 +245,7 @@ if (-not (Test-Path -LiteralPath $connectionScript -PathType Leaf) -or @($source
 }
 
 $powershellExecutable = Get-HostPowerShellExecutable
-$connectionOutput = @(& $connectionScript -Mode status -Surface $Surface -ContextKey $resolvedContext -WorkspaceGrant -RequestTimeoutSeconds 8 2>&1)
+$connectionOutput = @(& $connectionScript -Mode status -Surface $Surface -ContextKey $resolvedContext -WorkspaceGrant -RequestTimeoutSeconds 6 2>&1)
 $connectionJson = @($connectionOutput | ForEach-Object { $_.ToString() } | Where-Object { $_.Trim().StartsWith('{') } | Select-Object -Last 1)
 if (-not $connectionJson) { throw 'Desktop Bridge could not verify the account-bound installation.' }
 $connection = $connectionJson | ConvertFrom-Json

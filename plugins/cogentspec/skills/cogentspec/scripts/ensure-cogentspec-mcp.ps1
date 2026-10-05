@@ -39,7 +39,8 @@ if (-not $codexCommand) {
 }
 
 function Read-CogentSpecConnection {
-    $result = Invoke-CogentSpecNativeCommand -FilePath $codexCommand -ArgumentList @('mcp', 'list')
+    $result = Invoke-CogentSpecNativeCommand -FilePath $codexCommand -ArgumentList @('mcp', 'list') -TimeoutSeconds 12
+    if ($result.TimedOut) { return 'timed_out' }
     if ($result.ExitCode -ne 0) { return 'unavailable' }
     $line = @($result.Output -split "`r?`n" | Where-Object {
         $_ -match '^\s*cogentspec\s+https://cogentspec\.com/mcp\s+'
@@ -61,7 +62,7 @@ if ($connection -eq 'connected') {
 }
 
 if ($connection -eq 'authorization_required') {
-    $login = Invoke-CogentSpecNativeCommand -FilePath $codexCommand -ArgumentList @('mcp', 'login', 'cogentspec')
+    $login = Invoke-CogentSpecNativeCommand -FilePath $codexCommand -ArgumentList @('mcp', 'login', 'cogentspec') -TimeoutSeconds 30
     if ($login.ExitCode -eq 0 -and (Read-CogentSpecConnection) -eq 'connected') {
         Write-CompactJson ([ordered]@{
             status = 'ready'
@@ -70,6 +71,15 @@ if ($connection -eq 'authorization_required') {
         })
         return
     }
+}
+
+if ($connection -eq 'timed_out') {
+    Write-CompactJson ([ordered]@{
+        status = 'connection_required'
+        connection = 'check_timed_out'
+        userMessage = 'CogentSpec could not verify the project-data connection within 12 seconds. Restart Codex, then run CogentSpec again.'
+    })
+    return
 }
 
 Write-CompactJson ([ordered]@{

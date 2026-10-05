@@ -48,7 +48,7 @@ param(
     [switch]$WorkspaceGrant,
     [int]$RequestTimeoutSeconds
 )
-if ($Mode -ne 'status' -or -not $WorkspaceGrant -or $RequestTimeoutSeconds -ne 8) {
+if ($Mode -ne 'status' -or -not $WorkspaceGrant -or $RequestTimeoutSeconds -ne 6) {
     throw 'The launcher did not make the bounded direct status request.'
 }
 [string]$PID | Set-Content -LiteralPath $env:COGENTSPEC_LAUNCHER_TEST_CONNECTOR_PROCESS_PATH -Encoding ascii
@@ -324,7 +324,7 @@ for ($heartbeat = 0; $heartbeat -lt 15; $heartbeat += 1) {
     Assert-BridgeLauncherTest ($popupHelperText.Contains('the ChatGPT popout remained pinned')) 'The ChatGPT popout helper does not distinguish an ineffective unpin request.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains('popupWindowHandle = $popupWindow.ToInt64()')) 'The ChatGPT popout inspector does not expose the verified native handle to the scoped hotkey worker.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains('popupProcessId = [CogentSpec.ChatGptPopupNative]::GetProcessId($popupWindow)')) 'The ChatGPT popout inspector does not expose the process that owns the verified Popout.'
-    Assert-BridgeLauncherTest ($popupHelperText.Contains("pinShortcut = 'Ctrl+Shift+P'")) 'The ChatGPT popout inspector does not advertise the pin toggle shortcut.'
+    Assert-BridgeLauncherTest ($popupHelperText.Contains("pinShortcut = 'Ctrl+Shift+Y'")) 'The ChatGPT popout inspector does not advertise the pin toggle shortcut.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains('function Get-ChatGptConversationFingerprint')) 'The ChatGPT popout inspector does not fingerprint the connected conversation.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains('function Get-ChatGptConversationObservation')) 'The ChatGPT popout inspector does not identify the current blank or named conversation independently from visibility.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains("`$speaker -cne 'You said:'")) 'The ChatGPT popout inspector does not bind its fingerprint to a user message.'
@@ -376,13 +376,14 @@ for ($heartbeat = 0; $heartbeat -lt 15; $heartbeat += 1) {
     }
     $standaloneWatcherText = Get-Content -Raw -LiteralPath (Join-Path $repositoryRoot 'plugins\cogentspec\skills\cogentspec\scripts\watch-cogentspec-popout-bridge.ps1')
     Assert-BridgeLauncherTest ($standaloneWatcherText.Contains('class ChatGptPopupPinHotkey')) 'The standalone Popout Bridge does not host the pin hotkey listener.'
-    Assert-BridgeLauncherTest ($standaloneWatcherText.Contains('WH_KEYBOARD_LL')) 'The pin hotkey listener cannot pass Ctrl+Shift+P through outside the Popout.'
-    Assert-BridgeLauncherTest (-not $standaloneWatcherText.Contains('RegisterHotKey')) 'The pin shortcut is globally registered and can steal Ctrl+Shift+P from other applications.'
+    Assert-BridgeLauncherTest ($standaloneWatcherText.Contains('WH_KEYBOARD_LL')) 'The pin hotkey listener cannot pass Ctrl+Shift+Y through outside the Popout.'
+    Assert-BridgeLauncherTest (-not $standaloneWatcherText.Contains('RegisterHotKey')) 'The pin shortcut is globally registered and can steal Ctrl+Shift+Y from other applications.'
     Assert-BridgeLauncherTest ($standaloneWatcherText.Contains('IsVerifiedForegroundPopup(foreground)')) 'The pin hotkey is not scoped to the verified foreground ChatGPT Popout.'
     Assert-BridgeLauncherTest ($standaloneWatcherText.Contains('window.ToInt64() != expectedWindow')) 'The pin hotkey does not bind its action to the verified native Popout handle.'
     Assert-BridgeLauncherTest ($standaloneWatcherText.Contains('processId == (uint)expectedProcess')) 'The pin hotkey does not bind its action to the verified signed ChatGPT process.'
     Assert-BridgeLauncherTest ($standaloneWatcherText.Contains('[int]$inspection.popupProcessId')) 'The pin hotkey cache can bind to an unrelated ChatGPT helper process.'
-    Assert-BridgeLauncherTest ($standaloneWatcherText.Contains('Interlocked.Exchange(ref capturedP, 1)')) 'The pin hotkey does not debounce repeated P key-down events.'
+    Assert-BridgeLauncherTest ($standaloneWatcherText.Contains('private const int VK_Y = 0x59')) 'The pin hotkey does not use the approved Y key.'
+    Assert-BridgeLauncherTest ($standaloneWatcherText.Contains('Interlocked.Exchange(ref capturedY, 1)')) 'The pin hotkey does not debounce repeated Y key-down events.'
     Assert-BridgeLauncherTest ($standaloneWatcherText.Contains('SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE')) 'The pin hotkey can move, resize, or focus the Popout.'
     Assert-BridgeLauncherTest ($standaloneWatcherText.Contains("pinHotkeyScope = 'verified_foreground_chatgpt_popout'")) 'The standalone Bridge readiness marker does not expose the hotkey safety boundary.'
     Assert-BridgeLauncherTest ($standaloneWatcherText.Contains('$script:ActiveChatFingerprint')) 'The standalone Bridge does not retain the connected-chat fingerprint.'
@@ -422,7 +423,8 @@ for ($heartbeat = 0; $heartbeat -lt 15; $heartbeat += 1) {
 
     $launcherText = Get-Content -Raw -LiteralPath (Join-Path $repositoryRoot 'plugins\cogentspec\skills\cogentspec\scripts\start-cogentstack-bridge.ps1')
     Assert-BridgeLauncherTest ($launcherText.Contains('function Confirm-StandalonePopoutConnection')) 'A successful $cogentspec invocation cannot confirm the retained Popout chat.'
-    Assert-BridgeLauncherTest ($launcherText.Contains("`$popupHelperPath -Mode inspect")) 'The task Bridge does not inspect the current Popout conversation before confirming it.'
+    Assert-BridgeLauncherTest ($launcherText.Contains("Invoke-CogentSpecNativeCommand -FilePath `$popupHelperPath -ArgumentList @('-Mode', 'inspect') -TimeoutSeconds 5")) 'The task Bridge does not inspect the current Popout conversation within a bounded subprocess.'
+    Assert-BridgeLauncherTest ($launcherText.Contains('TimeoutSec = 5')) 'The Popout connection confirmation request is not bounded to five seconds.'
     Assert-BridgeLauncherTest ($launcherText.Contains("`$conversationState -ne 'identified'")) 'The task Bridge can confirm a blank or unidentified Popout conversation.'
     Assert-BridgeLauncherTest ($launcherText.Contains("`$currentConversationKey -cne `$chatFingerprint")) 'The task Bridge can confirm a connection receipt for a different conversation.'
     Assert-BridgeLauncherTest ($launcherText.Contains("chatFingerprint = `$chatFingerprint")) 'The task Bridge does not bind confirmation to the active Popout chat fingerprint.'
@@ -466,7 +468,7 @@ for ($heartbeat = 0; $heartbeat -lt 15; $heartbeat += 1) {
         launcherElapsedMs = [int]$result.launcherElapsedMs
         observedElapsedMs = [int]$timer.ElapsedMilliseconds
         directAccountCheck = $true
-        boundedAccountCheckSeconds = 8
+        boundedAccountCheckSeconds = 6
         projectDataConnection = 'ready'
         presenceVerified = [bool]$result.presenceVerified
         reuseVerified = [bool]$reuseResult.presenceVerified

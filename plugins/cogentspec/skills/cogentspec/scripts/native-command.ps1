@@ -5,8 +5,59 @@ function Invoke-CogentSpecNativeCommand {
     param(
         [Parameter(Mandatory)]
         [string]$FilePath,
-        [string[]]$ArgumentList = @()
+        [string[]]$ArgumentList = @(),
+        [ValidateRange(0, 3600)]
+        [int]$TimeoutSeconds = 0
     )
+
+    if ($TimeoutSeconds -gt 0) {
+        $captureRoot = Join-Path ([IO.Path]::GetTempPath()) ("cogentspec-native-" + [Guid]::NewGuid().ToString('N'))
+        $standardOutputPath = Join-Path $captureRoot 'stdout.txt'
+        $standardErrorPath = Join-Path $captureRoot 'stderr.txt'
+        $process = $null
+        try {
+            [void](New-Item -ItemType Directory -Path $captureRoot -Force)
+            $launchFilePath = $FilePath
+            $launchArgumentList = $ArgumentList
+            if ([IO.Path]::GetExtension($FilePath) -ieq '.ps1') {
+                $launchFilePath = (Get-Process -Id $PID -ErrorAction Stop).Path
+                $launchArgumentList = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $FilePath) + $ArgumentList
+            }
+            $process = Start-Process `
+                -FilePath $launchFilePath `
+                -ArgumentList $launchArgumentList `
+                -WindowStyle Hidden `
+                -PassThru `
+                -RedirectStandardOutput $standardOutputPath `
+                -RedirectStandardError $standardErrorPath
+            $completed = $process.WaitForExit($TimeoutSeconds * 1000)
+            if (-not $completed) {
+                & taskkill.exe /PID $process.Id /T /F 2>$null | Out-Null
+                return [pscustomobject]@{
+                    ExitCode = -1
+                    Output = ''
+                    TimedOut = $true
+                }
+            }
+            $process.WaitForExit()
+            $standardOutput = if (Test-Path -LiteralPath $standardOutputPath -PathType Leaf) {
+                Get-Content -Raw -LiteralPath $standardOutputPath
+            } else { '' }
+            $standardError = if (Test-Path -LiteralPath $standardErrorPath -PathType Leaf) {
+                Get-Content -Raw -LiteralPath $standardErrorPath
+            } else { '' }
+            return [pscustomobject]@{
+                ExitCode = [int]$process.ExitCode
+                Output = (@($standardOutput, $standardError) | Where-Object { $_ } | ForEach-Object { $_.Trim() }) -join [Environment]::NewLine
+                TimedOut = $false
+            }
+        } finally {
+            if ($process) { $process.Dispose() }
+            if (Test-Path -LiteralPath $captureRoot -PathType Container) {
+                Remove-Item -LiteralPath $captureRoot -Recurse -Force -ErrorAction SilentlyContinue
+            }
+        }
+    }
 
     $previousErrorActionPreference = $ErrorActionPreference
     $nativeOutput = ''
@@ -25,5 +76,6 @@ function Invoke-CogentSpecNativeCommand {
     return [pscustomobject]@{
         ExitCode = [int]$nativeExitCode
         Output = $nativeOutput.Trim()
+        TimedOut = $false
     }
 }

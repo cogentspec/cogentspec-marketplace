@@ -936,7 +936,7 @@ if ($Mode -eq 'inspect') {
         chatFingerprint = $chatFingerprint
         connectedChatMarkerFound = [bool]$conversation.commandMarkerFound
         manualShortcut = 'Ctrl+Shift+Space'
-        pinShortcut = 'Ctrl+Shift+P'
+        pinShortcut = 'Ctrl+Shift+Y'
     })
     return
 }

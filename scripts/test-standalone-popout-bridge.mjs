@@ -77,7 +77,7 @@ assert.match(watcherSource, /\$target -eq 'chatgpt-desktop-popup:update'[\s\S]*?
 assert.match(watcherSource, /-Mode open -UseRetainedChat -KeepPinned/);
 assert.match(productionHelperSource, /popupWindowHandle = \$popupWindow\.ToInt64\(\)/);
 assert.match(productionHelperSource, /popupProcessId = \[CogentSpec\.ChatGptPopupNative\]::GetProcessId\(\$popupWindow\)/);
-assert.match(productionHelperSource, /pinShortcut = 'Ctrl\+Shift\+P'/);
+assert.match(productionHelperSource, /pinShortcut = 'Ctrl\+Shift\+Y'/);
 assert.match(productionHelperSource, /function Get-ChatGptConversationFingerprint/);
 assert.match(productionHelperSource, /function Get-ChatGptConversationObservation/);
 assert.match(productionHelperSource, /\$speaker -cne 'You said:'/);
@@ -96,7 +96,8 @@ assert.match(watcherSource, /IsVerifiedForegroundPopup\(foreground\)/);
 assert.match(watcherSource, /window\.ToInt64\(\) != expectedWindow/);
 assert.match(watcherSource, /processId == \(uint\)expectedProcess/);
 assert.match(watcherSource, /\[int\]\$inspection\.popupProcessId/);
-assert.match(watcherSource, /Interlocked\.Exchange\(ref capturedP, 1\)/);
+assert.match(watcherSource, /private const int VK_Y = 0x59/);
+assert.match(watcherSource, /Interlocked\.Exchange\(ref capturedY, 1\)/);
 assert.match(watcherSource, /SWP_NOMOVE \| SWP_NOSIZE \| SWP_NOACTIVATE/);
 assert.match(watcherSource, /SetVerifiedPopup\(0, 0\)/);
 assert.match(watcherSource, /if \(\$TestToken\) \{ return \}/);
@@ -234,7 +235,7 @@ try {
   const ready = JSON.parse((await readFile(readyPath, "utf8")).replace(/^\uFEFF/, ""));
   assert.equal(ready.serverAcknowledged, true);
   assert.equal(ready.pluginId, "cogentspec");
-  assert.equal(ready.pinHotkey, "Ctrl+Shift+P");
+  assert.equal(ready.pinHotkey, "Ctrl+Shift+Y");
   assert.equal(ready.pinHotkeyReady, false);
   assert.equal(ready.pinHotkeyScope, "verified_foreground_chatgpt_popout");
   assert.equal(ready.popupVisible, false);
