@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [ValidateSet('inspect', 'open', 'desktop', 'dismiss', 'pin', 'unpin')]
+    [ValidateSet('inspect', 'open', 'desktop', 'recover', 'dismiss', 'pin', 'unpin')]
     [string]$Mode = 'open',
     [switch]$PasteClipboard,
     [switch]$UseRetainedChat,
@@ -782,6 +782,14 @@ function Get-ChatGptUserTurnRuntimeId($Element, $Walker = $null) {
     return ''
 }
 
+function Test-ChatGptMissingClientNotice([string[]]$Names) {
+    for ($index = 0; $index -lt ($Names.Count - 1); $index++) {
+        if ($Names[$index].Trim() -ceq 'Error submitting message' -and
+            $Names[$index + 1].Trim() -ceq 'no-client-found') { return $true }
+    }
+    return $false
+}
+
 function Get-ChatGptConversationObservation([IntPtr]$Window) {
     if ($Window -eq [IntPtr]::Zero) {
         return [ordered]@{ state = 'unknown'; currentConversationKey = ''; chatFingerprint = ''; commandMarkerFound = $false }
@@ -797,6 +805,8 @@ function Get-ChatGptConversationObservation([IntPtr]$Window) {
             [System.Windows.Automation.ControlType]::Text
         )
         $textElements = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $textCondition)
+        $noticeNames = @($textElements | ForEach-Object { [string]$_.Current.Name })
+        $clientUnavailable = Test-ChatGptMissingClientNotice -Names $noticeNames
         $markerRuntimeId = ''
         $latestUserMessageRuntimeId = ''
         for ($index = 0; $index -lt ($textElements.Count - 1); $index++) {
@@ -844,7 +854,8 @@ function Get-ChatGptConversationObservation([IntPtr]$Window) {
                 ([BitConverter]::ToString($keyDigest)).Replace('-', '').ToLowerInvariant()
             }
             return [ordered]@{
-                state = $state
+                state = if ($clientUnavailable) { 'unknown' } else { $state }
+                clientUnavailable = $clientUnavailable
                 currentConversationKey = $currentConversationKey
                 chatFingerprint = $chatFingerprint
                 commandMarkerFound = [bool]$markerRuntimeId
@@ -951,9 +962,30 @@ if ($Mode -eq 'inspect') {
         currentConversationKey = [string]$conversation.currentConversationKey
         chatFingerprint = $chatFingerprint
         connectedChatMarkerFound = [bool]$conversation.commandMarkerFound
+        clientUnavailable = ($conversation.Contains('clientUnavailable') -and [bool]$conversation.clientUnavailable)
         manualShortcut = 'Ctrl+Shift+Space'
         pinShortcut = 'Ctrl+Shift+Y'
     })
+    return
+}
+
+if ($Mode -eq 'recover') {
+    # Dispatch to the existing immutable thread, never a new standalone chat.
+    # A protocol dispatch is NOT evidence that the desktop client resumed.
+    if (-not $ThreadId) {
+        Write-Failure -Status 'task_identity_unavailable' -Reason 'Open the original saved chat in ChatGPT Desktop, then send $cogentspec there. No verified saved thread is available for automatic recovery.'
+        return
+    }
+    try {
+        Start-Process "codex://threads/$ThreadId" -ErrorAction Stop
+        Write-CompactJson ([ordered]@{
+            status = 'recovery_requested'; opened = $false; threadId = $ThreadId
+            clientResumeConfirmed = $false; popoutConnectionConfirmed = $false
+            reason = 'Requested the saved chat in ChatGPT Desktop. Send $cogentspec from that chat after it opens; the retained Popout is not yet verified.'
+        })
+    } catch {
+        Write-Failure -Status 'task_reopen_failed' -Reason 'The saved chat could not be requested in ChatGPT Desktop. Open it from the desktop chat list, then send $cogentspec.'
+    }
     return
 }
 
@@ -1083,6 +1115,13 @@ if ($Mode -in @('pin', 'unpin')) {
 }
 
 $existingPopupDismissed = $false
+if ($UseRetainedChat -and $popupWindow -ne [IntPtr]::Zero) {
+    $retainedObservation = Get-ChatGptConversationObservation -Window $popupWindow
+    if ($retainedObservation.Contains('clientUnavailable') -and [bool]$retainedObservation.clientUnavailable) {
+        Write-Failure -Status 'retained_client_unavailable' -Reason 'This retained Popout has no desktop client. Open the original saved chat in ChatGPT Desktop, then send $cogentspec there. The command was not pasted or sent into the orphaned Popout.' -Opened $true
+        return
+    }
+}
 if (-not $ThreadId -and -not $UseRetainedChat) {
     Write-Failure -Status 'task_identity_unavailable' -Reason 'Desktop Bridge could not identify the ChatGPT task that owns this popout. Return to the intended task and run CogentSpec again.'
     return

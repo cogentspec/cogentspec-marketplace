@@ -6,6 +6,11 @@ $ast = [Management.Automation.Language.Parser]::ParseFile($helper, [ref]$tokens,
 if ($errors.Count) { throw 'Popout helper has parser errors.' }
 $function = $ast.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Get-ChatGptUserTurnRuntimeId' }, $true)
 Invoke-Expression $function.Extent.Text
+$noticeFunction = $ast.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Test-ChatGptMissingClientNotice' }, $true)
+Invoke-Expression $noticeFunction.Extent.Text
+if (-not (Test-ChatGptMissingClientNotice @('Error submitting message', 'no-client-found'))) { throw 'Missing-client notice was missed.' }
+if (Test-ChatGptMissingClientNotice @('You said:', 'Why no-client-found?', 'ChatGPT said:', 'A no-client-found error can occur.')) { throw 'Transcript prose must not be a host error.' }
+if (Test-ChatGptMissingClientNotice @('Error submitting message', 'network-error')) { throw 'Unrelated error must not trigger saved-client recovery.' }
 
 class FixtureElement {
     [object]$Current

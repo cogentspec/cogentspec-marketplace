@@ -369,6 +369,14 @@ function Update-PopupPinHotkeyTarget {
         $fingerprint = if ($inspection.PSObject.Properties['chatFingerprint'] -and
             [string]$inspection.chatFingerprint -match '^[a-f0-9]{64}$') { [string]$inspection.chatFingerprint } else { '' }
         $script:VerifiedPopupVisible = $visible
+        $missingClientNotice = ($verified -and $inspection.PSObject.Properties['clientUnavailable'] -and [bool]$inspection.clientUnavailable)
+        if ($missingClientNotice -and $currentConversationKey) { $script:UnavailableConversationKey = $currentConversationKey }
+        # Dismissing a toast is not client recovery. Only a different/new command
+        # turn can release the affected identity; a blank/unknown chat stays red.
+        $script:ClientUnavailable = $missingClientNotice -or ($currentConversationKey -and
+            (Get-Variable -Name UnavailableConversationKey -Scope Script -ErrorAction SilentlyContinue) -and
+            $script:UnavailableConversationKey -eq $currentConversationKey)
+        if ($script:ClientUnavailable) { $conversationState = 'unknown' }
         $script:CurrentConversationState = $conversationState
         $script:CurrentConversationKey = $currentConversationKey
         $script:ActiveChatFingerprint = if ($verified) { $fingerprint } else { '' }
@@ -382,6 +390,7 @@ function Update-PopupPinHotkeyTarget {
         }
     } catch {
         $script:VerifiedPopupVisible = $false
+        $script:ClientUnavailable = $false
         $script:CurrentConversationState = 'unknown'
         $script:CurrentConversationKey = ''
         $script:ActiveChatFingerprint = ''
@@ -438,7 +447,21 @@ try {
                             throw 'Standalone Popout Bridge rejected an unsupported target.'
                         }
                         $composerRequired = $target -ne 'chatgpt-desktop-popup'
-                        $helperOutput = if ($target -eq 'chatgpt-desktop-popup:connect') {
+                        # Refresh before dispatch: a user may have switched chats
+                        # after the web request. Do not recover a different chat.
+                        $requestConversationKey = if ($claimed.request.PSObject.Properties['recoveryChatFingerprint']) { [string]$claimed.request.recoveryChatFingerprint } else { '' }
+                        Update-PopupPinHotkeyTarget
+                        $recoverThreadId = if ($claimed.request.PSObject.Properties['recoveryThreadId']) { [string]$claimed.request.recoveryThreadId } else { '' }
+                        if ($script:ClientUnavailable -and ($target -ne 'chatgpt-desktop-popup:connect' -or
+                            -not $requestConversationKey -or $requestConversationKey -ne $script:CurrentConversationKey -or
+                            $recoverThreadId -notmatch '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')) {
+                            throw 'This retained Popout has no desktop client. Open the original saved chat from the desktop chat list and send $cogentspec there. No verified thread is available for automatic recovery; no new chat was substituted.'
+                        }
+                        $helperOutput = if ($script:ClientUnavailable -and $target -eq 'chatgpt-desktop-popup:connect' -and
+                            $requestConversationKey -and $requestConversationKey -eq $script:CurrentConversationKey -and
+                            $recoverThreadId -match '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$') {
+                            @(& $popupHelper -Mode recover -ThreadId $recoverThreadId 2>&1)
+                        } elseif ($target -eq 'chatgpt-desktop-popup:connect') {
                             @(& $popupHelper -Mode open -UseRetainedChat -OpenWithShortcut -KeepPinned -PasteClipboard 2>&1)
                         } elseif ($target -eq 'chatgpt-desktop-popup:update') {
                             @(& $popupHelper -Mode open -UseRetainedChat -KeepPinned -PasteClipboard 2>&1)
