@@ -116,9 +116,16 @@ function Confirm-StandalonePopoutConnection([string]$SurfaceName, [string]$Conne
         $chatFingerprint = if ($inspection.PSObject.Properties['chatFingerprint']) {
             [string]$inspection.chatFingerprint
         } else { '' }
+        $currentConversationKey = if ($inspection.PSObject.Properties['currentConversationKey']) {
+            [string]$inspection.currentConversationKey
+        } else { '' }
+        $conversationState = if ($inspection.PSObject.Properties['conversationState']) {
+            [string]$inspection.conversationState
+        } else { 'unknown' }
         if ([string]$inspection.status -ne 'ready' -or -not [bool]$inspection.publisherVerified -or
-            -not [bool]$inspection.popupVerified -or -not [bool]$inspection.popupVisible -or
-            $chatFingerprint -notmatch '^[a-f0-9]{64}$') { return $false }
+            -not [bool]$inspection.popupVerified -or $conversationState -ne 'identified' -or
+            $chatFingerprint -notmatch '^[a-f0-9]{64}$' -or
+            $currentConversationKey -cne $chatFingerprint) { return $false }
         $body = @{
             contextKey = $ConnectedContextKey
             threadId = $ConnectedThreadId

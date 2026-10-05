@@ -21,7 +21,8 @@ const popupWindowFinder = productionHelperSource.slice(
   productionHelperSource.indexOf("public static IntPtr[] FindPopupWindows"),
   productionHelperSource.indexOf("public static IntPtr[] FindMainWindows"),
 );
-assert.match(popupWindowFinder, /if \(!IsWindowVisible\(window\)\) return true;/);
+assert.doesNotMatch(popupWindowFinder, /if \(!IsWindowVisible\(window\)\) return true;/);
+assert.match(popupWindowFinder, /className\.ToString\(\), "Chrome_WidgetWin_1"/);
 assert.match(productionHelperSource, /'Dismiss Popout Window'/);
 assert.match(productionHelperSource, /function Find-ChatGptPopupWindowMatch/);
 assert.match(productionHelperSource, /'Work with ChatGPT', 'Ask ChatGPT anything locally'/);
@@ -74,8 +75,11 @@ assert.match(productionHelperSource, /popupWindowHandle = \$popupWindow\.ToInt64
 assert.match(productionHelperSource, /popupProcessId = \[CogentSpec\.ChatGptPopupNative\]::GetProcessId\(\$popupWindow\)/);
 assert.match(productionHelperSource, /pinShortcut = 'Ctrl\+Shift\+P'/);
 assert.match(productionHelperSource, /function Get-ChatGptConversationFingerprint/);
+assert.match(productionHelperSource, /function Get-ChatGptConversationObservation/);
 assert.match(productionHelperSource, /\$speaker -cne 'You said:'/);
-assert.match(productionHelperSource, /\$message -cne '\$cogentspec'/);
+assert.match(productionHelperSource, /\$message -ceq '\$cogentspec'/);
+assert.match(productionHelperSource, /conversationState = \[string\]\$conversation\.state/);
+assert.match(productionHelperSource, /currentConversationKey = \[string\]\$conversation\.currentConversationKey/);
 assert.match(productionHelperSource, /chatFingerprint = \$chatFingerprint/);
 assert.match(watcherSource, /class ChatGptPopupPinHotkey/);
 assert.match(watcherSource, /WH_KEYBOARD_LL/);
@@ -89,7 +93,11 @@ assert.match(watcherSource, /SWP_NOMOVE \| SWP_NOSIZE \| SWP_NOACTIVATE/);
 assert.match(watcherSource, /SetVerifiedPopup\(0, 0\)/);
 assert.match(watcherSource, /if \(\$TestToken\) \{ return \}/);
 assert.match(watcherSource, /\$script:ActiveChatFingerprint/);
+assert.match(watcherSource, /\$script:CurrentConversationState/);
+assert.match(watcherSource, /\$script:CurrentConversationKey/);
 assert.match(watcherSource, /popupVisible=' \+ \$script:VerifiedPopupVisible/);
+assert.match(watcherSource, /conversationState=' \+ \[Uri\]::EscapeDataString/);
+assert.match(watcherSource, /currentConversationKey=' \+ \[Uri\]::EscapeDataString/);
 assert.match(watcherSource, /chatFingerprint=' \+ \[Uri\]::EscapeDataString/);
 assert.match(projectWatcherSource, /targetRequestId -eq 'chatgpt-desktop-popup:connect'[\s\S]*?'-UseRetainedChat', '-OpenWithShortcut'/);
 assert.match(projectWatcherSource, /targetRequestId -eq 'chatgpt-desktop-popup:update'[\s\S]*?\$arguments \+= '-UseRetainedChat'/);
@@ -103,13 +111,12 @@ const composerFailureSource = productionHelperSource.slice(
 assert.doesNotMatch(composerFailureSource, /SendControlShiftSpace|RequestClosePopup|restoreDeadline/);
 assert.match(composerFailureSource, /A Popout connection failure must fail in the Popout/);
 assert.doesNotMatch(productionHelperSource, /found the retained ChatGPT popout but could not make it ready for reconnection/);
-assert.doesNotMatch(popupWindowFinder, /className\.ToString\(\), "Chrome_WidgetWin_1"/);
 assert.doesNotMatch(popupWindowFinder, /bool isPopupToolWindow/);
 
 await writeFile(helper, `
 param([string]$Mode, [switch]$UseRetainedChat, [switch]$OpenWithShortcut, [switch]$KeepPinned, [switch]$PasteClipboard)
 if ($Mode -eq 'inspect') {
-  [ordered]@{ status = 'ready'; publisherVerified = $true; popupVerified = $true; popupVisible = $true; popupWindowHandle = 1234; popupProcessId = 5678; chatFingerprint = '${"a".repeat(64)}' } | ConvertTo-Json -Compress
+  [ordered]@{ status = 'ready'; publisherVerified = $true; popupVerified = $true; popupVisible = $false; popupWindowHandle = 1234; popupProcessId = 5678; conversationState = 'identified'; currentConversationKey = '${"a".repeat(64)}'; chatFingerprint = '${"a".repeat(64)}' } | ConvertTo-Json -Compress
   return
 }
 [ordered]@{ mode = $Mode; useRetainedChat = [bool]$UseRetainedChat; openWithShortcut = [bool]$OpenWithShortcut; keepPinned = [bool]$KeepPinned; pasteClipboard = [bool]$PasteClipboard } |
@@ -206,7 +213,10 @@ try {
   assert.equal(getAttempts >= 2, true);
   assert.equal(markerStatuses.includes("retrying"), true);
   assert.equal(calls.some((call) => call.method === "GET" && call.url.includes("/api/plugin/desktop-popout-actions?pluginId=cogentspec&pluginVersion=0.6.58")), true);
-  assert.equal(calls.some((call) => call.method === "GET" && call.url.includes("popupVisible=true") && call.url.includes(`chatFingerprint=${"a".repeat(64)}`)), true);
+  assert.equal(calls.some((call) => call.method === "GET" && call.url.includes("popupVisible=false")
+    && call.url.includes("conversationState=identified")
+    && call.url.includes(`currentConversationKey=${"a".repeat(64)}`)
+    && call.url.includes(`chatFingerprint=${"a".repeat(64)}`)), true);
   assert.equal(calls.some((call) => call.method === "PATCH" && JSON.parse(call.body).action === "claim"), true);
   assert.equal(calls.some((call) => call.method === "PATCH" && JSON.parse(call.body).action === "complete"), true);
   const helperResult = JSON.parse((await readFile(helperArguments, "utf8")).replace(/^\uFEFF/, ""));
@@ -217,7 +227,9 @@ try {
   assert.equal(ready.pinHotkey, "Ctrl+Shift+P");
   assert.equal(ready.pinHotkeyReady, false);
   assert.equal(ready.pinHotkeyScope, "verified_foreground_chatgpt_popout");
-  assert.equal(ready.popupVisible, true);
+  assert.equal(ready.popupVisible, false);
+  assert.equal(ready.conversationState, "identified");
+  assert.equal(ready.currentConversationKey, "a".repeat(64));
   assert.equal(ready.connectedChatMarkerFound, true);
   console.log(JSON.stringify({ status: "valid", lifecycle, transientRecovery: true, markerStatuses: [...new Set(markerStatuses)], getAttempts, calls: calls.length, helper: helperResult, workerOutput: output.stdout.trim() }));
 } finally {

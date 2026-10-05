@@ -518,10 +518,9 @@ namespace CogentSpec {
                 }
                 if (!matchesProcess) return true;
 
-                StringBuilder title = new StringBuilder(256);
-                GetWindowText(window, title, title.Capacity);
-                if (!String.Equals(title.ToString(), "ChatGPT", StringComparison.Ordinal)) return true;
-                if (!IsWindowVisible(window)) return true;
+                StringBuilder className = new StringBuilder(128);
+                GetClassName(window, className, className.Capacity);
+                if (!String.Equals(className.ToString(), "Chrome_WidgetWin_1", StringComparison.Ordinal)) return true;
 
                 popupWindows.Add(window);
                 return true;
@@ -541,7 +540,7 @@ namespace CogentSpec {
                         break;
                     }
                 }
-                if (!matchesProcess || !IsWindowVisible(window)) return true;
+                if (!matchesProcess) return true;
 
                 StringBuilder className = new StringBuilder(128);
                 GetClassName(window, className, className.Capacity);
@@ -735,38 +734,75 @@ function Find-VerifiedChatGptComposer([IntPtr]$Window) {
     return $null
 }
 
-function Get-ChatGptConversationFingerprint([IntPtr]$Window) {
-    if ($Window -eq [IntPtr]::Zero) { return '' }
+function Get-ChatGptConversationObservation([IntPtr]$Window) {
+    if ($Window -eq [IntPtr]::Zero) {
+        return [ordered]@{ state = 'unknown'; currentConversationKey = ''; chatFingerprint = ''; commandMarkerFound = $false }
+    }
     try {
         Add-Type -AssemblyName UIAutomationClient -ErrorAction Stop
         $root = [System.Windows.Automation.AutomationElement]::FromHandle($Window)
-        if ($null -eq $root) { return '' }
+        if ($null -eq $root) {
+            return [ordered]@{ state = 'unknown'; currentConversationKey = ''; chatFingerprint = ''; commandMarkerFound = $false }
+        }
         $textCondition = [System.Windows.Automation.PropertyCondition]::new(
             [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
             [System.Windows.Automation.ControlType]::Text
         )
         $textElements = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $textCondition)
         $markerRuntimeId = ''
+        $latestUserMessageRuntimeId = ''
         for ($index = 0; $index -lt ($textElements.Count - 1); $index++) {
             $speaker = (([string]$textElements.Item($index).Current.Name) -replace '[\u200B-\u200D\uFEFF]', '').Trim()
             if ($speaker -cne 'You said:') { continue }
             $message = (([string]$textElements.Item($index + 1).Current.Name) -replace '[\u200B-\u200D\uFEFF]', '').Trim()
-            if ($message -cne '$cogentspec') { continue }
             $runtimeId = @($textElements.Item($index + 1).GetRuntimeId())
-            if ($runtimeId.Count -gt 0) { $markerRuntimeId = $runtimeId -join '.' }
+            if ($runtimeId.Count -eq 0) { continue }
+            $runtimeIdText = $runtimeId -join '.'
+            $latestUserMessageRuntimeId = $runtimeIdText
+            if ($message -ceq '$cogentspec') { $markerRuntimeId = $runtimeIdText }
         }
-        if (-not $markerRuntimeId) { return '' }
-        $fingerprintInput = "$($Window.ToInt64())|$markerRuntimeId"
+        $composer = Find-VerifiedChatGptComposer -Window $Window
+        $composerRuntimeId = if ($null -ne $composer) { @($composer.GetRuntimeId()) -join '.' } else { '' }
+        $state = if ($markerRuntimeId -or $latestUserMessageRuntimeId) { 'identified' }
+            elseif ($composerRuntimeId) { 'blank' }
+            else { 'unknown' }
+        $identityRuntimeId = if ($markerRuntimeId) { "marker:$markerRuntimeId" }
+            elseif ($latestUserMessageRuntimeId) { "message:$latestUserMessageRuntimeId" }
+            elseif ($composerRuntimeId) { "blank:$composerRuntimeId" }
+            else { '' }
+        if (-not $identityRuntimeId) {
+            return [ordered]@{ state = 'unknown'; currentConversationKey = ''; chatFingerprint = ''; commandMarkerFound = $false }
+        }
         $algorithm = [Security.Cryptography.SHA256]::Create()
         try {
-            $digest = $algorithm.ComputeHash([Text.Encoding]::UTF8.GetBytes($fingerprintInput))
-            return ([BitConverter]::ToString($digest)).Replace('-', '').ToLowerInvariant()
+            $chatFingerprint = ''
+            if ($markerRuntimeId) {
+                $markerInput = "$($Window.ToInt64())|$markerRuntimeId"
+                $markerDigest = $algorithm.ComputeHash([Text.Encoding]::UTF8.GetBytes($markerInput))
+                $chatFingerprint = ([BitConverter]::ToString($markerDigest)).Replace('-', '').ToLowerInvariant()
+            }
+            $currentConversationKey = if ($chatFingerprint) { $chatFingerprint } else {
+                $keyInput = "$($Window.ToInt64())|$identityRuntimeId"
+                $keyDigest = $algorithm.ComputeHash([Text.Encoding]::UTF8.GetBytes($keyInput))
+                ([BitConverter]::ToString($keyDigest)).Replace('-', '').ToLowerInvariant()
+            }
+            return [ordered]@{
+                state = $state
+                currentConversationKey = $currentConversationKey
+                chatFingerprint = $chatFingerprint
+                commandMarkerFound = [bool]$markerRuntimeId
+            }
         } finally {
             $algorithm.Dispose()
         }
     } catch {
-        return ''
+        return [ordered]@{ state = 'unknown'; currentConversationKey = ''; chatFingerprint = ''; commandMarkerFound = $false }
     }
+}
+
+function Get-ChatGptConversationFingerprint([IntPtr]$Window) {
+    $observation = Get-ChatGptConversationObservation -Window $Window
+    return [string]$observation.chatFingerprint
 }
 
 function Get-ChatGptComposerText($Composer) {
@@ -836,7 +872,8 @@ $temporaryTopmostWindow = [IntPtr]::Zero
 $workflowPinApplied = $false
 
 if ($Mode -eq 'inspect') {
-    $chatFingerprint = Get-ChatGptConversationFingerprint -Window $popupWindow
+    $conversation = Get-ChatGptConversationObservation -Window $popupWindow
+    $chatFingerprint = [string]$conversation.chatFingerprint
     Write-CompactJson ([ordered]@{
         status = 'ready'
         opened = $false
@@ -852,8 +889,10 @@ if ($Mode -eq 'inspect') {
         popupWindowHandle = $popupWindow.ToInt64()
         popupProcessId = [CogentSpec.ChatGptPopupNative]::GetProcessId($popupWindow)
         popupForeground = [CogentSpec.ChatGptPopupNative]::IsForeground($popupWindow)
+        conversationState = [string]$conversation.state
+        currentConversationKey = [string]$conversation.currentConversationKey
         chatFingerprint = $chatFingerprint
-        connectedChatMarkerFound = [bool]$chatFingerprint
+        connectedChatMarkerFound = [bool]$conversation.commandMarkerFound
         manualShortcut = 'Ctrl+Shift+Space'
         pinShortcut = 'Ctrl+Shift+P'
     })

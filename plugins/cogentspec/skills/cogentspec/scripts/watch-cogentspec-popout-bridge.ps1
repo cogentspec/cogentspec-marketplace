@@ -30,6 +30,8 @@ $ErrorActionPreference = 'Stop'
 $script:PinHotkeyReady = $false
 $script:PinHotkeyError = ''
 $script:VerifiedPopupVisible = $false
+$script:CurrentConversationState = 'unknown'
+$script:CurrentConversationKey = ''
 $script:ActiveChatFingerprint = ''
 
 function Write-ReadyMarker([bool]$ServerAcknowledged, [string]$Status = 'ready', [string]$LastError = '') {
@@ -49,6 +51,8 @@ function Write-ReadyMarker([bool]$ServerAcknowledged, [string]$Status = 'ready',
         pinHotkeyScope = 'verified_foreground_chatgpt_popout'
         pinHotkeyError = [string]$script:PinHotkeyError
         popupVisible = [bool]$script:VerifiedPopupVisible
+        conversationState = [string]$script:CurrentConversationState
+        currentConversationKey = [string]$script:CurrentConversationKey
         connectedChatMarkerFound = [bool]$script:ActiveChatFingerprint
     } | ConvertTo-Json | Set-Content -LiteralPath $ReadyPath -Encoding UTF8
 }
@@ -349,14 +353,21 @@ function Update-PopupPinHotkeyTarget {
         if (-not $inspectionJson) { throw 'The verified ChatGPT Popout helper returned no inspection result.' }
         $inspection = $inspectionJson | ConvertFrom-Json
         $verified = [string]$inspection.status -eq 'ready' -and [bool]$inspection.publisherVerified -and
-            [bool]$inspection.popupVerified -and [bool]$inspection.popupVisible -and
+            [bool]$inspection.popupVerified -and
             [long]$inspection.popupWindowHandle -ne 0 -and [int]$inspection.popupProcessId -gt 0
+        $visible = $verified -and [bool]$inspection.popupVisible
+        $conversationState = if ($verified -and $inspection.PSObject.Properties['conversationState'] -and
+            [string]$inspection.conversationState -in @('blank', 'identified')) { [string]$inspection.conversationState } else { 'unknown' }
+        $currentConversationKey = if ($verified -and $inspection.PSObject.Properties['currentConversationKey'] -and
+            [string]$inspection.currentConversationKey -match '^[a-f0-9]{64}$') { [string]$inspection.currentConversationKey } else { '' }
         $fingerprint = if ($inspection.PSObject.Properties['chatFingerprint'] -and
             [string]$inspection.chatFingerprint -match '^[a-f0-9]{64}$') { [string]$inspection.chatFingerprint } else { '' }
-        $script:VerifiedPopupVisible = $verified
+        $script:VerifiedPopupVisible = $visible
+        $script:CurrentConversationState = $conversationState
+        $script:CurrentConversationKey = $currentConversationKey
         $script:ActiveChatFingerprint = if ($verified) { $fingerprint } else { '' }
         if ($script:PinHotkeyReady) {
-            if ($verified) {
+            if ($visible) {
                 [CogentSpec.ChatGptPopupPinHotkey]::SetVerifiedPopup([long]$inspection.popupWindowHandle, [int]$inspection.popupProcessId)
             } else {
                 [CogentSpec.ChatGptPopupPinHotkey]::SetVerifiedPopup(0, 0)
@@ -364,6 +375,8 @@ function Update-PopupPinHotkeyTarget {
         }
     } catch {
         $script:VerifiedPopupVisible = $false
+        $script:CurrentConversationState = 'unknown'
+        $script:CurrentConversationKey = ''
         $script:ActiveChatFingerprint = ''
         if ($script:PinHotkeyReady) { [CogentSpec.ChatGptPopupPinHotkey]::SetVerifiedPopup(0, 0) }
     }
@@ -392,6 +405,10 @@ try {
     while ($true) {
         try {
             $presenceQuery = $query + '&popupVisible=' + $script:VerifiedPopupVisible.ToString().ToLowerInvariant()
+            $presenceQuery += '&conversationState=' + [Uri]::EscapeDataString($script:CurrentConversationState)
+            if ($script:CurrentConversationKey) {
+                $presenceQuery += '&currentConversationKey=' + [Uri]::EscapeDataString($script:CurrentConversationKey)
+            }
             if ($script:ActiveChatFingerprint) {
                 $presenceQuery += '&chatFingerprint=' + [Uri]::EscapeDataString($script:ActiveChatFingerprint)
             }
