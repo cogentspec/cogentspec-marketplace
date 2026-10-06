@@ -40,79 +40,179 @@ function Initialize-PopoutWorkspaceLifecycle {
     Add-Type -TypeDefinition @'
 using System;
 using System.Diagnostics;
+using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Threading;
+
 namespace CogentSpec {
+ // Pure decision model: regression tests do not call native UI APIs.
+ public sealed class PopoutLifecycleModel {
+  public bool ControllerHidden, ManualReveal;
+  long closedSince = -1;
+  public string Decide(string state, bool associated, bool exists, bool visible, bool popupForeground, bool ownerGone, long now) {
+   if (!associated || !exists) { ControllerHidden = false; closedSince = -1; return "none"; }
+   if (state == "closed" || ownerGone) {
+    if (closedSince < 0) closedSince = now;
+    return now - closedSince >= 15000 ? "dismiss" : "none";
+   }
+   closedSince = -1;
+   if (state == "unknown" || state == "unmanaged") return "none";
+   if (state == "active") {
+    ManualReveal = false;
+    if (ControllerHidden && !visible) return "restore";
+    if (visible) ControllerHidden = false;
+    return "none";
+   }
+   if (ControllerHidden && visible) { ControllerHidden = false; ManualReveal = true; }
+   if (popupForeground || ManualReveal) return "none";
+   if ((state == "hidden" || state == "blurred") && visible) {
+    ControllerHidden = true; return "hide";
+   }
+   return "none";
+  }
+ }
  public static class PopoutWorkspaceLifecycle {
   [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
   [DllImport("user32.dll")] static extern bool IsWindow(IntPtr h);
   [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr h);
   [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
   [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern int GetWindowText(IntPtr h, StringBuilder s, int n);
-  [DllImport("user32.dll")] static extern bool PostMessage(IntPtr h, uint m, IntPtr w, IntPtr l);
-  static IntPtr owner, popup;
-  static uint ownerPid, popupPid;
-  static bool managed, closing;
-  static DateTime closeRequestedAt;
-  public static string LastAction = "none";
-  public static string Decide(string state, bool associated, bool ownerGone, bool popupForeground, bool ownerForeground) {
-   if (!associated) return "none";
-   if (state == "closed" || (ownerGone && (state == "unknown" || state == "unmanaged"))) return "dismiss";
-   // Tab changes, taskbar switches and refresh grace must never destroy the
-   // Popout instance. Its verified fingerprint is bound to that instance.
-   return "none";
+  [DllImport("user32.dll")] static extern bool ShowWindowAsync(IntPtr h, int command);
+  [DllImport("user32.dll")] static extern bool PostMessage(IntPtr h, uint message, IntPtr w, IntPtr l);
+  static readonly object gate = new object();
+  static IntPtr popup;
+  static uint popupPid;
+  static PopoutLifecycleModel model = new PopoutLifecycleModel();
+  static string sessionPath;
+  static int ownerPid;
+  static long ownerStartedAt, sequence;
+  static bool closing;
+  static DateTime actionAt;
+  static Thread thread;
+  static volatile bool running;
+  public static string LastAction = "none", State = "unmanaged", Authority = "awaiting_extension";
+  static string Root {get {return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CogentSpec", "browser-lifecycle");}}
+  static bool MatchesPopup() {
+   uint actual;
+   return popup != IntPtr.Zero && IsWindow(popup) && GetWindowThreadProcessId(popup, out actual) != 0 && actual == popupPid;
   }
-  static bool Matches(IntPtr h, uint expected) {
-   uint actual; return h != IntPtr.Zero && IsWindow(h) && GetWindowThreadProcessId(h, out actual) != 0 && actual == expected;
+  static bool OwnerAlive() {
+   try {using (var process = Process.GetProcessById(ownerPid)) return process.StartTime.ToUniversalTime().Ticks == ownerStartedAt && !process.HasExited;}
+   catch {return false;}
   }
   public static void Observe(long handle, int pid) {
-   if (handle == 0 || pid <= 0) return;
-   var h = new IntPtr(handle);
-   if (!Matches(h, (uint)pid)) return;
-   if (popup != h || popupPid != (uint)pid) {
-    managed = Matches(owner, ownerPid); closing = false; LastAction = "none";
-   }
-   popup = h; popupPid = (uint)pid;
-  }
-  static void RememberOwner(IntPtr foreground) {
-   uint pid; GetWindowThreadProcessId(foreground, out pid);
-   try {
-    string name = Process.GetProcessById((int)pid).ProcessName.ToLowerInvariant();
-    var title = new StringBuilder(512); GetWindowText(foreground, title, title.Capacity);
-    // Never associate an unrelated foreground browser or the ChatGPT Popout.
-    if ((name == "chrome" || name == "msedge" || name == "firefox" || name == "codex")
-      && title.ToString().IndexOf("CogentSpec", StringComparison.OrdinalIgnoreCase) >= 0) {
-      owner = foreground; ownerPid = pid; managed = true;
+   lock(gate) {
+    uint actual; var h = new IntPtr(handle);
+    if (h == IntPtr.Zero || !IsWindow(h) || GetWindowThreadProcessId(h, out actual) == 0 || actual != (uint)pid) return;
+    if (h != popup || popupPid != actual) {
+     // A new instance requires a new active workspace association. Never carry
+     // the old chat proof or an old close command onto a replacement window.
+     model = new PopoutLifecycleModel(); sessionPath = null; sequence = 0; closing = false;
+     LastAction = "none"; Authority = "awaiting_association";
     }
-   } catch { }
-  }
-  public static void Tick(string state) {
-   IntPtr foreground = GetForegroundWindow();
-   if (state == "active" && foreground != popup) RememberOwner(foreground);
-   bool ownerGone = managed && !Matches(owner, ownerPid);
-   if (!Matches(popup, popupPid)) {
-    if (closing) LastAction = "dismiss_confirmed";
-    return;
-   }
-   if (closing) {
-    if ((DateTime.UtcNow - closeRequestedAt).TotalSeconds < 5) return;
-    // WM_CLOSE acceptance is not proof of destruction. Some host versions
-    // retain hidden windows; expose that limitation rather than claiming close.
-    LastAction = "dismiss_unconfirmed";
-    if (!IsWindowVisible(popup) || state == "closed") return;
-    closing = false; // explicitly reopened by the user, never reopen ourselves
-   }
-   if (!managed) return;
-   // Actual native owner destruction handles browser exit/crash without relying
-   // on a heartbeat timeout. Explicit pagehide handles closing just the tab.
-   string action = Decide(state, managed, ownerGone, foreground == popup, foreground == owner);
-   if (action == "dismiss") {
-    closing = PostMessage(popup, 0x0010, IntPtr.Zero, IntPtr.Zero); // WM_CLOSE, Popout only
-    closeRequestedAt = DateTime.UtcNow;
-    LastAction = closing ? "dismiss_requested" : "dismiss_failed";
-    return;
+    popup = h; popupPid = actual;
    }
   }
+  public static bool IsControllerHidden(long handle) {
+   lock(gate) {return popup.ToInt64() == handle && model.ControllerHidden && MatchesPopup() && !IsWindowVisible(popup) && !closing;}
+  }
+  static string[] Read(string path) {
+   var fields = File.ReadAllText(path).Split('|');
+   Guid id; long n, ticks, started; int pid;
+   if (fields.Length != 7 || fields[0] != "1" || !Guid.TryParseExact(fields[1], "D", out id)
+    || !Int64.TryParse(fields[2], out n) || n < 1 || !Int64.TryParse(fields[4], out ticks)
+    || ticks < DateTime.MinValue.Ticks || ticks > DateTime.MaxValue.Ticks
+    || !Int32.TryParse(fields[5], out pid) || pid <= 0 || !Int64.TryParse(fields[6], out started)) return null;
+   if (fields[3] != "active" && fields[3] != "hidden" && fields[3] != "blurred" && fields[3] != "closed" && fields[3] != "disconnected") return null;
+   if (Path.GetFileNameWithoutExtension(path) != id.ToString()) return null;
+   return fields;
+  }
+  static bool Fresh(string[] fields) {
+   double age = (DateTime.UtcNow - new DateTime(Int64.Parse(fields[4]), DateTimeKind.Utc)).TotalSeconds;
+   return age >= -1 && age <= 10 && fields[3] != "disconnected";
+  }
+  static void Bind(IntPtr foreground) {
+   uint pid; GetWindowThreadProcessId(foreground, out pid);
+   var title = new StringBuilder(512); GetWindowText(foreground, title, title.Capacity);
+   if (title.ToString().IndexOf("CogentSpec", StringComparison.OrdinalIgnoreCase) < 0) return;
+   using (var process = Process.GetProcessById((int)pid)) {
+    if (process.ProcessName != "chrome" && process.ProcessName != "msedge") return;
+    string chosen = null; string[] choice = null;
+    foreach (var path in Directory.GetFiles(Root, "*.state")) {
+     var f = Read(path);
+     if (f == null || !Fresh(f) || f[3] != "active" || Int32.Parse(f[5]) != (int)pid
+      || Int64.Parse(f[6]) != process.StartTime.ToUniversalTime().Ticks) continue;
+     if (chosen != null) {Authority = "ambiguous_browser_session"; return;}
+     chosen = path; choice = f;
+    }
+    if (chosen != null) {
+     sessionPath = chosen; ownerPid = (int)pid; ownerStartedAt = Int64.Parse(choice[6]);
+     sequence = 0; Authority = "local_extension";
+    }
+   }
+  }
+  public static void Tick(string ignoredServerState) {
+   lock(gate) {
+    if (!Directory.Exists(Root)) {Authority = "awaiting_extension"; State = "unmanaged"; return;}
+    var foreground = GetForegroundWindow();
+    if (!MatchesPopup()) {
+     if (closing) LastAction = "dismiss_confirmed";
+     model.ControllerHidden = false; return;
+    }
+    if (sessionPath == null && foreground != popup) Bind(foreground);
+    bool associated = sessionPath != null;
+    if (!associated) {State = "unmanaged"; return;}
+    bool ownerGone = !OwnerAlive();
+    State = "unknown";
+    try {
+     var fields = Read(sessionPath);
+     if (fields != null && Int32.Parse(fields[5]) == ownerPid && Int64.Parse(fields[6]) == ownerStartedAt
+      && Int64.Parse(fields[2]) >= sequence && Fresh(fields)) {
+      sequence = Int64.Parse(fields[2]); State = fields[3];
+     }
+    } catch {}
+    if (closing) {
+     if ((DateTime.UtcNow-actionAt).TotalSeconds >= 5) LastAction = "dismiss_unconfirmed";
+     return;
+    }
+    bool visible = IsWindowVisible(popup);
+    // ShowWindowAsync is asynchronous. Wait for the outcome before allowing
+    // the model to interpret a still-visible window as a manual reopen.
+    if (LastAction == "hide_requested" && visible) {
+     if ((DateTime.UtcNow-actionAt).TotalSeconds < 3) return;
+     model.ControllerHidden = false; LastAction = "hide_failed"; return;
+    }
+    if (LastAction == "hide_requested" && !visible) LastAction = "hide_confirmed";
+    if (LastAction == "restore_requested" && !visible) {
+     if ((DateTime.UtcNow-actionAt).TotalSeconds < 3) return;
+     LastAction = "restore_failed"; return;
+    }
+    if (LastAction == "restore_requested" && visible) LastAction = "restore_confirmed";
+    string action = model.Decide(State, associated, true, visible, foreground == popup, ownerGone, DateTime.UtcNow.Ticks/TimeSpan.TicksPerMillisecond);
+    if (action == "hide" || action == "restore") {
+     // SW_HIDE and SW_SHOWNOACTIVATE preserve HWND and topmost style. No keys,
+     // activation, window replacement, main-window close or process termination.
+     bool requested = ShowWindowAsync(popup, action == "hide" ? 0 : 4);
+     actionAt = DateTime.UtcNow;
+     LastAction = action + (requested ? "_requested" : "_failed");
+     if (!requested && action == "hide") model.ControllerHidden = false;
+    } else if (action == "dismiss") {
+     closing = PostMessage(popup, 0x0010, IntPtr.Zero, IntPtr.Zero);
+     actionAt = DateTime.UtcNow; LastAction = closing ? "dismiss_requested" : "dismiss_failed";
+    }
+   }
+  }
+  public static void Start() {
+   lock(gate) {
+    if (running) return;
+    running = true;
+    thread = new Thread(delegate() {
+     while(running) {try {Tick(null);} catch {Authority = "local_controller_error";} Thread.Sleep(250);}
+    }); thread.IsBackground = true; thread.Start();
+   }
+  }
+  public static void Stop() {running = false; if (thread != null) thread.Join(1000);}
  }
 }
 '@
@@ -121,6 +221,7 @@ $script:WorkspaceLifecycleState = 'unmanaged'
 $script:WorkspaceLifecycleSeenAt = [DateTime]::MinValue
 if (-not $TestToken) {
     Initialize-PopoutWorkspaceLifecycle
+    [CogentSpec.PopoutWorkspaceLifecycle]::Start()
 }
 
 function Write-ReadyMarker([bool]$ServerAcknowledged, [string]$Status = 'ready', [string]$LastError = '') {
@@ -144,8 +245,9 @@ function Write-ReadyMarker([bool]$ServerAcknowledged, [string]$Status = 'ready',
         currentConversationKey = [string]$script:CurrentConversationKey
         connectedChatMarkerFound = [bool]$script:ActiveChatFingerprint
         popupWindowHandle = [long]$script:CurrentPopupWindowHandle
-        workspaceLifecycleState = [string]$script:WorkspaceLifecycleState
+        workspaceLifecycleState = if ($TestToken) { [string]$script:WorkspaceLifecycleState } else { [CogentSpec.PopoutWorkspaceLifecycle]::State }
         workspaceLifecycleAction = if ($TestToken) { 'test' } else { [CogentSpec.PopoutWorkspaceLifecycle]::LastAction }
+        workspaceLifecycleAuthority = if ($TestToken) { 'test' } else { [CogentSpec.PopoutWorkspaceLifecycle]::Authority }
     } | ConvertTo-Json | Set-Content -LiteralPath $ReadyPath -Encoding UTF8
 }
 
@@ -439,6 +541,15 @@ namespace CogentSpec {
 }
 
 function Update-PopupPinHotkeyTarget {
+    # Only the same verified, controller-hidden native instance can retain its
+    # previous exact-chat proof. It cannot be interacted with while hidden.
+    # Once visible, normal inspection runs before the next server presence POST.
+    if (-not $TestToken -and $script:CurrentPopupWindowHandle -ne 0 -and
+        [CogentSpec.PopoutWorkspaceLifecycle]::IsControllerHidden([long]$script:CurrentPopupWindowHandle)) {
+        $script:VerifiedPopupVisible = $false
+        if ($script:PinHotkeyReady) { [CogentSpec.ChatGptPopupPinHotkey]::SetVerifiedPopup(0, 0) }
+        return
+    }
     try {
         $inspectionArguments = @{ Mode = 'inspect' }
         if ($script:CurrentPopupWindowHandle -ne 0) {
@@ -618,6 +729,7 @@ try {
         } while ([DateTime]::UtcNow -lt $waitDeadline)
     }
 } finally {
+    if (-not $TestToken) { [CogentSpec.PopoutWorkspaceLifecycle]::Stop() }
     if ($script:PinHotkeyReady) {
         [CogentSpec.ChatGptPopupPinHotkey]::Stop()
         $script:PinHotkeyReady = $false
