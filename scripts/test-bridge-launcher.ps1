@@ -418,7 +418,7 @@ Start-Sleep -Milliseconds 5500
     Assert-BridgeLauncherTest ($standaloneWatcherText.Contains('private const int VK_Y = 0x59')) 'The pin hotkey does not use the approved Y key.'
     Assert-BridgeLauncherTest ($standaloneWatcherText.Contains('Interlocked.Exchange(ref capturedY, 1)')) 'The pin hotkey does not debounce repeated Y key-down events.'
     Assert-BridgeLauncherTest ($standaloneWatcherText.Contains('SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE')) 'The pin hotkey can move, resize, or focus the Popout.'
-    Assert-BridgeLauncherTest ($standaloneWatcherText.Contains("pinHotkeyScope = 'verified_foreground_chatgpt_popout'")) 'The standalone Bridge readiness marker does not expose the hotkey safety boundary.'
+    Assert-BridgeLauncherTest ($standaloneWatcherText.Contains("pinHotkeyScope = 'verified_popout_or_bound_active_workspace'")) 'The standalone Bridge readiness marker does not expose the hotkey safety boundary.'
     Assert-BridgeLauncherTest ($standaloneWatcherText.Contains('$script:ActiveChatFingerprint')) 'The standalone Bridge does not retain the connected-chat fingerprint.'
     Assert-BridgeLauncherTest ($standaloneWatcherText.Contains('$script:CurrentConversationState')) 'The standalone Bridge does not retain whether the current conversation is blank, identified, or unknown.'
     Assert-BridgeLauncherTest ($standaloneWatcherText.Contains('$script:CurrentConversationKey')) 'The standalone Bridge does not retain the current conversation independently from Popout visibility.'

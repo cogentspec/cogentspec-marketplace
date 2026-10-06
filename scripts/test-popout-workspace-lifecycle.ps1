@@ -9,6 +9,16 @@ if($fn.Extent.Text -match 'browser-lifecycle|local_extension|awaiting_extension|
 Invoke-Expression $fn.Extent.Text
 Initialize-PopoutWorkspaceLifecycle
 $count=0
+# Compile hotkey C# without starting a hook or touching a native window.
+$pin=$ast.Find({param($n)$n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Initialize-PopupPinHotkey'},$true)
+$pinCode=[regex]::Match($pin.Extent.Text,"(?s)Add-Type -TypeDefinition @'\r?\n(.*?)\r?\n'@").Groups[1].Value
+if(-not $pinCode){throw 'Pin hotkey C# not found'}
+Add-Type -TypeDefinition $pinCode
+foreach($verified in @($false,$true)){foreach($popup in @($false,$true)){foreach($bound in @($false,$true)){foreach($active in @($false,$true)){foreach($fresh in @($false,$true)){foreach($work in @($false,$true)){
+ $expected=$verified -and ($popup -or ($bound -and $active -and $fresh -and $work))
+ if([CogentSpec.ChatGptPopupPinHotkey]::PinAllowed($verified,$popup,$bound,$active,$fresh,$work) -ne $expected){throw 'Pin scope permutation failed'}
+ $count++
+}}}}}}
 function Check($m,$state,$exists,$visible,$popupFocus,$workFocus,$expected){
  $actual=$m.Decide($state,$exists,$visible,$popupFocus,$workFocus)
  if($actual -ne $expected){throw "$state expected $expected got $actual"}
@@ -26,8 +36,8 @@ foreach($away in @('hidden','blurred')){
 $m=[CogentSpec.PopoutLifecycleModel]::new()
 Check $m 'blurred' $true $true $true $false 'none'
 Check $m 'hidden' $true $true $false $false 'hide'
-Check $m 'hidden' $true $true $true $false 'none'
-Check $m 'hidden' $true $true $false $false 'none'
+Check $m 'hidden' $true $true $true $false 'hide'
+Check $m 'hidden' $true $true $false $false 'hide'
 Check $m 'active' $true $true $false $true 'none'
 Check $m 'hidden' $true $true $false $false 'hide'
 foreach($state in @('unknown','departed','closing','closed','disconnected','unmanaged')){
@@ -42,5 +52,7 @@ Check $m 'active' $true $false $false $true 'none'
 Check $m 'close' $true $false $false $false 'close'
 Check $m 'close' $false $false $false $false 'none'
 $mirror=Join-Path $PSScriptRoot '..\plugins\cogentstack\skills\cogentstack\scripts\watch-cogentspec-popout-bridge.ps1'
+if(-not $source.Contains('WorkspacePinAllowed(target.ToInt64())')){throw 'Owner-scoped workspace pin target missing'}
+if(-not $source.Contains('ToggleTopmost(target)')){throw 'Pin must toggle the verified Popout, not the browser'}
 if((Get-Content -Raw $mirror) -ne $source){throw 'Watcher mirrors differ'}
 @{status='passed';assertions=$count;nativeWindowCallsPerformed=$false;physicalAcceptance='not_performed'}|ConvertTo-Json -Compress

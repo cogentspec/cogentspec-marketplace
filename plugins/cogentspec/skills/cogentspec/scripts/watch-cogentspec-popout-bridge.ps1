@@ -59,8 +59,10 @@ namespace CogentSpec {
     return "none";
    }
    if (state!="hidden" && state!="blurred") return "none";
-   if (ControllerHidden && visible) {ControllerHidden=false; ManualReveal=true;}
-   if (popupForeground || ManualReveal) return "none";
+   // A hidden work document means a different tab is selected. Popout focus
+   // must not override that explicit event. Blur alone may be Popout interaction.
+   if (state=="blurred" && ControllerHidden && visible) {ControllerHidden=false; ManualReveal=true;}
+   if (state=="blurred" && (popupForeground || ManualReveal)) return "none";
    if (visible) {ControllerHidden=true; return "hide";}
    return "none";
   }
@@ -85,6 +87,11 @@ namespace CogentSpec {
   static volatile bool running;
   public static string State="unknown", LastAction="none", Authority="awaiting_workspace_owner";
   public static string BoundOwner {get {lock(gate){return owner;}}}
+  public static bool AllowsWorkspacePin(long h) {
+   lock(gate){return owner!="" && popup.ToInt64()==h && Matches() &&
+    State=="active" && (DateTime.UtcNow-received).TotalSeconds<=10 &&
+    WorkspaceForeground();}
+  }
   static bool Matches() {uint p;return popup!=IntPtr.Zero&&IsWindow(popup)&&GetWindowThreadProcessId(popup,out p)!=0&&p==popupPid;}
   static bool WorkspaceForeground() {
    if (browser==IntPtr.Zero||GetForegroundWindow()!=browser||!IsWindow(browser))return false;
@@ -201,7 +208,7 @@ function Write-ReadyMarker([bool]$ServerAcknowledged, [string]$Status = 'ready',
         lastError = $LastError
         pinHotkey = 'Ctrl+Shift+Y'
         pinHotkeyReady = [bool]$script:PinHotkeyReady
-        pinHotkeyScope = 'verified_foreground_chatgpt_popout'
+        pinHotkeyScope = 'verified_popout_or_bound_active_workspace'
         pinHotkeyError = [string]$script:PinHotkeyError
         popupVisible = [bool]$script:VerifiedPopupVisible
         conversationState = [string]$script:CurrentConversationState
@@ -447,6 +454,25 @@ namespace CogentSpec {
         }
 
         private static bool IsVerifiedForegroundPopup(IntPtr window) {
+            return window == GetForegroundWindow() && IsVerifiedPopup(window);
+        }
+
+        public static bool PinAllowed(bool verified, bool popupForeground, bool bound, bool active, bool fresh, bool workspaceForeground) {
+            return verified && (popupForeground || (bound && active && fresh && workspaceForeground));
+        }
+
+        private static bool WorkspacePinAllowed(long target) {
+            // Controller and hook are separate Add-Type assemblies.
+            foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies()) {
+                var controller = assembly.GetType("CogentSpec.PopoutWorkspaceLifecycle");
+                if (controller == null) continue;
+                try { return (bool)controller.GetMethod("AllowsWorkspacePin").Invoke(null, new object[] { target }); }
+                catch { return false; }
+            }
+            return false;
+        }
+
+        private static bool IsVerifiedPopup(IntPtr window) {
             long expectedWindow = Interlocked.Read(ref verifiedPopupWindow);
             int expectedProcess = Interlocked.CompareExchange(ref verifiedProcessId, 0, 0);
             if (expectedWindow == 0 || expectedProcess <= 0 || window.ToInt64() != expectedWindow) return false;
@@ -481,9 +507,12 @@ namespace CogentSpec {
                     if (keyDown && IsPressed(VK_CONTROL) && IsPressed(VK_SHIFT) &&
                         !IsPressed(VK_MENU) && !IsPressed(VK_LWIN) && !IsPressed(VK_RWIN)) {
                         IntPtr foreground = GetForegroundWindow();
-                        if (IsVerifiedForegroundPopup(foreground)) {
+                        IntPtr target = new IntPtr(Interlocked.Read(ref verifiedPopupWindow));
+                        if (PinAllowed(IsVerifiedPopup(target),
+                            IsVerifiedForegroundPopup(foreground), true, true, true,
+                            WorkspacePinAllowed(target.ToInt64()))) {
                             Interlocked.Exchange(ref capturedY, 1);
-                            ToggleTopmost(foreground);
+                            ToggleTopmost(target);
                             return new IntPtr(1);
                         }
                     }
