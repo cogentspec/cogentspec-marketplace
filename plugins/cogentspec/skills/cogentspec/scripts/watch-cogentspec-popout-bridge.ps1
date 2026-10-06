@@ -34,6 +34,101 @@ $script:CurrentConversationState = 'unknown'
 $script:CurrentConversationKey = ''
 $script:ActiveChatFingerprint = ''
 $script:CurrentPopupWindowHandle = 0
+# Separate from the keyboard hook: no key synthesis, no process termination.
+function Initialize-PopoutWorkspaceLifecycle {
+    if ($null -ne ('CogentSpec.PopoutWorkspaceLifecycle' -as [type])) { return }
+    Add-Type -TypeDefinition @'
+using System;
+using System.Diagnostics;
+using System.Runtime.InteropServices;
+using System.Text;
+namespace CogentSpec {
+ public static class PopoutWorkspaceLifecycle {
+  [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
+  [DllImport("user32.dll")] static extern bool IsWindow(IntPtr h);
+  [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr h);
+  [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+  [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern int GetWindowText(IntPtr h, StringBuilder s, int n);
+  [DllImport("user32.dll")] static extern bool PostMessage(IntPtr h, uint m, IntPtr w, IntPtr l);
+  static IntPtr owner, popup;
+  static uint ownerPid, popupPid;
+  static bool managed, closing;
+  static DateTime closeRequestedAt;
+  static bool temporaryDismissal;
+  public static bool RetainConnection { get; private set; }
+  public static string LastAction = "none";
+  public static string Decide(string state, bool associated, bool ownerGone, bool popupForeground, bool ownerForeground) {
+   if (!associated) return "none";
+   if (state == "closed" || (ownerGone && state != "active" && state != "blurred" && state != "hidden")) return "dismiss";
+   if (popupForeground) return "none";
+   if (state == "hidden" || state == "closing" ||
+     ((state == "active" || state == "blurred") && !ownerForeground)) return "hide";
+   return "none";
+  }
+  static bool Matches(IntPtr h, uint expected) {
+   uint actual; return h != IntPtr.Zero && IsWindow(h) && GetWindowThreadProcessId(h, out actual) != 0 && actual == expected;
+  }
+  public static void Observe(long handle, int pid) {
+   if (handle == 0 || pid <= 0) return;
+   var h = new IntPtr(handle);
+   if (!Matches(h, (uint)pid)) return;
+   if (popup != h || popupPid != (uint)pid) {
+    managed = Matches(owner, ownerPid); closing = false; RetainConnection = false; LastAction = "none";
+   }
+   popup = h; popupPid = (uint)pid;
+  }
+  static void RememberOwner(IntPtr foreground) {
+   uint pid; GetWindowThreadProcessId(foreground, out pid);
+   try {
+    string name = Process.GetProcessById((int)pid).ProcessName.ToLowerInvariant();
+    var title = new StringBuilder(512); GetWindowText(foreground, title, title.Capacity);
+    // Never associate an unrelated foreground browser or the ChatGPT Popout.
+    if ((name == "chrome" || name == "msedge" || name == "firefox" || name == "codex")
+      && title.ToString().IndexOf("CogentSpec", StringComparison.OrdinalIgnoreCase) >= 0) {
+      owner = foreground; ownerPid = pid; managed = true;
+    }
+   } catch { }
+  }
+  public static void Tick(string state) {
+   IntPtr foreground = GetForegroundWindow();
+   if (state == "active" && foreground != popup) RememberOwner(foreground);
+   bool ownerGone = managed && !Matches(owner, ownerPid);
+   bool workspaceClosed = state == "closed" || (ownerGone && state != "active" && state != "blurred" && state != "hidden");
+   if (workspaceClosed) { RetainConnection = false; temporaryDismissal = false; }
+   if (!Matches(popup, popupPid)) {
+    if (closing) LastAction = temporaryDismissal ? "hide_confirmed" : "dismiss_confirmed";
+    return;
+   }
+   if (closing) {
+    if ((DateTime.UtcNow - closeRequestedAt).TotalSeconds < 5) return;
+    // WM_CLOSE acceptance is not proof of destruction. Some host versions
+    // retain hidden windows; expose that limitation rather than claiming close.
+    LastAction = temporaryDismissal ? "hide_unconfirmed" : "dismiss_unconfirmed";
+    if (!IsWindowVisible(popup) || state == "closed") return;
+    closing = false; // explicitly reopened by the user, never reopen ourselves
+   }
+   if (!managed) return;
+   // Actual native owner destruction handles browser exit/crash without relying
+   // on a heartbeat timeout. Explicit pagehide handles closing just the tab.
+   string action = Decide(state, managed, ownerGone, foreground == popup, foreground == owner);
+   if (action == "dismiss" || (action == "hide" && foreground != IntPtr.Zero && IsWindowVisible(popup))) {
+    temporaryDismissal = action == "hide";
+    closing = PostMessage(popup, 0x0010, IntPtr.Zero, IntPtr.Zero); // WM_CLOSE, Popout only
+    RetainConnection = closing && temporaryDismissal;
+    closeRequestedAt = DateTime.UtcNow;
+    LastAction = closing ? (temporaryDismissal ? "hide_requested" : "dismiss_requested") : "dismiss_failed";
+    return;
+   }
+  }
+ }
+}
+'@
+}
+$script:WorkspaceLifecycleState = 'unmanaged'
+$script:WorkspaceLifecycleSeenAt = [DateTime]::MinValue
+if (-not $TestToken) {
+    Initialize-PopoutWorkspaceLifecycle
+}
 
 function Write-ReadyMarker([bool]$ServerAcknowledged, [string]$Status = 'ready', [string]$LastError = '') {
     if (-not $ReadyPath) { return }
@@ -56,6 +151,8 @@ function Write-ReadyMarker([bool]$ServerAcknowledged, [string]$Status = 'ready',
         currentConversationKey = [string]$script:CurrentConversationKey
         connectedChatMarkerFound = [bool]$script:ActiveChatFingerprint
         popupWindowHandle = [long]$script:CurrentPopupWindowHandle
+        workspaceLifecycleState = [string]$script:WorkspaceLifecycleState
+        workspaceLifecycleAction = if ($TestToken) { 'test' } else { [CogentSpec.PopoutWorkspaceLifecycle]::LastAction }
     } | ConvertTo-Json | Set-Content -LiteralPath $ReadyPath -Encoding UTF8
 }
 
@@ -348,6 +445,13 @@ namespace CogentSpec {
     }
 }
 
+function Preserve-IntentionalDismissalIdentity($Inspection, [bool]$Retain, [string]$State, [string]$Key, [string]$Fingerprint, [bool]$Unavailable) {
+    return $Retain -and -not $Unavailable -and $State -eq 'identified' -and
+        $Key -match '^[a-f0-9]{64}$' -and $Key -eq $Fingerprint -and
+        [bool]$Inspection.publisherVerified -and $Inspection.PSObject.Properties['popupDetected'] -and
+        -not [bool]$Inspection.popupDetected
+}
+
 function Update-PopupPinHotkeyTarget {
     try {
         $inspectionArguments = @{ Mode = 'inspect' }
@@ -358,10 +462,25 @@ function Update-PopupPinHotkeyTarget {
         $inspectionJson = @($inspectionOutput | ForEach-Object { [string]$_ } | Where-Object { $_.Trim().StartsWith('{') } | Select-Object -Last 1)
         if (-not $inspectionJson) { throw 'The verified ChatGPT Popout helper returned no inspection result.' }
         $inspection = $inspectionJson | ConvertFrom-Json
+        $retain = -not $TestToken -and [CogentSpec.PopoutWorkspaceLifecycle]::RetainConnection
+        $unavailable = (Get-Variable -Name ClientUnavailable -Scope Script -ErrorAction SilentlyContinue) -and $script:ClientUnavailable
+        if (Preserve-IntentionalDismissalIdentity $inspection $retain $script:CurrentConversationState `
+            $script:CurrentConversationKey $script:ActiveChatFingerprint ([bool]$unavailable)) {
+            # This is the same observed conversation, intentionally dismissed.
+            # No connection is created here. A reappearing/new window must pass
+            # fresh inspection; ambiguous detection or any failure goes red.
+            $script:VerifiedPopupVisible = $false
+            $script:CurrentPopupWindowHandle = 0
+            if ($script:PinHotkeyReady) { [CogentSpec.ChatGptPopupPinHotkey]::SetVerifiedPopup(0, 0) }
+            return
+        }
         $verified = [string]$inspection.status -eq 'ready' -and [bool]$inspection.publisherVerified -and
             [bool]$inspection.popupVerified -and
             [long]$inspection.popupWindowHandle -ne 0 -and [int]$inspection.popupProcessId -gt 0
         $visible = $verified -and [bool]$inspection.popupVisible
+        if ($verified -and -not $TestToken) {
+            [CogentSpec.PopoutWorkspaceLifecycle]::Observe([long]$inspection.popupWindowHandle, [int]$inspection.popupProcessId)
+        }
         $conversationState = if ($verified -and $inspection.PSObject.Properties['conversationState'] -and
             [string]$inspection.conversationState -in @('blank', 'identified')) { [string]$inspection.conversationState } else { 'unknown' }
         $currentConversationKey = if ($verified -and $inspection.PSObject.Properties['currentConversationKey'] -and
@@ -431,6 +550,11 @@ try {
             }
             $listing = Invoke-PopoutApi -Method Get -Path "/api/plugin/desktop-popout-actions$presenceQuery" -Token $token
             $consecutiveFailures = 0
+            if ($listing.PSObject.Properties['workspaceLifecycle']) {
+                $script:WorkspaceLifecycleState = [string]$listing.workspaceLifecycle.state
+                $script:WorkspaceLifecycleSeenAt = [DateTime]::UtcNow
+            } else { $script:WorkspaceLifecycleState = 'unmanaged' }
+            if (-not $TestToken) { [CogentSpec.PopoutWorkspaceLifecycle]::Tick($script:WorkspaceLifecycleState) }
             Write-ReadyMarker -ServerAcknowledged $true -Status 'ready'
             $request = $listing.request
             if ($request) {
@@ -513,6 +637,10 @@ try {
             if ($remainingMilliseconds -le 0) { break }
             Start-Sleep -Milliseconds ([Math]::Min(1500, $remainingMilliseconds))
             Update-PopupPinHotkeyTarget
+            if (([DateTime]::UtcNow - $script:WorkspaceLifecycleSeenAt).TotalSeconds -gt 90) {
+                $script:WorkspaceLifecycleState = 'unknown'
+            }
+            if (-not $TestToken) { [CogentSpec.PopoutWorkspaceLifecycle]::Tick($script:WorkspaceLifecycleState) }
         } while ([DateTime]::UtcNow -lt $waitDeadline)
     }
 } finally {
