@@ -30,6 +30,11 @@ const popoutStartupSource = await readFile(join(repositoryRoot, "plugins", "coge
 assert.match(popoutStartupSource, /\(\[DateTime\]\$marker\.acknowledgedAt\)\.ToUniversalTime\(\)/);
 assert.match(popoutStartupSource, /\$age\.TotalSeconds -ge 0/);
 assert.doesNotMatch(popoutStartupSource, /DateTime\]::Parse\(\[string\]\$marker\.acknowledgedAt/);
+assert.match(popoutStartupSource, /\$deadline = \[DateTime\]::UtcNow\.AddSeconds\(30\)/);
+assert.ok(watcherSource.indexOf("Write-StartupMarker 'native_initialization'") < watcherSource.indexOf('function Initialize-PopoutWorkspaceLifecycle'));
+assert.match(watcherSource, /Write-StartupMarker 'protected_credential_read'/);
+assert.match(watcherSource, /Write-StartupMarker 'popout_inspection'/);
+assert.match(watcherSource, /Write-StartupMarker 'service_acknowledgment'/);
 const popupWindowFinder = productionHelperSource.slice(
   productionHelperSource.indexOf("public static IntPtr[] FindPopupWindows"),
   productionHelperSource.indexOf("public static IntPtr[] FindMainWindows"),
@@ -247,6 +252,7 @@ try {
   assert.deepEqual(helperResult, { mode: "open", useRetainedChat: true, openWithShortcut: true, keepPinned: true, pasteClipboard: true });
   const ready = JSON.parse((await readFile(readyPath, "utf8")).replace(/^\uFEFF/, ""));
   assert.equal(ready.serverAcknowledged, true);
+  assert.equal(ready.startupStage, 'service_acknowledgment');
   assert.equal(ready.pluginId, "cogentspec");
   assert.equal(ready.pinHotkey, "Ctrl+Shift+Y");
   assert.equal(ready.pinHotkeyReady, false);

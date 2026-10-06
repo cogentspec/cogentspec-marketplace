@@ -92,7 +92,9 @@ New-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Na
 $creation = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $commandLine }
 if ([int]$creation.ReturnValue -ne 0 -or [int]$creation.ProcessId -le 0) { throw 'Standalone Popout Bridge could not be started.' }
 $processId = [int]$creation.ProcessId
-$deadline = [DateTime]::UtcNow.AddSeconds(10)
+# Cold native compilation and inspection precede the bounded 12-second API
+# request. Ten seconds could kill a healthy worker before that request finished.
+$deadline = [DateTime]::UtcNow.AddSeconds(30)
 do {
     Start-Sleep -Milliseconds 100
     if (-not (Get-Process -Id $processId -ErrorAction SilentlyContinue)) { break }
@@ -106,12 +108,13 @@ do {
 
 if (-not (Test-Path -LiteralPath $readyPath -PathType Leaf)) {
     Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue
-    throw 'Standalone Popout Bridge started, but CogentSpec did not acknowledge it.'
+    throw 'Standalone Popout Bridge produced no startup marker within 30 seconds.'
 }
 $ready = Get-Content -Raw -LiteralPath $readyPath | ConvertFrom-Json
 if ([int]$ready.processId -ne $processId -or -not [bool]$ready.serverAcknowledged) {
     Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue
-    throw 'Standalone Popout Bridge did not become ready.'
+    $stage = if ($ready.PSObject.Properties['startupStage']) { [string]$ready.startupStage } else { [string]$ready.status }
+    throw "Standalone Popout Bridge did not become ready within 30 seconds (stage: $stage)."
 }
 [ordered]@{
     processId = $processId

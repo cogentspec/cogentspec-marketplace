@@ -36,6 +36,37 @@ $script:ActiveChatFingerprint = ''
 $script:CurrentPopupWindowHandle = 0
 $script:LifecycleWorkerId = [Guid]::NewGuid().ToString('D')
 $script:LifecyclePopupHandle = 0
+$script:StartupStage = 'native_initialization'
+function Write-MarkerJson($Value) {
+    if (-not $ReadyPath) { return }
+    $parent = Split-Path -Parent $ReadyPath
+    if ($parent) { [void](New-Item -ItemType Directory -Path $parent -Force) }
+    $temporary = "$ReadyPath.$PID.tmp"
+    try {
+        [IO.File]::WriteAllText($temporary, ($Value | ConvertTo-Json), [Text.UTF8Encoding]::new($false))
+        for ($attempt=0; $attempt -lt 10; $attempt++) {
+            try {
+                if ([IO.File]::Exists($ReadyPath)) { [IO.File]::Replace($temporary,$ReadyPath,[System.Management.Automation.Language.NullString]::Value) }
+                else { [IO.File]::Move($temporary,$ReadyPath) }
+                return
+            } catch [IO.IOException] {
+                if ($attempt -eq 9) { throw }
+                Start-Sleep -Milliseconds 50
+            }
+        }
+    } finally {
+        if ([IO.File]::Exists($temporary)) { [IO.File]::Delete($temporary) }
+    }
+}
+function Write-StartupMarker([string]$Stage) {
+    $script:StartupStage = $Stage
+    if (-not $ReadyPath) { return }
+    [void](New-Item -ItemType Directory -Path (Split-Path -Parent $ReadyPath) -Force)
+    Write-MarkerJson ([ordered]@{ processId=$PID; pluginId=$PluginId; pluginVersion=$PluginVersion;
+        serverAcknowledged=$false; acknowledgedAt=[DateTime]::UtcNow.ToString('o');
+        status='starting'; startupStage=$Stage })
+}
+Write-StartupMarker 'native_initialization'
 # Native lifecycle is independent from keyboard shortcuts and account-wide rows.
 function Initialize-PopoutWorkspaceLifecycle {
     if ($null -ne ('CogentSpec.PopoutWorkspaceLifecycle' -as [type])) { return }
@@ -199,13 +230,14 @@ function Write-ReadyMarker([bool]$ServerAcknowledged, [string]$Status = 'ready',
     if (-not $ReadyPath) { return }
     $parent = Split-Path -Parent $ReadyPath
     if ($parent) { [void](New-Item -ItemType Directory -Path $parent -Force) }
-    [ordered]@{
+    Write-MarkerJson ([ordered]@{
         processId = $PID
         pluginId = $PluginId
         pluginVersion = $PluginVersion
         serverAcknowledged = $ServerAcknowledged
         acknowledgedAt = [DateTime]::UtcNow.ToString('o')
         status = $Status
+        startupStage = $script:StartupStage
         lastError = $LastError
         pinHotkey = 'Ctrl+Shift+Y'
         pinHotkeyReady = [bool]$script:PinHotkeyReady
@@ -219,7 +251,7 @@ function Write-ReadyMarker([bool]$ServerAcknowledged, [string]$Status = 'ready',
         workspaceLifecycleState = if ($TestToken) { [string]$script:WorkspaceLifecycleState } else { [CogentSpec.PopoutWorkspaceLifecycle]::State }
         workspaceLifecycleAction = if ($TestToken) { 'test' } else { [CogentSpec.PopoutWorkspaceLifecycle]::LastAction }
         workspaceLifecycleAuthority = if ($TestToken) { 'test' } else { [CogentSpec.PopoutWorkspaceLifecycle]::Authority }
-    } | ConvertTo-Json | Set-Content -LiteralPath $ReadyPath -Encoding UTF8
+    })
 }
 
 function Unprotect-CogentSpecValue([string]$Value) {
@@ -608,6 +640,7 @@ if ($TestToken) {
     $popupHelper = $TestHelperPath
 } else {
     if ($ServiceUrl -ne 'https://cogentspec.com') { throw 'The production standalone Popout Bridge only connects to CogentSpec.' }
+    Write-StartupMarker 'protected_credential_read'
     $token = Read-DesktopToken
     $popupHelper = Join-Path $PSScriptRoot 'open-chatgpt-popup.ps1'
 }
@@ -616,8 +649,11 @@ if (-not (Test-Path -LiteralPath $popupHelper -PathType Leaf)) { throw 'The veri
 $query = '?pluginId=' + [Uri]::EscapeDataString($PluginId) + '&pluginVersion=' + [Uri]::EscapeDataString($PluginVersion)
 $polls = 0
 $consecutiveFailures = 0
+Write-StartupMarker 'keyboard_hook_initialization'
 Initialize-PopupPinHotkey
+Write-StartupMarker 'popout_inspection'
 Update-PopupPinHotkeyTarget
+Write-StartupMarker 'service_acknowledgment'
 
 try {
     while ($true) {
@@ -635,6 +671,7 @@ try {
             if ($script:ActiveChatFingerprint) {
                 $presenceQuery += '&chatFingerprint=' + [Uri]::EscapeDataString($script:ActiveChatFingerprint)
             }
+            $script:StartupStage = 'service_acknowledgment'
             $listing = Invoke-PopoutApi -Method Get -Path "/api/plugin/desktop-popout-actions$presenceQuery" -Token $token
             $consecutiveFailures = 0
             if (-not $TestToken) {
