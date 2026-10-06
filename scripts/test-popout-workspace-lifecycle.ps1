@@ -1,52 +1,46 @@
 $ErrorActionPreference = 'Stop'
 $watcher = Join-Path $PSScriptRoot '..\plugins\cogentspec\skills\cogentspec\scripts\watch-cogentspec-popout-bridge.ps1'
-$tokens = $null; $errors = $null
-$ast = [Management.Automation.Language.Parser]::ParseFile($watcher, [ref]$tokens, [ref]$errors)
-if ($errors.Count) {throw 'Watcher parse failed'}
-$initializer = $ast.Find({param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Initialize-PopoutWorkspaceLifecycle'}, $true)
-Invoke-Expression $initializer.Extent.Text
+$source=Get-Content -Raw -LiteralPath $watcher
+$tokens=$null; $errors=$null
+$ast=[Management.Automation.Language.Parser]::ParseFile($watcher,[ref]$tokens,[ref]$errors)
+if($errors.Count){throw 'Watcher parse failed'}
+$fn=$ast.Find({param($n)$n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Initialize-PopoutWorkspaceLifecycle'},$true)
+if($fn.Extent.Text -match 'browser-lifecycle|local_extension|awaiting_extension|SendKeys|keybd_event|SendInput'){throw 'Extension or synthetic shortcuts remain'}
+Invoke-Expression $fn.Extent.Text
 Initialize-PopoutWorkspaceLifecycle
-$script:Count = 0
-function Check($model, $state, $visible, $foreground, $now, $expected, $associated=$true, $exists=$true, $ownerGone=$false) {
-    $actual = $model.Decide($state, $associated, $exists, $visible, $foreground, $ownerGone, $now)
-    if ($actual -ne $expected) {throw "At ${now}, ${state}: expected $expected; got $actual"}
-    $script:Count++
+$count=0
+function Check($m,$state,$exists,$visible,$popupFocus,$workFocus,$expected){
+ $actual=$m.Decide($state,$exists,$visible,$popupFocus,$workFocus)
+ if($actual -ne $expected){throw "$state expected $expected got $actual"}
+ $script:count++
 }
-foreach ($state in @('hidden', 'blurred')) {
-    $m = [CogentSpec.PopoutLifecycleModel]::new()
-    Check $m 'active' $true $false 0 'none'
-    Check $m $state $true $false 1 'hide'
-    Check $m $state $false $false 2 'none'
-    Check $m 'active' $false $false 3 'restore'
-    Check $m 'active' $true $false 4 'none'
+foreach($away in @('hidden','blurred')){
+ $m=[CogentSpec.PopoutLifecycleModel]::new()
+ Check $m 'active' $true $true $false $true 'none'
+ Check $m $away $true $true $false $false 'hide'
+ Check $m $away $true $false $false $false 'none'
+ Check $m 'active' $true $false $false $false 'none'
+ Check $m 'active' $true $false $false $true 'restore'
+ Check $m 'active' $true $true $false $true 'none'
 }
-$m = [CogentSpec.PopoutLifecycleModel]::new()
-Check $m 'blurred' $true $true 0 'none'
-Check $m 'active' $false $false 1 'none'
-Check $m 'hidden' $true $false 2 'hide'
-Check $m 'hidden' $true $true 3 'none'
-Check $m 'hidden' $true $false 4 'none'
-Check $m 'active' $true $false 5 'none'
-Check $m 'hidden' $true $false 6 'hide'
-Check $m 'unknown' $false $false 7 'none'
-Check $m 'closed' $false $false 10 'none'
-Check $m 'closed' $false $false 15009 'none'
-Check $m 'closed' $false $false 15010 'dismiss'
-$m = [CogentSpec.PopoutLifecycleModel]::new()
-Check $m 'closed' $true $false 0 'none'
-Check $m 'active' $true $false 14000 'none'
-Check $m 'closed' $true $false 15000 'none'
-Check $m 'closed' $true $false 30000 'dismiss'
-$m = [CogentSpec.PopoutLifecycleModel]::new()
-Check $m 'unknown' $false $false 0 'none' $true $true $true
-Check $m 'unknown' $false $false 15000 'dismiss' $true $true $true
-foreach ($state in @('active', 'hidden', 'blurred', 'closed', 'unknown', 'unmanaged')) {
-    foreach ($visible in @($true,$false)) {
-        foreach ($foreground in @($true,$false)) {
-            $m = [CogentSpec.PopoutLifecycleModel]::new()
-            Check $m $state $visible $foreground 50000 'none' $false
-            Check $m $state $visible $foreground 50000 'none' $true $false
-        }
-    }
+$m=[CogentSpec.PopoutLifecycleModel]::new()
+Check $m 'blurred' $true $true $true $false 'none'
+Check $m 'hidden' $true $true $false $false 'hide'
+Check $m 'hidden' $true $true $true $false 'none'
+Check $m 'hidden' $true $true $false $false 'none'
+Check $m 'active' $true $true $false $true 'none'
+Check $m 'hidden' $true $true $false $false 'hide'
+foreach($state in @('unknown','departed','closing','closed','disconnected','unmanaged')){
+ $m=[CogentSpec.PopoutLifecycleModel]::new()
+ Check $m $state $true $true $false $false 'none'
+ Check $m $state $true $false $false $true 'none'
 }
-@{status='passed'; assertions=$script:Count; nativeWindowCallsPerformed=$false; physicalAcceptance='not_performed'} | ConvertTo-Json -Compress
+$m=[CogentSpec.PopoutLifecycleModel]::new()
+Check $m 'hidden' $true $true $false $false 'hide'
+Check $m 'active' $false $false $false $true 'none'
+Check $m 'active' $true $false $false $true 'none'
+Check $m 'close' $true $false $false $false 'close'
+Check $m 'close' $false $false $false $false 'none'
+$mirror=Join-Path $PSScriptRoot '..\plugins\cogentstack\skills\cogentstack\scripts\watch-cogentspec-popout-bridge.ps1'
+if((Get-Content -Raw $mirror) -ne $source){throw 'Watcher mirrors differ'}
+@{status='passed';assertions=$count;nativeWindowCallsPerformed=$false;physicalAcceptance='not_performed'}|ConvertTo-Json -Compress

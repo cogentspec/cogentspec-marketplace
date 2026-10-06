@@ -1,4 +1,6 @@
-# Popout lifecycle candidate
+# Rejected Popout lifecycle prototype — not a product dependency
+
+The user rejected browser-extension installation on 2026-10-06. The production watcher source no longer consumes this channel or starts its native lifecycle controller. Do not install, register, publish or recommend this prototype as a fix. Files are retained only as historical test/reference material; the installation instructions below describe the rejected candidate, not a supported onboarding flow.
 
 This Chrome/Edge extension and local Windows native host are not installed or physically accepted yet. No credentials or chat contents are read; no shortcuts are synthesised.
 
