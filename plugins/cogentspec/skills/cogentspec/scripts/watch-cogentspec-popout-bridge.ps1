@@ -176,6 +176,9 @@ namespace CogentSpec {
         private static extern IntPtr GetForegroundWindow();
 
         [DllImport("user32.dll")]
+        private static extern IntPtr GetAncestor(IntPtr window, uint flags);
+
+        [DllImport("user32.dll")]
         private static extern bool IsWindow(IntPtr window);
 
         [DllImport("user32.dll")]
@@ -267,6 +270,26 @@ namespace CogentSpec {
         public static string LastToggleStatus { get { return lastToggleStatus; } }
         public static bool LastTogglePinned { get { return lastTogglePinned != 0; } }
         public static long LastToggleUtcTicks { get { return Interlocked.Read(ref lastToggleUtcTicks); } }
+
+        // Never activate, move, close, or re-pin a window. The publisher/window
+        // verification is refreshed by the existing inspection boundary.
+        public static bool ShouldAutoUnpin(string state, bool verified, bool pinned,
+            bool foregroundKnown, bool foregroundIsPopup) {
+            return verified && pinned && foregroundKnown &&
+                (state == "hidden" || (state == "blurred" && !foregroundIsPopup));
+        }
+
+        public static bool UnpinWhenWorkspaceAway(string state) {
+            if (state != "hidden" && state != "blurred") return false;
+            IntPtr popup = new IntPtr(Interlocked.Read(ref verifiedPopupWindow));
+            if (!IsVerifiedForegroundPopup(popup) || !IsTopmost(popup)) return false;
+            IntPtr foreground = GetForegroundWindow();
+            if (foreground == IntPtr.Zero) return false;
+            if (!ShouldAutoUnpin(state, true, true, foreground != IntPtr.Zero,
+                foreground == popup || GetAncestor(foreground, 3) == popup)) return false;
+            return SetWindowPos(popup, HWND_NOTOPMOST, 0, 0, 0, 0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE) && !IsTopmost(popup);
+        }
 
         private static void HookThreadMain() {
             callback = HookCallback;
@@ -399,6 +422,20 @@ function Update-PopupPinHotkeyTarget {
     }
 }
 
+function Update-WorkspaceAwayPin {
+    if (-not $script:PinHotkeyReady -or -not $script:VerifiedPopupVisible) { return }
+    $focusVariable = Get-Variable -Name WorkspaceFocus -Scope Script -ErrorAction SilentlyContinue
+    if (-not $focusVariable -or -not $focusVariable.Value) { return }
+    $focus = $focusVariable.Value
+    try {
+        $age = ([DateTime]::UtcNow - ([DateTime]$focus.updatedAt).ToUniversalTime()).TotalSeconds
+        if ($age -lt 0 -or $age -gt 15) { return }
+        if ([string]$focus.conversationKey -ne $script:CurrentConversationKey -or
+            $script:CurrentConversationState -notin @('blank', 'identified')) { return }
+        [void][CogentSpec.ChatGptPopupPinHotkey]::UnpinWhenWorkspaceAway([string]$focus.state)
+    } catch { }
+}
+
 if ($TestToken) {
     if ($ServiceUrl -notmatch '^https?://(localhost|127\.0\.0\.1)(:\d+)?$' -or -not $TestHelperPath) {
         throw 'Test tokens are restricted to a loopback service and an explicit helper.'
@@ -430,6 +467,8 @@ try {
                 $presenceQuery += '&chatFingerprint=' + [Uri]::EscapeDataString($script:ActiveChatFingerprint)
             }
             $listing = Invoke-PopoutApi -Method Get -Path "/api/plugin/desktop-popout-actions$presenceQuery" -Token $token
+            $script:WorkspaceFocus = if ($listing.PSObject.Properties['workspaceFocus']) { $listing.workspaceFocus } else { $null }
+            Update-WorkspaceAwayPin
             $consecutiveFailures = 0
             Write-ReadyMarker -ServerAcknowledged $true -Status 'ready'
             $request = $listing.request
@@ -513,6 +552,7 @@ try {
             if ($remainingMilliseconds -le 0) { break }
             Start-Sleep -Milliseconds ([Math]::Min(1500, $remainingMilliseconds))
             Update-PopupPinHotkeyTarget
+            Update-WorkspaceAwayPin
         } while ([DateTime]::UtcNow -lt $waitDeadline)
     }
 } finally {
