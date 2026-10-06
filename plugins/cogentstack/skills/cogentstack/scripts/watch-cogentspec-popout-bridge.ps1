@@ -54,15 +54,12 @@ namespace CogentSpec {
   static uint ownerPid, popupPid;
   static bool managed, closing;
   static DateTime closeRequestedAt;
-  static bool temporaryDismissal;
-  public static bool RetainConnection { get; private set; }
   public static string LastAction = "none";
   public static string Decide(string state, bool associated, bool ownerGone, bool popupForeground, bool ownerForeground) {
    if (!associated) return "none";
-   if (state == "closed" || (ownerGone && state != "active" && state != "blurred" && state != "hidden")) return "dismiss";
-   if (popupForeground) return "none";
-   if (state == "hidden" || state == "closing" ||
-     ((state == "active" || state == "blurred") && !ownerForeground)) return "hide";
+   if (state == "closed" || (ownerGone && (state == "unknown" || state == "unmanaged"))) return "dismiss";
+   // Tab changes, taskbar switches and refresh grace must never destroy the
+   // Popout instance. Its verified fingerprint is bound to that instance.
    return "none";
   }
   static bool Matches(IntPtr h, uint expected) {
@@ -73,7 +70,7 @@ namespace CogentSpec {
    var h = new IntPtr(handle);
    if (!Matches(h, (uint)pid)) return;
    if (popup != h || popupPid != (uint)pid) {
-    managed = Matches(owner, ownerPid); closing = false; RetainConnection = false; LastAction = "none";
+    managed = Matches(owner, ownerPid); closing = false; LastAction = "none";
    }
    popup = h; popupPid = (uint)pid;
   }
@@ -93,17 +90,15 @@ namespace CogentSpec {
    IntPtr foreground = GetForegroundWindow();
    if (state == "active" && foreground != popup) RememberOwner(foreground);
    bool ownerGone = managed && !Matches(owner, ownerPid);
-   bool workspaceClosed = state == "closed" || (ownerGone && state != "active" && state != "blurred" && state != "hidden");
-   if (workspaceClosed) { RetainConnection = false; temporaryDismissal = false; }
    if (!Matches(popup, popupPid)) {
-    if (closing) LastAction = temporaryDismissal ? "hide_confirmed" : "dismiss_confirmed";
+    if (closing) LastAction = "dismiss_confirmed";
     return;
    }
    if (closing) {
     if ((DateTime.UtcNow - closeRequestedAt).TotalSeconds < 5) return;
     // WM_CLOSE acceptance is not proof of destruction. Some host versions
     // retain hidden windows; expose that limitation rather than claiming close.
-    LastAction = temporaryDismissal ? "hide_unconfirmed" : "dismiss_unconfirmed";
+    LastAction = "dismiss_unconfirmed";
     if (!IsWindowVisible(popup) || state == "closed") return;
     closing = false; // explicitly reopened by the user, never reopen ourselves
    }
@@ -111,12 +106,10 @@ namespace CogentSpec {
    // Actual native owner destruction handles browser exit/crash without relying
    // on a heartbeat timeout. Explicit pagehide handles closing just the tab.
    string action = Decide(state, managed, ownerGone, foreground == popup, foreground == owner);
-   if (action == "dismiss" || (action == "hide" && foreground != IntPtr.Zero && IsWindowVisible(popup))) {
-    temporaryDismissal = action == "hide";
+   if (action == "dismiss") {
     closing = PostMessage(popup, 0x0010, IntPtr.Zero, IntPtr.Zero); // WM_CLOSE, Popout only
-    RetainConnection = closing && temporaryDismissal;
     closeRequestedAt = DateTime.UtcNow;
-    LastAction = closing ? (temporaryDismissal ? "hide_requested" : "dismiss_requested") : "dismiss_failed";
+    LastAction = closing ? "dismiss_requested" : "dismiss_failed";
     return;
    }
   }
@@ -445,13 +438,6 @@ namespace CogentSpec {
     }
 }
 
-function Preserve-IntentionalDismissalIdentity($Inspection, [bool]$Retain, [string]$State, [string]$Key, [string]$Fingerprint, [bool]$Unavailable) {
-    return $Retain -and -not $Unavailable -and $State -eq 'identified' -and
-        $Key -match '^[a-f0-9]{64}$' -and $Key -eq $Fingerprint -and
-        [bool]$Inspection.publisherVerified -and $Inspection.PSObject.Properties['popupDetected'] -and
-        -not [bool]$Inspection.popupDetected
-}
-
 function Update-PopupPinHotkeyTarget {
     try {
         $inspectionArguments = @{ Mode = 'inspect' }
@@ -462,18 +448,6 @@ function Update-PopupPinHotkeyTarget {
         $inspectionJson = @($inspectionOutput | ForEach-Object { [string]$_ } | Where-Object { $_.Trim().StartsWith('{') } | Select-Object -Last 1)
         if (-not $inspectionJson) { throw 'The verified ChatGPT Popout helper returned no inspection result.' }
         $inspection = $inspectionJson | ConvertFrom-Json
-        $retain = -not $TestToken -and [CogentSpec.PopoutWorkspaceLifecycle]::RetainConnection
-        $unavailable = (Get-Variable -Name ClientUnavailable -Scope Script -ErrorAction SilentlyContinue) -and $script:ClientUnavailable
-        if (Preserve-IntentionalDismissalIdentity $inspection $retain $script:CurrentConversationState `
-            $script:CurrentConversationKey $script:ActiveChatFingerprint ([bool]$unavailable)) {
-            # This is the same observed conversation, intentionally dismissed.
-            # No connection is created here. A reappearing/new window must pass
-            # fresh inspection; ambiguous detection or any failure goes red.
-            $script:VerifiedPopupVisible = $false
-            $script:CurrentPopupWindowHandle = 0
-            if ($script:PinHotkeyReady) { [CogentSpec.ChatGptPopupPinHotkey]::SetVerifiedPopup(0, 0) }
-            return
-        }
         $verified = [string]$inspection.status -eq 'ready' -and [bool]$inspection.publisherVerified -and
             [bool]$inspection.popupVerified -and
             [long]$inspection.popupWindowHandle -ne 0 -and [int]$inspection.popupProcessId -gt 0

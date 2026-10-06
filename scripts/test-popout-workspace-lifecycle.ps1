@@ -8,14 +8,14 @@ Invoke-Expression $function.Extent.Text
 Initialize-PopoutWorkspaceLifecycle
 $cases = @(
     @('blurred', $true, $false, $true, $false, 'none'),
-    @('hidden', $true, $false, $false, $true, 'hide'),
-    @('blurred', $true, $false, $false, $false, 'hide'),
+    @('hidden', $true, $false, $false, $true, 'none'),
+    @('blurred', $true, $false, $false, $false, 'none'),
     @('active', $true, $false, $false, $true, 'none'),
-    @('closing', $true, $false, $false, $true, 'hide'),
+    @('closing', $true, $false, $false, $true, 'none'),
     @('closed', $true, $false, $false, $true, 'dismiss'),
     @('unknown', $true, $false, $false, $false, 'none'),
     @('unknown', $true, $true, $false, $false, 'dismiss'),
-    @('active', $true, $true, $false, $false, 'hide'),
+    @('active', $true, $true, $false, $false, 'none'),
     @('closed', $false, $false, $false, $false, 'none'),
     @('hidden', $true, $false, $true, $false, 'none')
 )
@@ -23,25 +23,17 @@ foreach ($case in $cases) {
     $actual = [CogentSpec.PopoutWorkspaceLifecycle]::Decide($case[0], $case[1], $case[2], $case[3], $case[4])
     if ($actual -ne $case[5]) { throw "Unexpected lifecycle action for $($case[0]): $actual" }
 }
-$preserveFunction = $ast.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Preserve-IntentionalDismissalIdentity' }, $true)
-Invoke-Expression $preserveFunction.Extent.Text
-$key = 'a' * 64
-$absent = [pscustomobject]@{publisherVerified=$true; popupDetected=$false}
-$present = [pscustomobject]@{publisherVerified=$true; popupDetected=$true}
-$retentionCases = @(
-    @($absent, $true, 'identified', $key, $key, $false, $true),
-    @($absent, $false, 'identified', $key, $key, $false, $false),
-    @($present, $true, 'identified', $key, $key, $false, $false),
-    @($absent, $true, 'blank', $key, $key, $false, $false),
-    @($absent, $true, 'unknown', $key, $key, $false, $false),
-    @($absent, $true, 'identified', $key, ('b' * 64), $false, $false),
-    @($absent, $true, 'identified', $key, $key, $true, $false),
-    @([pscustomobject]@{publisherVerified=$false; popupDetected=$false}, $true, 'identified', $key, $key, $false, $false)
-)
-foreach ($case in $retentionCases) {
-    $actual = Preserve-IntentionalDismissalIdentity $case[0] $case[1] $case[2] $case[3] $case[4] $case[5]
-    if ([bool]$actual -ne $case[6]) { throw 'Intentional dismissal identity gate failed' }
+foreach ($state in @('active', 'blurred', 'hidden', 'closing')) {
+    foreach ($ownerGone in @($true, $false)) {
+        foreach ($popupForeground in @($true, $false)) {
+            foreach ($ownerForeground in @($true, $false)) {
+                if ([CogentSpec.PopoutWorkspaceLifecycle]::Decide($state, $true, $ownerGone, $popupForeground, $ownerForeground) -ne 'none') {
+                    throw "Non-terminal state destroyed Popout: $state"
+                }
+            }
+        }
+    }
 }
 $source = Get-Content -Raw $watcher
-if ($source -match 'ShowWindowAsync|SW_HIDE') { throw 'Direct Windows hiding must not be present' }
-@{status='passed'; cases=$cases.Count; retentionCases=$retentionCases.Count; nativeWindowCallsPerformed=$false} | ConvertTo-Json -Compress
+if ($source -match 'ShowWindowAsync|SW_HIDE|RetainConnection|Preserve-IntentionalDismissalIdentity') { throw 'Temporary hide/retention workaround must be absent' }
+@{status='passed'; cases=$cases.Count; nonTerminalCombinations=32; nativeWindowCallsPerformed=$false} | ConvertTo-Json -Compress
