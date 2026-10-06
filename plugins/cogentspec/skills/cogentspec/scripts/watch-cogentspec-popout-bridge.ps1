@@ -120,7 +120,7 @@ namespace CogentSpec {
    lock(gate) {
     if(!Matches()||key!=fingerprint||age<0||age>10000) {State="unknown";return;}
     if(owner!=id) {
-     if(String.IsNullOrEmpty(key))return;
+     if(String.IsNullOrEmpty(key)&&String.IsNullOrEmpty(owner))return;
      // Bind only on an active work-page handshake while a CogentSpec browser
      // window is foreground. No remote/hidden page can establish ownership.
      if(state!="active")return;
@@ -134,7 +134,8 @@ namespace CogentSpec {
      owner=id;sequence=0;Authority="bound_workspace_document";
     }
     if(seq<sequence)return;
-    if(state!=State&&(LastAction=="hide_failed"||LastAction=="restore_failed"))LastAction="none";
+    if(state!=State&&(LastAction=="hide_failed"||LastAction=="restore_failed"||
+       (LastAction=="close_failed"&&state!="close")))LastAction="none";
     sequence=seq;State=state;received=DateTime.UtcNow.AddMilliseconds(-age);
    }
   }

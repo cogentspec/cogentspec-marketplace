@@ -250,7 +250,7 @@ try {
   assert.equal(ready.pluginId, "cogentspec");
   assert.equal(ready.pinHotkey, "Ctrl+Shift+Y");
   assert.equal(ready.pinHotkeyReady, false);
-  assert.equal(ready.pinHotkeyScope, "verified_foreground_chatgpt_popout");
+  assert.equal(ready.pinHotkeyScope, "verified_popout_or_bound_active_workspace");
   assert.equal(ready.popupVisible, false);
   assert.equal(ready.conversationState, "identified");
   assert.equal(ready.currentConversationKey, "a".repeat(64));

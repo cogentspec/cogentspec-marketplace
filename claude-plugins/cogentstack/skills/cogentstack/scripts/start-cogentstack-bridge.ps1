@@ -354,7 +354,8 @@ if ([string]$connection.webWorkspaceCode -notmatch '^cgw_[A-Za-z0-9_-]{32,}$' -o
 }
 $workspaceBaseUrl = "https://cogentspec.app/stack?surface=$([Uri]::EscapeDataString($Surface))&context=$([Uri]::EscapeDataString($resolvedContext))"
 $navigationKey = [Guid]::NewGuid().ToString('N')
-$webWorkspaceUrl = "$workspaceBaseUrl&open=web&nav=$navigationKey#desktop-web=$([Uri]::EscapeDataString([string]$connection.webWorkspaceCode))"
+$webLaunchBaseUrl = if ($Surface -eq 'chatgpt') { $workspaceBaseUrl.Replace('/stack?', '/popout-launch?') } else { $workspaceBaseUrl }
+$webWorkspaceUrl = "$webLaunchBaseUrl&open=web&nav=$navigationKey#desktop-web=$([Uri]::EscapeDataString([string]$connection.webWorkspaceCode))"
 $chatgptWorkspaceUrl = "$workspaceBaseUrl&open=chatgpt&nav=$navigationKey#desktop-chatgpt=$([Uri]::EscapeDataString([string]$connection.chatgptWorkspaceCode))"
 $workspaceUrl = $chatgptWorkspaceUrl
 
