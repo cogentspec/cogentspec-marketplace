@@ -36,6 +36,8 @@ $script:ActiveChatFingerprint = ''
 $script:CurrentPopupWindowHandle = 0
 $script:LifecycleWorkerId = [Guid]::NewGuid().ToString('D')
 $script:LifecyclePopupHandle = 0
+$script:LifecyclePopupProcessId = 0
+$script:LifecycleWindowKey = ''
 $script:StartupStage = 'native_initialization'
 function Write-MarkerJson($Value) {
     if (-not $ReadyPath) { return }
@@ -248,6 +250,8 @@ function Write-ReadyMarker([bool]$ServerAcknowledged, [string]$Status = 'ready',
         currentConversationKey = [string]$script:CurrentConversationKey
         connectedChatMarkerFound = [bool]$script:ActiveChatFingerprint
         popupWindowHandle = [long]$script:CurrentPopupWindowHandle
+        windowControlProtocol = 'window-v1'
+        windowControlVerified = [bool]($script:CurrentPopupWindowHandle -ne 0 -and $script:LifecycleWindowKey)
         workspaceLifecycleState = if ($TestToken) { [string]$script:WorkspaceLifecycleState } else { [CogentSpec.PopoutWorkspaceLifecycle]::State }
         workspaceLifecycleAction = if ($TestToken) { 'test' } else { [CogentSpec.PopoutWorkspaceLifecycle]::LastAction }
         workspaceLifecycleAuthority = if ($TestToken) { 'test' } else { [CogentSpec.PopoutWorkspaceLifecycle]::Authority }
@@ -607,12 +611,19 @@ function Update-PopupPinHotkeyTarget {
         $script:CurrentConversationKey = $currentConversationKey
         $script:ActiveChatFingerprint = if ($verified) { $fingerprint } else { '' }
         $script:CurrentPopupWindowHandle = if ($verified) { [long]$inspection.popupWindowHandle } else { 0 }
-        if ($verified -and -not $TestToken) {
-            if ($script:LifecyclePopupHandle -ne 0 -and $script:LifecyclePopupHandle -ne [long]$inspection.popupWindowHandle) {
+        if ($verified) {
+            # Stable for this native window, including blank/new/disconnected chats.
+            # Never use the conversation key as window-control authority.
+            if ($script:LifecyclePopupHandle -ne [long]$inspection.popupWindowHandle -or
+                $script:LifecyclePopupProcessId -ne [int]$inspection.popupProcessId) {
                 $script:LifecycleWorkerId = [Guid]::NewGuid().ToString('D')
+                $script:LifecycleWindowKey = [Guid]::NewGuid().ToString('N') + [Guid]::NewGuid().ToString('N')
             }
             $script:LifecyclePopupHandle = [long]$inspection.popupWindowHandle
-            [CogentSpec.PopoutWorkspaceLifecycle]::Observe([long]$inspection.popupWindowHandle, [int]$inspection.popupProcessId, [string]$script:CurrentConversationKey)
+            $script:LifecyclePopupProcessId = [int]$inspection.popupProcessId
+            if (-not $TestToken) {
+                [CogentSpec.PopoutWorkspaceLifecycle]::Observe([long]$inspection.popupWindowHandle, [int]$inspection.popupProcessId, [string]$script:LifecycleWindowKey)
+            }
         }
         if ($script:PinHotkeyReady) {
             if ($visible) {
@@ -661,6 +672,10 @@ try {
             $presenceQuery = $query + '&popupVisible=' + $script:VerifiedPopupVisible.ToString().ToLowerInvariant()
             $presenceQuery += '&conversationState=' + [Uri]::EscapeDataString($script:CurrentConversationState)
             $presenceQuery += '&lifecycleWorkerId=' + $script:LifecycleWorkerId
+            $presenceQuery += '&lifecycleProtocol=window-v1'
+            if ($script:CurrentPopupWindowHandle -ne 0) {
+                $presenceQuery += '&lifecycleWindowKey=' + $script:LifecycleWindowKey
+            }
             if (-not $TestToken) {
                 $presenceQuery += '&lifecycleOutcome=' + [CogentSpec.PopoutWorkspaceLifecycle]::LastAction
                 $presenceQuery += '&lifecycleBoundOwner=' + [CogentSpec.PopoutWorkspaceLifecycle]::BoundOwner

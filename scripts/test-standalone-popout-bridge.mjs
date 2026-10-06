@@ -246,6 +246,11 @@ try {
     && call.url.includes("conversationState=identified")
     && call.url.includes(`currentConversationKey=${"a".repeat(64)}`)
     && call.url.includes(`chatFingerprint=${"a".repeat(64)}`)), true, JSON.stringify(calls));
+  const windowPresence=calls.filter(call=>call.method==='GET').map(call=>new URL(call.url,serviceUrl).searchParams);
+  assert.ok(windowPresence.every(p=>p.get('lifecycleProtocol')==='window-v1'));
+  assert.ok(windowPresence.every(p=>/^[0-9a-f]{64}$/.test(p.get('lifecycleWindowKey'))));
+  assert.equal(new Set(windowPresence.map(p=>p.get('lifecycleWindowKey'))).size,1);
+  assert.ok(windowPresence.every(p=>p.get('lifecycleWindowKey')!==p.get('currentConversationKey')));
   assert.equal(calls.some((call) => call.method === "PATCH" && JSON.parse(call.body).action === "claim"), true);
   assert.equal(calls.some((call) => call.method === "PATCH" && JSON.parse(call.body).action === "complete"), true);
   const helperResult = JSON.parse((await readFile(helperArguments, "utf8")).replace(/^\uFEFF/, ""));
@@ -257,6 +262,8 @@ try {
   assert.equal(ready.pinHotkey, "Ctrl+Shift+Y");
   assert.equal(ready.pinHotkeyReady, false);
   assert.equal(ready.pinHotkeyScope, "verified_popout_or_bound_active_workspace");
+  assert.equal(ready.windowControlProtocol, 'window-v1');
+  assert.equal(ready.windowControlVerified, true);
   assert.equal(ready.popupVisible, false);
   assert.equal(ready.conversationState, "identified");
   assert.equal(ready.currentConversationKey, "a".repeat(64));
