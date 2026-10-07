@@ -794,6 +794,8 @@ if ($TestToken) {
 if (-not (Test-Path -LiteralPath $popupHelper -PathType Leaf)) { throw 'The verified ChatGPT Popout helper is missing.' }
 $query = '?pluginId=' + [Uri]::EscapeDataString($PluginId) + '&pluginVersion=' + [Uri]::EscapeDataString($PluginVersion)
 $polls = 0
+$diagnosticProcess = $null
+$diagnosticSession = ''
 $consecutiveFailures = 0
 Write-StartupMarker 'keyboard_hook_initialization'
 Initialize-PopupPinHotkey
@@ -829,6 +831,29 @@ try {
             $script:StartupStage = 'service_acknowledgment'
             $listing = Invoke-PopoutApi -Method Get -Path "/api/plugin/desktop-popout-actions$presenceQuery" -Token $token
             $consecutiveFailures = 0
+            # Capture has its own process/network/UIA deadlines: it never runs on
+            # the lifecycle controller thread and is armed only by website opt-in.
+            if (-not $TestToken -and $listing.PSObject.Properties['diagnosticCapture']) {
+                $capture = $listing.diagnosticCapture
+                if ($capture -and [string]$capture.id -ne $diagnosticSession) {
+                    if ($diagnosticProcess) { $diagnosticProcess.Dispose() }
+                    $diagnosticSession = [string]$capture.id
+                    try {
+                        $path = Join-Path $PSScriptRoot 'capture-popout-diagnostics.ps1'
+                        $info = [Diagnostics.ProcessStartInfo]::new()
+                        $info.FileName = (Get-Process -Id $PID).Path
+                        $info.Arguments = '-NoProfile -NonInteractive -File "' + $path + '"'
+                        $info.UseShellExecute = $false
+                        $info.CreateNoWindow = $true
+                        $info.RedirectStandardInput = $true
+                        $diagnosticProcess = [Diagnostics.Process]::Start($info)
+                        $diagnosticProcess.StandardInput.WriteLine((@{service=$ServiceUrl;id=$capture.id;worker=$script:LifecycleWorkerId;token=$token}|ConvertTo-Json -Compress))
+                        $diagnosticProcess.StandardInput.Close()
+                    } catch { $diagnosticProcess = $null }
+                }
+                # Stop is handled by the collector's account-bound poll so its
+                # finally block can also terminate its own read-only children.
+            }
             if (-not $TestToken -and -not [CogentSpec.PopoutControlTransport]::IsFresh) {
                 if ($listing.PSObject.Properties['control'] -and $listing.control.PSObject.Properties['ownerId']) {
                     [CogentSpec.PopoutWorkspaceLifecycle]::Receive([string]$listing.control.ownerId,

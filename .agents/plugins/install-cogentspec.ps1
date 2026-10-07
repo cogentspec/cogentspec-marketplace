@@ -301,6 +301,7 @@ try {
         'skills/cogentspec/scripts/native-command.ps1',
         'skills/cogentspec/scripts/open-chatgpt-desktop-ui.ps1',
         'skills/cogentspec/scripts/open-chatgpt-popup.ps1',
+        'skills/cogentspec/scripts/capture-popout-diagnostics.ps1',
         'skills/cogentspec/scripts/prepare-development-handoff.ps1',
         'skills/cogentspec/scripts/prepare-deployment.ps1',
         'skills/cogentspec/scripts/project-build-handoff.ps1',

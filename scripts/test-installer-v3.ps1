@@ -42,6 +42,11 @@ function Invoke-InstallerFixture {
 
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $fixtureRoot = Join-Path ([IO.Path]::GetTempPath()) ("cogentspec-installer-v3-" + [Guid]::NewGuid().ToString('N'))
+$fixtureRoot = [IO.Path]::GetFullPath($fixtureRoot)
+if ([IO.Path]::GetDirectoryName($fixtureRoot) -ne [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\') -or
+    [IO.Path]::GetFileName($fixtureRoot) -notmatch '^cogentspec-installer-v3-[a-f0-9]{32}$') {
+    throw 'Installer fixture cleanup target is outside its isolated temporary directory.'
+}
 $fixtureMarketplace = Join-Path $fixtureRoot 'marketplace'
 $fixtureInstallerDirectory = Join-Path $fixtureMarketplace '.agents\plugins'
 $fixturePlugin = Join-Path $fixtureMarketplace 'plugins\cogentspec'

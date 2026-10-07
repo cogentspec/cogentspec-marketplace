@@ -58,7 +58,7 @@ assert.match(mainWindowBoundarySource, /FindMainWindows\(\$chatGptProcessIds\)/)
 assert.doesNotMatch(mainWindowBoundarySource, /\.MainWindowHandle\b/);
 assert.match(productionHelperSource, /'popup_specific_composer'/);
 assert.match(productionHelperSource, /popup_detected_not_verified/);
-assert.match(productionHelperSource, /ChatGPT Popout opened, but Desktop Bridge could not verify one safe composer window/);
+assert.match(productionHelperSource, /observed a candidate window but did not verify a visible Popout/);
 assert.match(productionHelperSource, /return \[System\.Windows\.Automation\.OrCondition\]::new\(\$conditions\)/);
 assert.match(productionHelperSource, /\$Element\.Current\.IsEnabled -and \$Element\.Current\.IsKeyboardFocusable/);
 assert.match(productionHelperSource, /'Do anything'/);
@@ -76,7 +76,7 @@ assert.match(productionHelperSource, /pinned = \$popupPinned/);
 assert.match(productionHelperSource, /\$popupPinned -ne \$shouldPin/);
 assert.match(productionHelperSource, /the ChatGPT popout remained pinned/);
 assert.match(productionHelperSource, /Ctrl\+Shift\+Space is a toggle/);
-assert.match(productionHelperSource, /if \(-not \$popupCandidateDetected -and \$popupWindow -eq \[IntPtr\]::Zero\)/);
+assert.match(productionHelperSource, /\$startupDecision -eq 'open_once'/);
 assert.doesNotMatch(productionHelperSource, /\$attempt -le 2/); // A global toggle must never be retried.
 assert.match(productionHelperSource, /A newly exposed Popout may omit its dismiss control while unpinned/);
 assert.match(productionHelperSource, /CogentSpec opened the ChatGPT Popout but Windows could not pin it for composer input/);

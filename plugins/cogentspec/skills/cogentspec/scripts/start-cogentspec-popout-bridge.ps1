@@ -47,7 +47,7 @@ $runtimeRoot = Join-Path $stateRoot "popout-runtime\$pluginId-$pluginVersion"
 $bridgeStateRoot = Join-Path $stateRoot 'popout-bridge'
 [void](New-Item -ItemType Directory -Path $runtimeRoot -Force)
 [void](New-Item -ItemType Directory -Path $bridgeStateRoot -Force)
-foreach ($scriptName in @('watch-cogentspec-popout-bridge.ps1', 'open-chatgpt-popup.ps1')) {
+foreach ($scriptName in @('watch-cogentspec-popout-bridge.ps1', 'open-chatgpt-popup.ps1', 'capture-popout-diagnostics.ps1')) {
     $source = Join-Path $PSScriptRoot $scriptName
     if (-not (Test-Path -LiteralPath $source -PathType Leaf)) { throw "Standalone Popout Bridge is missing $scriptName." }
     Copy-Item -LiteralPath $source -Destination (Join-Path $runtimeRoot $scriptName) -Force

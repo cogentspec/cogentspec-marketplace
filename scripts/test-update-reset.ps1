@@ -11,6 +11,9 @@ function Assert-ResetTest([bool]$Condition, [string]$Message) {
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $resetScript = Join-Path $repositoryRoot 'plugins\cogentspec\skills\cogentspec\scripts\reset-cogentspec-update.ps1'
 $fixtureRoot = Join-Path ([IO.Path]::GetTempPath()) ('cogentspec-reset-test-' + [Guid]::NewGuid().ToString('N'))
+$fixtureRoot = [IO.Path]::GetFullPath($fixtureRoot)
+if ([IO.Path]::GetDirectoryName($fixtureRoot) -ne [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\') -or
+    [IO.Path]::GetFileName($fixtureRoot) -notmatch '^cogentspec-reset-test-[a-f0-9]{32}$') { throw 'Unsafe reset fixture path' }
 $stateRoot = Join-Path $fixtureRoot 'bridge'
 $runtimeRoot = Join-Path $fixtureRoot 'bridge-runtime\old-runtime'
 $popoutStateRoot = Join-Path $fixtureRoot 'popout-bridge'
@@ -22,6 +25,8 @@ $worker = $null
 $orphanWorker = $null
 $popoutWorker = $null
 $orphanPopoutWorker = $null
+$diagnosticWorker = $null
+$diagnosticReader = $null
 
 try {
     [void](New-Item -ItemType Directory -Path $stateRoot -Force)
@@ -31,6 +36,11 @@ try {
     Set-Content -LiteralPath $credentialPath -Value '{"protected":"fixture"}' -Encoding UTF8
     Set-Content -LiteralPath $watcherPath -Value 'Start-Sleep -Seconds 120' -Encoding UTF8
     Set-Content -LiteralPath $popoutWatcherPath -Value 'Start-Sleep -Seconds 120' -Encoding UTF8
+    $diagnosticPath = Join-Path $popoutRuntimeRoot 'capture-popout-diagnostics.ps1'
+    Set-Content -LiteralPath $diagnosticPath -Value 'Start-Sleep -Seconds 120' -Encoding UTF8
+    $diagnosticWorker = Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoProfile','-File',$diagnosticPath) -WindowStyle Hidden -PassThru
+    $diagnosticCommand = "& '$($diagnosticPath.Replace("'", "''"))'"
+    $diagnosticReader = Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoProfile','-EncodedCommand',[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($diagnosticCommand))) -WindowStyle Hidden -PassThru
 
     $worker = Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $watcherPath) -WindowStyle Hidden -RedirectStandardOutput (Join-Path $fixtureRoot 'worker.stdout.log') -RedirectStandardError (Join-Path $fixtureRoot 'worker.stderr.log') -PassThru
     $orphanCommand = "& '$($watcherPath.Replace("'", "''"))'"
@@ -55,7 +65,7 @@ try {
     Assert-ResetTest ([bool]$result.packageRuntimeCleared) 'The reset helper did not report runtime cleanup.'
     Assert-ResetTest ([bool]$result.workerStateCleared) 'The reset helper did not report worker-state cleanup.'
     Assert-ResetTest ([bool]$result.credentialPreserved) 'The reset helper did not preserve the credential fixture.'
-    Assert-ResetTest ([int]$result.workersStopped -eq 4) 'The reset helper did not stop both task workers and both standalone Popout workers.'
+    Assert-ResetTest ([int]$result.workersStopped -eq 6) 'The reset helper did not stop task, Popout and both diagnostic processes.'
     Assert-ResetTest (-not (Test-Path -LiteralPath $stateRoot)) 'The Bridge state directory remains after reset.'
     Assert-ResetTest (-not (Test-Path -LiteralPath (Join-Path $fixtureRoot 'bridge-runtime'))) 'The Bridge runtime directory remains after reset.'
     Assert-ResetTest (-not (Test-Path -LiteralPath (Join-Path $fixtureRoot 'popout-bridge'))) 'The standalone Popout state directory remains after reset.'
@@ -70,6 +80,8 @@ try {
         credentialPreserved = [bool]$result.credentialPreserved
     } | ConvertTo-Json -Compress
 } finally {
+    if ($diagnosticWorker -and -not $diagnosticWorker.HasExited) { Stop-Process -Id $diagnosticWorker.Id -Force -ErrorAction SilentlyContinue }
+    if ($diagnosticReader -and -not $diagnosticReader.HasExited) { Stop-Process -Id $diagnosticReader.Id -Force -ErrorAction SilentlyContinue }
     if ($worker -and -not $worker.HasExited) { Stop-Process -Id $worker.Id -Force -ErrorAction SilentlyContinue }
     if ($orphanWorker -and -not $orphanWorker.HasExited) { Stop-Process -Id $orphanWorker.Id -Force -ErrorAction SilentlyContinue }
     if ($popoutWorker -and -not $popoutWorker.HasExited) { Stop-Process -Id $popoutWorker.Id -Force -ErrorAction SilentlyContinue }

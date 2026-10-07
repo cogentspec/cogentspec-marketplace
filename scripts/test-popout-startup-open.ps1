@@ -7,6 +7,20 @@ $ast=[Management.Automation.Language.Parser]::ParseInput($source,[ref]$tokens,[r
 if($errors.Count){throw 'Production helper parse failed'}
 $fn=$ast.Find({param($n)$n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Test-ChatGptPopupSpecificComposer'},$true)
 Invoke-Expression $fn.Extent.Text
+foreach($name in @('Resolve-ChatGptPopupDiscovery','Get-ChatGptPopupStartupDecision')) {
+ $fn=$ast.Find({param($n)$n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name},$true)
+ Invoke-Expression $fn.Extent.Text
+}
+foreach($case in @(
+ @{rows=@();state='absent';decision='open_once'},
+ @{rows=@(@{window=12;strict=$false;popupSpecific=$false;visible=$true});state='unknown';decision='stop_unverified'},
+ @{rows=@(@{window=12;strict=$true;popupSpecific=$false;visible=$true});state='visible';decision='use_verified'},
+ @{rows=@(@{window=12;strict=$true;popupSpecific=$false;visible=$false});state='hidden';decision='restore_verified'},
+ @{rows=@(@{window=12;strict=$true;popupSpecific=$false;visible=$true},@{window=13;strict=$true;popupSpecific=$false;visible=$false});state='ambiguous';decision='stop_ambiguous'}
+)) {
+ $d=Resolve-ChatGptPopupDiscovery $case.rows
+ if($d.state -ne $case.state -or (Get-ChatGptPopupStartupDecision $d.state $false) -ne $case.decision){throw 'Evidence classification failed'}
+}
 foreach($name in @('Work with ChatGPT','Ask ChatGPT anything locally','Ask ChatGPT anything','Do anything')) {
  if(!(Test-ChatGptPopupSpecificComposer $false $name)){throw "Unpinned standalone composer rejected: $name"}
  if(Test-ChatGptPopupSpecificComposer $true $name){throw "Main Desktop composer mistaken for Popout: $name"}
@@ -45,10 +59,10 @@ function Check($condition,$message) { if(!$condition){throw $message} }
 $cases=@(
  @{name='cold-fast';ready=.2;candidate=.1;toggles=1},
  @{name='cold-delayed-beyond-old-retry';ready=8;candidate=4;toggles=1},
- @{name='accessibility-delayed';ready=5;candidate=0;toggles=0},
+ @{name='accessibility-delayed';ready=5;candidate=0;toggles=0;unknown=$true},
  @{name='already-visible';ready=0;candidate=0;toggles=0;activated=$true},
  @{name='never-opens';ready=99;candidate=99;toggles=1},
- @{name='unverified-window';ready=99;candidate=0;toggles=0},
+ @{name='unverified-window';ready=99;candidate=0;toggles=0;unknown=$true},
  @{name='ambiguous';ready=99;candidate=0;toggles=0;ambiguous=$true},
  @{name='shortcut-rejected';ready=99;candidate=99;toggles=1;sendFailure=$true}
 )
@@ -60,9 +74,11 @@ foreach($case in $cases) {
  $activatedExisting=[bool]$case.activated;$popupCandidateDetected=$case.candidate -eq 0;$popupCandidateAmbiguous=$false
  $chatGptProcessIds=@(5678);$chatGptMainWindowHandles=@(9000);$PreferredWindowHandle=0
  $shortcutSent=$false;$shortcutAttempts=0;$popupVisible=$false
+ $popupMatch=@{discoveryState=$(if($case.ambiguous){'ambiguous'}elseif($case.unknown){'unknown'}else{'absent'})}
  . $block
  Check ([StartupFixture]::Toggles -eq $case.toggles) "$($case.name): wrong number of global toggles"
  if($case.sendFailure) { Check ($failure -eq 'shortcut_failed') 'Input failure must be explicit' }
+ elseif($case.unknown -or $case.ambiguous) { Check ($failure -eq 'popup_identity_unresolved' -and !$popupVisible) 'Unknown identity must fail closed without claiming open' }
  elseif($case.ready -lt 12) { Check ($popupVisible -and $popupWindow -eq [IntPtr]1234) "$($case.name): verified window was missed" }
  else { Check (!$popupVisible) "$($case.name): unverified window reported as open" }
  Check (([StartupFixture]::Now-$started).TotalSeconds -le 12.1) "$($case.name): unbounded observation"

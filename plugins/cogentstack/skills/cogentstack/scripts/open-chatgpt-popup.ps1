@@ -750,6 +750,36 @@ function Test-ChatGptPopupSpecificComposer([bool]$IsMainWindow, [string]$Compose
     )
 }
 
+function Resolve-ChatGptPopupDiscovery([object[]]$Evidence) {
+    # Native style / an unreadable UIA tree alone proves neither Popout nor
+    # absence. Keep uncertainty separate from an authenticated composer target.
+    $items = @($Evidence)
+    $verified = @($items | Where-Object { $_.strict -or $_.popupSpecific })
+    $unknown = @($items | Where-Object { -not $_.strict -and -not $_.popupSpecific })
+    $state = if ($verified.Count -gt 1) { 'ambiguous' }
+        elseif ($verified.Count -eq 1) { if ($verified[0].visible) { 'visible' } else { 'hidden' } }
+        elseif ($unknown.Count -gt 0) { 'unknown' }
+        else { 'absent' }
+    return [ordered]@{
+        state = $state
+        window = if ($verified.Count -eq 1) { [IntPtr]$verified[0].window } else { [IntPtr]::Zero }
+        verifiedCount = $verified.Count
+        unknownCount = $unknown.Count
+        candidateCount = $items.Count
+    }
+}
+
+function Get-ChatGptPopupStartupDecision([string]$State, [bool]$ShortcutSent) {
+    switch ($State) {
+        'visible' { return 'use_verified' }
+        'hidden' { return 'restore_verified' }
+        'absent' { if ($ShortcutSent) { return 'observe' } else { return 'open_once' } }
+        'unknown' { if ($ShortcutSent) { return 'observe' } else { return 'stop_unverified' } }
+        'ambiguous' { return 'stop_ambiguous' }
+        default { return 'stop_unverified' }
+    }
+}
+
 function Find-ChatGptPopupWindowMatch(
     [int[]]$ProcessIds,
     [long[]]$MainWindowHandles,
@@ -769,8 +799,8 @@ function Find-ChatGptPopupWindowMatch(
     )
     $nativeCandidates = @([CogentSpec.ChatGptPopupNative]::FindPopupWindows($ProcessIds))
     $evidence = @($nativeCandidates | ForEach-Object {
+        $window = [IntPtr]$_
         try {
-            $window = [IntPtr]$_
             $root = [System.Windows.Automation.AutomationElement]::FromHandle($window)
             $matches = @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $composerCondition) | Where-Object {
                 Test-IsChatGptComposer -Element $_
@@ -788,17 +818,21 @@ function Find-ChatGptPopupWindowMatch(
                 visible = [CogentSpec.ChatGptPopupNative]::IsVisible($window)
                 foreground = [CogentSpec.ChatGptPopupNative]::IsForeground($window)
             }
-        } catch { }
+        } catch {
+            # A failed inspection must never disappear from the evidence set.
+            [pscustomobject]@{ window = $window; strict = $false; popupSpecific = $false; visible = $false; foreground = $false }
+        }
     })
     $match = Select-ChatGptPopupWindowMatch -Evidence $evidence -PreferredWindowHandle $PreferredWindowHandle
-    # A native tool window can exist before its accessibility tree is ready.
-    # Do not toggle that window closed just because its composer is still loading.
-    # This is observation only: it grants no authority to focus, pin or paste.
-    if (-not $match.candidateDetected -and @($nativeCandidates | Where-Object {
-        $MainWindowHandles -notcontains ([IntPtr]$_).ToInt64()
-    }).Count -gt 0) {
-        $match.candidateDetected = $true
-        $match.verification = 'awaiting_composer'
+    $discovery = Resolve-ChatGptPopupDiscovery -Evidence $evidence
+    $match.discoveryState = $discovery.state
+    $match.unknownCount = $discovery.unknownCount
+    if ($discovery.state -eq 'ambiguous') {
+        $match.window = [IntPtr]::Zero
+        $match.ambiguous = $true
+        $match.verification = 'ambiguous_verified_windows'
+    } elseif ($discovery.state -eq 'unknown') {
+        $match.verification = 'unclassified_native_windows'
     }
     return $match
 }
@@ -1253,7 +1287,12 @@ if (-not $activatedExisting) {
     # Ctrl+Shift+Space is a TOGGLE, not an idempotent open operation. Send it
     # at most once, then observe. A delayed window must never receive a retry
     # which hides it again. Candidate evidence is not completed verification.
-    if (-not $popupCandidateDetected -and $popupWindow -eq [IntPtr]::Zero) {
+    $startupDecision = Get-ChatGptPopupStartupDecision -State $popupMatch.discoveryState -ShortcutSent $shortcutSent
+    if ($startupDecision -in @('stop_unverified', 'stop_ambiguous')) {
+        Write-Failure -Status 'popup_identity_unresolved' -Reason 'Desktop Bridge could not distinguish one Popout from the other ChatGPT windows. No opening shortcut or composer input was sent.' -PopupVerification $popupVerification
+        return
+    }
+    if ($startupDecision -eq 'open_once') {
         if (-not [CogentSpec.ChatGptPopupNative]::SendControlShiftSpace()) {
             Write-Failure -Status 'shortcut_failed' -Reason 'CogentSpec could not send the popout shortcut. Press Ctrl + Shift + Space.'
             return
@@ -1305,7 +1344,7 @@ if (-not $UseRetainedChat -and -not $activatedExisting -and $popupWindow -ne [In
 if ($popupWindow -eq [IntPtr]::Zero -or -not $popupVisible) {
     [void](Restore-ChatGptPopupTopmost -PopupWindow $temporaryTopmostWindow -Required $temporaryTopmost)
     if ($popupCandidateDetected) {
-        Write-Failure -Status 'popup_detected_not_verified' -Reason 'ChatGPT Popout opened, but Desktop Bridge could not verify one safe composer window, so the prepared request was not inserted.' -Opened $true -PopupDetected $true -PopupVerification $popupVerification
+        Write-Failure -Status 'popup_detected_not_verified' -Reason 'Desktop Bridge observed a candidate window but did not verify a visible Popout. The prepared request was not inserted.' -PopupDetected $true -PopupVerification $popupVerification
     } else {
         Write-Failure -Status 'popup_not_opened' -Reason 'The connected ChatGPT task did not expose its popout window. Press Ctrl + Shift + Space from that task.'
     }
