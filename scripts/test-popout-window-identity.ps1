@@ -104,4 +104,27 @@ foreach($case in @(
 }
 $mockRoot.Calls=0;$mockRoot.Exact=@((Field 'Do anything'));$mockRoot.Fallback=@()
 if(@(Get-ChatGptComposerMatches $mockRoot 1234).Count -ne 1 -or $mockRoot.Calls -ne 1){throw 'Exact ready composer unnecessarily rescanned'}
+
+# Execute production window evidence ordering. A verified dismiss control must
+# bypass even a broken/slow composer provider, without weakening the fallback.
+$definition=$helperAst.Find({param($n)$n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Get-ChatGptPopupRootEvidence'},$true)
+Invoke-Expression $definition.Extent.Text
+$rootFixture=[pscustomobject]@{Dismiss=$true;Broken=$false}
+$rootFixture | Add-Member ScriptMethod FindFirst {param($scope,$condition) if($this.Broken){throw 'UIA unavailable'};if($this.Dismiss){return [pscustomobject]@{Verified=$true}};return $null}
+$script:composerCalls=0;$script:composerBroken=$true;$script:composerFixture=@()
+function Get-ChatGptComposerMatches {param($Root,$Handle) $script:composerCalls++;if($script:composerBroken){throw 'Composer inspection must not run'};return $script:composerFixture}
+$identity=Get-ChatGptPopupRootEvidence $rootFixture 1234 $false
+if(!$identity.strict -or $script:composerCalls -ne 0){throw 'Window identity waited for composer inspection'}
+$rootFixture.Dismiss=$false;$script:composerBroken=$false
+$identity=Get-ChatGptPopupRootEvidence $rootFixture 1234 $false
+if($identity.strict -or $identity.popupSpecific){throw 'Unknown window accepted without positive evidence'}
+$script:composerFixture=@([pscustomobject]@{Current=[pscustomobject]@{Name='Do anything'}})
+$identity=Get-ChatGptPopupRootEvidence $rootFixture 1234 $false
+if(!$identity.popupSpecific){throw 'Composer identity fallback lost'}
+$identity=Get-ChatGptPopupRootEvidence $rootFixture 1234 $true
+if($identity.popupSpecific){throw 'Main window accepted through fallback'}
+$rootFixture.Broken=$true;$threw=$false
+try {Get-ChatGptPopupRootEvidence $rootFixture 1234 $false}catch{$threw=$true}
+if(!$threw){throw 'Unreadable window did not fail closed'}
+Write-Output 'PASS: dismiss-first identity; zero unnecessary composer scans; guarded fallback and unreadable-window rejection.'
 Write-Output 'PASS: normalized-name fallback, unrelated/disabled/unfocusable rejection, duplicate ambiguity, exact fast path; no native UI calls.'

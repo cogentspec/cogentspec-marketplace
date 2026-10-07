@@ -865,6 +865,20 @@ function Get-ChatGptPopupStartupDecision([string]$State, [bool]$ShortcutSent) {
     }
 }
 
+function Get-ChatGptPopupRootEvidence($Root, [long]$Handle, [bool]$IsMainWindow) {
+    $dismissCondition = [System.Windows.Automation.AndCondition]::new(
+        [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Button),
+        [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::NameProperty, 'Dismiss Popout Window'))
+    $dismiss = Measure-PopupStage 'uia_dismiss_search' { $Root.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $dismissCondition) } -Handle $Handle
+    # Positive window evidence needs no composer inspection. Input and conversation
+    # verification perform their own checks later; this must not wait behind them.
+    if ($null -ne $dismiss) { return (Get-ChatGptPopupIdentityEvidence $true 0 $IsMainWindow '') }
+    $matches = @(Get-ChatGptComposerMatches $Root $Handle)
+    if ($TimingSink) { try { [void](& $TimingSink @{stage='composer_matches';phase='point';handle=$Handle;composerCount=$matches.Count;visible=[CogentSpec.ChatGptPopupNative]::IsVisible([IntPtr]$Handle)}) } catch {} }
+    $name = if ($matches.Count -eq 1) { (([string]$matches[0].Current.Name) -replace '[\u200B-\u200D\uFEFF]', '').Trim() } else { '' }
+    return (Get-ChatGptPopupIdentityEvidence $false $matches.Count $IsMainWindow $name)
+}
+
 function Find-ChatGptPopupWindowMatch(
     [int[]]$ProcessIds,
     [long[]]$MainWindowHandles,
@@ -872,17 +886,6 @@ function Find-ChatGptPopupWindowMatch(
     [long]$StartupCandidateHandle = 0
 ) {
     Add-Type -AssemblyName UIAutomationClient -ErrorAction Stop
-    $composerCondition = Get-ChatGptComposerCondition
-    $dismissCondition = [System.Windows.Automation.AndCondition]::new(
-        [System.Windows.Automation.PropertyCondition]::new(
-            [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
-            [System.Windows.Automation.ControlType]::Button
-        ),
-        [System.Windows.Automation.PropertyCondition]::new(
-            [System.Windows.Automation.AutomationElement]::NameProperty,
-            'Dismiss Popout Window'
-        )
-    )
     $nativeCandidates = @([CogentSpec.ChatGptPopupNative]::FindPopupWindows($ProcessIds))
     # Initial discovery remains broad. Once startup owns one newly visible
     # candidate, inspect only that handle; the caller fences native competitors.
@@ -893,15 +896,8 @@ function Find-ChatGptPopupWindowMatch(
         $window = [IntPtr]$_
         try {
             $root = Measure-PopupStage 'uia_root' { [System.Windows.Automation.AutomationElement]::FromHandle($window) } -Handle $window.ToInt64()
-            $matches = @(Get-ChatGptComposerMatches $root $window.ToInt64())
-            $dismissButton = (Measure-PopupStage 'uia_dismiss_search' { $root.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $dismissCondition) } -Handle $window.ToInt64())
-            if ($TimingSink) { try { [void](& $TimingSink @{stage='composer_matches';phase='point';handle=$window.ToInt64();composerCount=$matches.Count;visible=[CogentSpec.ChatGptPopupNative]::IsVisible($window)}) } catch { } }
-            $composerName = if ($matches.Count -eq 1) {
-                (([string]$matches[0].Current.Name) -replace '[\u200B-\u200D\uFEFF]', '').Trim()
-            } else { '' }
             $isMainWindow = $MainWindowHandles -contains $window.ToInt64()
-            $identity = Get-ChatGptPopupIdentityEvidence -DismissPresent ($null -ne $dismissButton) `
-                -ComposerCount $matches.Count -IsMainWindow $isMainWindow -ComposerName $composerName
+            $identity = Get-ChatGptPopupRootEvidence $root $window.ToInt64() $isMainWindow
             [pscustomobject]@{
                 window = $window
                 strict = $identity.strict
