@@ -57,11 +57,21 @@ public static class StartupFixture {
  public static DateTime Now;
  public static int Toggles;
  public static bool Visible, SendWorks;
+ public static DateTime Started;
+ public static double CandidateAt;
+ public static double DisappearAt;
+ public static double ReplaceAt, MultipleAt;
 }
 namespace CogentSpec {
  public static class ChatGptPopupNative {
   public static bool SendControlShiftSpace() { StartupFixture.Toggles++; return StartupFixture.SendWorks; }
-  public static bool IsVisible(IntPtr h) { return h != IntPtr.Zero && StartupFixture.Visible; }
+  public static IntPtr[] FindPopupWindows(int[] p) {
+   double elapsed=(StartupFixture.Now-StartupFixture.Started).TotalSeconds;
+   if(elapsed>=StartupFixture.MultipleAt)return new[]{new IntPtr(1234),new IntPtr(4321)};
+   if(elapsed>=StartupFixture.ReplaceAt)return new[]{new IntPtr(4321)};
+   return elapsed >= StartupFixture.CandidateAt && elapsed < StartupFixture.DisappearAt ? new[]{new IntPtr(1234)} : new IntPtr[0];
+  }
+  public static bool IsVisible(IntPtr h) { return h != IntPtr.Zero && (StartupFixture.Visible || FindPopupWindows(new int[0]).Length > 0); }
  }
 }
 '@
@@ -80,6 +90,12 @@ $cases=@(
  @{name='cold-fast';ready=.2;candidate=.1;toggles=1},
  @{name='captured-hidden-shells';ready=.2;candidate=0;toggles=1;state='hidden_shells'},
  @{name='cold-delayed-beyond-old-retry';ready=8;candidate=4;toggles=1},
+ @{name='capture-da7989-late-verification';ready=20.3;candidate=.7;toggles=1},
+ @{name='diagnostic-late-verification';ready=27.2;candidate=.7;toggles=1},
+ @{name='visible-never-verifies';ready=99;candidate=.7;toggles=1},
+ @{name='user-hides-during-verification';ready=20;candidate=.7;disappear=3;toggles=1},
+ @{name='candidate-replaced-during-verification';ready=20;candidate=.7;replace=3;toggles=1},
+ @{name='second-candidate-during-verification';ready=20;candidate=.7;multiple=3;toggles=1},
  @{name='accessibility-delayed';ready=5;candidate=0;toggles=0;unknown=$true},
  @{name='already-visible';ready=0;candidate=0;toggles=0;activated=$true},
  @{name='never-opens';ready=99;candidate=99;toggles=1},
@@ -89,6 +105,12 @@ $cases=@(
 )
 foreach($case in $cases) {
  $script:started=[DateTime]'2026-01-01T00:00:00Z';[StartupFixture]::Now=$started
+ [StartupFixture]::Started=$started;[StartupFixture]::CandidateAt=$case.candidate
+ [StartupFixture]::DisappearAt=if($case.disappear){$case.disappear}else{999}
+ [StartupFixture]::ReplaceAt=if($case.replace){$case.replace}else{999}
+ [StartupFixture]::MultipleAt=if($case.multiple){$case.multiple}else{999}
+ $appearanceObserved=$false;$script:progressCount=0
+ $StartupProgress={param($stage) Check ($stage -eq 'awaiting_verification') 'Unexpected stage';$script:progressCount++}
  [StartupFixture]::Toggles=0;[StartupFixture]::Visible=[bool]$case.activated;[StartupFixture]::SendWorks=!$case.sendFailure
  $script:readyAt=$case.ready;$script:candidateAt=$case.candidate;$script:ambiguous=[bool]$case.ambiguous;$script:failure=''
  $popupWindow=if($case.activated){[IntPtr]1234}else{[IntPtr]::Zero}
@@ -100,15 +122,21 @@ foreach($case in $cases) {
  Check ([StartupFixture]::Toggles -eq $case.toggles) "$($case.name): wrong number of global toggles"
  if($case.sendFailure) { Check ($failure -eq 'shortcut_failed') 'Input failure must be explicit' }
  elseif($case.unknown -or $case.ambiguous) { Check ($failure -eq 'popup_identity_unresolved' -and !$popupVisible) 'Unknown identity must fail closed without claiming open' }
- elseif($case.ready -lt 12) { Check ($popupVisible -and $popupWindow -eq [IntPtr]1234) "$($case.name): verified window was missed" }
+ elseif($case.ready -lt 45 -and !$case.disappear -and !$case.replace -and !$case.multiple) { Check ($popupVisible -and $popupWindow -eq [IntPtr]1234) "$($case.name): verified window was missed" }
  else { Check (!$popupVisible) "$($case.name): unverified window reported as open" }
- Check (([StartupFixture]::Now-$started).TotalSeconds -le 12.1) "$($case.name): unbounded observation"
+ Check (([StartupFixture]::Now-$started).TotalSeconds -le 45.1) "$($case.name): unbounded observation"
+ if($case.name -eq 'never-opens'){Check (([StartupFixture]::Now-$started).TotalSeconds -le 12.1) 'Absent window should not use verification budget'}
+ if($case.name -like '*late-verification'){
+  Check ($failure -eq '' -and $progressCount -eq 1) 'Late verification must remain pending then succeed, with one progress notification'
+ }
+ if($case.disappear){Check (([StartupFixture]::Now-$started).TotalSeconds -le 3.1) 'Do not reopen a user-hidden candidate'}
+ if($case.replace -or $case.multiple){Check ($popupCandidateAmbiguous -and !$popupVisible) 'Changed or competing target must never be adopted'}
  if($case.name -eq 'cold-fast') {
   Check (([StartupFixture]::Now-$started).TotalMilliseconds -le 250) "Ready window delayed behind a fixed timeout: $(([StartupFixture]::Now-$started).TotalMilliseconds) ms"
  }
  Write-Output "PASS: $($case.name)"
 }
-Write-Output 'PASS: startup production branch; 9 scenarios; no native UI accessed.'
+Write-Output "PASS: startup production branch; $($cases.Count) scenarios; no native UI accessed."
 $settleStart=$source.IndexOf('$popupFollowerSettleMilliseconds = 0')
 $settleEnd=$source.IndexOf('if ($popupWindow -eq [IntPtr]::Zero -or -not $popupVisible)', $settleStart)
 if($settleStart -lt 0 -or $settleEnd -le $settleStart){throw 'Production settle branch not found'}
@@ -122,3 +150,21 @@ foreach($retained in @($true,$false)) {
  Check ($popupFollowerSettleMilliseconds -eq $expected) 'Reported settle delay is inaccurate'
 }
 Write-Output 'PASS: retained startup has no follower delay; non-retained owner handoff retains its safety pause.'
+
+# Exercise real terminal classification, not just an assertion on its text.
+$failureStart=$source.IndexOf('if ($popupWindow -eq [IntPtr]::Zero -or -not $popupVisible)', $settleStart)
+$failureEnd=$source.IndexOf('if (-not $activatedExisting -and -not (Invoke-PopupActivation', $failureStart)
+$failureBlock=[scriptblock]::Create($source.Substring($failureStart,$failureEnd-$failureStart))
+function Restore-ChatGptPopupTopmost { param($PopupWindow,$Required) return $true }
+foreach($case in @(
+ @{appearance=$true;ambiguous=$false;expected='popup_verification_incomplete'},
+ @{appearance=$false;ambiguous=$false;expected='popup_not_opened'},
+ @{appearance=$true;ambiguous=$true;expected='popup_identity_unresolved'}
+)){
+ $popupWindow=[IntPtr]::Zero;$popupVisible=$false;$appearanceObserved=$case.appearance
+ $popupCandidateAmbiguous=$case.ambiguous;$popupCandidateDetected=$false;$script:failure=''
+ $temporaryTopmostWindow=[IntPtr]::Zero;$temporaryTopmost=$false
+ . $failureBlock
+ Check ($failure -eq $case.expected) 'Appearance, ambiguity and verification failure must remain distinct'
+}
+Write-Output 'PASS: terminal messages distinguish absent, unverified and changed windows.'

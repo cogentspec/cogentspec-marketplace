@@ -9,7 +9,8 @@ param(
     [switch]$ReturnFocusToWorkspace,
     [ValidatePattern('^$|^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')]
     [string]$ThreadId = '',
-    [long]$PreferredWindowHandle = 0
+    [long]$PreferredWindowHandle = 0,
+    [scriptblock]$StartupProgress
 )
 
 Set-StrictMode -Version Latest
@@ -1288,6 +1289,7 @@ if ($UseRetainedChat -and -not $activatedExisting -and -not $OpenWithShortcut) {
     return
 }
 
+$appearanceObserved = $false
 $taskOwner = [ordered]@{ ready = $false; window = [IntPtr]::Zero; stableMilliseconds = 0 }
 if (-not $UseRetainedChat) {
     $taskOwner = Wait-ForChatGptTaskOwner -ProcessIds $chatGptProcessIds
@@ -1316,8 +1318,35 @@ if (-not $activatedExisting) {
         $shortcutAttempts = 1
     }
     $popupDeadline = [DateTime]::UtcNow.AddSeconds(12)
+    $verificationDeadline = [DateTime]::UtcNow.AddSeconds(45)
+    $openingCandidate = [IntPtr]::Zero
+    $appearanceObserved = $false
     do {
             Start-Sleep -Milliseconds 100
+            # Native appearance is evidence of progress, NOT composer identity.
+            # Retain one candidate across delayed UIA readiness; never toggle
+            # again, adopt another window, or type before positive verification.
+            $visibleCandidates = @([CogentSpec.ChatGptPopupNative]::FindPopupWindows($chatGptProcessIds) | Where-Object {
+                $chatGptMainWindowHandles -notcontains ([IntPtr]$_).ToInt64() -and
+                [CogentSpec.ChatGptPopupNative]::IsVisible([IntPtr]$_)
+            })
+            if ($visibleCandidates.Count -gt 1) { $popupCandidateAmbiguous = $true; break }
+            if ($visibleCandidates.Count -eq 1) {
+                $observedWindow = [IntPtr]$visibleCandidates[0]
+                if ($openingCandidate -ne [IntPtr]::Zero -and $openingCandidate -ne $observedWindow) {
+                    $popupCandidateAmbiguous = $true; break
+                }
+                $openingCandidate = $observedWindow
+                if (-not $appearanceObserved) {
+                    $appearanceObserved = $true
+                    if ($StartupProgress) {
+                        try { [void](& $StartupProgress 'awaiting_verification') } catch { }
+                    }
+                }
+            } elseif ($appearanceObserved) {
+                # Respect a user closing/hiding the candidate during startup.
+                break
+            }
             $popupMatch = Find-ChatGptPopupWindowMatch -ProcessIds $chatGptProcessIds -MainWindowHandles $chatGptMainWindowHandles `
                 -PreferredWindowHandle $PreferredWindowHandle
             $popupWindow = [IntPtr]$popupMatch.window
@@ -1325,6 +1354,10 @@ if (-not $activatedExisting) {
             $popupCandidateDetected = $popupCandidateDetected -or [bool]$popupMatch.candidateDetected
             $popupCandidateAmbiguous = $popupCandidateAmbiguous -or [bool]$popupMatch.ambiguous
             $popupVisible = [CogentSpec.ChatGptPopupNative]::IsVisible($popupWindow)
+            if ($popupWindow -ne [IntPtr]::Zero -and $openingCandidate -ne [IntPtr]::Zero -and $popupWindow -ne $openingCandidate) {
+                $popupWindow = [IntPtr]::Zero; $popupVisible = $false; $popupCandidateAmbiguous = $true
+            }
+            if ($appearanceObserved) { $popupDeadline = $verificationDeadline }
     } while (($popupWindow -eq [IntPtr]::Zero -or -not $popupVisible) -and
         -not $popupCandidateAmbiguous -and [DateTime]::UtcNow -lt $popupDeadline)
 } else {
@@ -1358,10 +1391,18 @@ if (-not $UseRetainedChat -and -not $activatedExisting -and $popupWindow -ne [In
 
 if ($popupWindow -eq [IntPtr]::Zero -or -not $popupVisible) {
     [void](Restore-ChatGptPopupTopmost -PopupWindow $temporaryTopmostWindow -Required $temporaryTopmost)
+    if ($popupCandidateAmbiguous) {
+        Write-Failure -Status 'popup_identity_unresolved' -Reason 'The Popout window changed or multiple candidates appeared during startup. No composer input was sent.'
+        return
+    }
+    if ($appearanceObserved) {
+        Write-Failure -Status 'popup_verification_incomplete' -Reason 'A ChatGPT window appeared, but its Popout composer could not be verified before startup ended. No request was inserted and no second opening shortcut was sent.' -PopupDetected $true
+        return
+    }
     if ($popupCandidateDetected) {
         Write-Failure -Status 'popup_detected_not_verified' -Reason 'Desktop Bridge observed a candidate window but did not verify a visible Popout. The prepared request was not inserted.' -PopupDetected $true -PopupVerification $popupVerification
     } else {
-        Write-Failure -Status 'popup_not_opened' -Reason 'The connected ChatGPT task did not expose its popout window. Press Ctrl + Shift + Space from that task.'
+        Write-Failure -Status 'popup_not_opened' -Reason 'No visible Popout candidate was observed after the opening shortcut. The Bridge has not confirmed that it opened.'
     }
     return
 }

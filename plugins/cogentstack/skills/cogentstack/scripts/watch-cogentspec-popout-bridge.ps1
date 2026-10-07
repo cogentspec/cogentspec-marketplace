@@ -899,18 +899,28 @@ try {
                             $recoverThreadId -notmatch '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')) {
                             throw 'This retained Popout has no desktop client. Open the original saved chat from the desktop chat list and send $cogentspec there. No verified thread is available for automatic recovery; no new chat was substituted.'
                         }
+                        $startupProgress = {
+                            param($stage)
+                            if ($stage -eq 'awaiting_verification') {
+                                [void](Invoke-PopoutApi -Method Patch -Path "/api/plugin/desktop-popout-actions$query" -Token $token -Body @{
+                                    requestId = [string]$request.id
+                                    action = 'progress'
+                                    stage = 'awaiting_verification'
+                                })
+                            }
+                        }
                         $helperOutput = if ($script:ClientUnavailable -and $target -eq 'chatgpt-desktop-popup:connect' -and
                             $requestConversationKey -and $requestConversationKey -eq $script:CurrentConversationKey -and
                             $recoverThreadId -match '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$') {
                             @(& $popupHelper -Mode recover -ThreadId $recoverThreadId 2>&1)
                         } elseif ($target -eq 'chatgpt-desktop-popup:connect') {
-                            @(& $popupHelper -Mode open -UseRetainedChat -OpenWithShortcut -KeepPinned -PasteClipboard -ReturnFocusToWorkspace 2>&1)
+                            @(& $popupHelper -Mode open -UseRetainedChat -OpenWithShortcut -KeepPinned -PasteClipboard -ReturnFocusToWorkspace -StartupProgress $startupProgress 2>&1)
                         } elseif ($target -eq 'chatgpt-desktop-popup:update') {
                             @(& $popupHelper -Mode open -UseRetainedChat -KeepPinned -PasteClipboard 2>&1)
                         } elseif ($claimed.request.PSObject.Properties['initializationOwnerId'] -and $claimed.request.initializationOwnerId) {
                             # Fresh work-area initialization opens once and pins explicitly.
                             # No composer text, connection claim, or shortcut toggle loop.
-                            @(& $popupHelper -Mode open -UseRetainedChat -OpenWithShortcut -KeepPinned -ReturnFocusToWorkspace 2>&1)
+                            @(& $popupHelper -Mode open -UseRetainedChat -OpenWithShortcut -KeepPinned -ReturnFocusToWorkspace -StartupProgress $startupProgress 2>&1)
                         } else {
                             @(& $popupHelper -Mode open -UseRetainedChat -KeepPinned 2>&1)
                         }

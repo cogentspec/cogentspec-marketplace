@@ -144,13 +144,14 @@ assert.doesNotMatch(productionHelperSource, /found the retained ChatGPT popout b
 assert.doesNotMatch(popupWindowFinder, /bool isPopupToolWindow/);
 
 await writeFile(helper, `
-param([string]$Mode, [switch]$UseRetainedChat, [switch]$OpenWithShortcut, [switch]$KeepPinned, [switch]$PasteClipboard, [switch]$ReturnFocusToWorkspace, [long]$PreferredWindowHandle = 0)
+param([string]$Mode, [switch]$UseRetainedChat, [switch]$OpenWithShortcut, [switch]$KeepPinned, [switch]$PasteClipboard, [switch]$ReturnFocusToWorkspace, [long]$PreferredWindowHandle = 0, [scriptblock]$StartupProgress)
 if ($Mode -eq 'inspect') {
   [ordered]@{ status = 'ready'; publisherVerified = $true; popupVerified = $true; popupVisible = $false; popupWindowHandle = 1234; popupProcessId = 5678; conversationState = 'identified'; currentConversationKey = '${"a".repeat(64)}'; chatFingerprint = '${"a".repeat(64)}' } | ConvertTo-Json -Compress
   return
 }
 [ordered]@{ mode = $Mode; useRetainedChat = [bool]$UseRetainedChat; openWithShortcut = [bool]$OpenWithShortcut; keepPinned = [bool]$KeepPinned; pasteClipboard = [bool]$PasteClipboard; returnFocusToWorkspace = [bool]$ReturnFocusToWorkspace } |
   ConvertTo-Json -Compress | Set-Content -LiteralPath '${helperArguments.replaceAll("'", "''")}' -Encoding UTF8
+if($StartupProgress){[void](& $StartupProgress 'awaiting_verification')}
 [ordered]@{ status = 'opened'; opened = $true; decision = 'open_once'; composerPopulated = [bool]$PasteClipboard } | ConvertTo-Json -Compress
 `, "utf8");
 
@@ -193,6 +194,10 @@ const server = createServer(async (incoming, response) => {
     lifecycle = "processing";
     response.end(JSON.stringify({ request: { ...request, status: lifecycle } }));
     return;
+  }
+  if (payload.action === "progress" && lifecycle === "processing") {
+    assert.equal(payload.stage, 'awaiting_verification');
+    response.end(JSON.stringify({request:{...request,status:lifecycle}}));return;
   }
   if (payload.action === "complete" && lifecycle === "processing") {
     lifecycle = "completed";
@@ -255,6 +260,8 @@ try {
   assert.ok(windowPresence.every(p=>p.get('lifecycleWindowKey')!==p.get('currentConversationKey')));
   assert.equal(calls.some((call) => call.method === "PATCH" && JSON.parse(call.body).action === "claim"), true);
   assert.equal(calls.some((call) => call.method === "PATCH" && JSON.parse(call.body).action === "complete"), true);
+  const stages=calls.filter(c=>c.method==='PATCH').map(c=>JSON.parse(c.body).action);
+  assert.deepEqual(stages,['claim','progress','complete']);
   const completion=JSON.parse(calls.find(call=>call.method==='PATCH' && JSON.parse(call.body).action==='complete').body);
   assert.deepEqual(completion.diagnostics,{status:'opened',decision:'open_once'});
   const helperResult = JSON.parse((await readFile(helperArguments, "utf8")).replace(/^\uFEFF/, ""));
