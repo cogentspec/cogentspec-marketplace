@@ -268,7 +268,7 @@ try {
   if(timingCapture){
     assert.equal(completion.diagnostics.status,'opened');
     const rows=completion.diagnostics.timings;
-    assert.ok(rows.some(r=>r.stage==='uia_composer_search'&&r.durationMs===123.5&&r.handle===1234));
+    assert.ok(rows.some(r=>r.stage==='uia_composer_search'&&r.phase==='summary'&&r.maxDurationMs===123.5&&r.handle===1234&&r.completedCount>=1));
     assert.ok(rows.some(r=>r.stage==='opener'&&r.phase==='start'));
     assert.ok(rows.some(r=>r.stage==='final_verification'&&r.phase==='end'));
     assert.ok(rows.every(r=>typeof r.elapsedMs==='number'&&r.elapsedMs>=0));

@@ -703,6 +703,39 @@ namespace CogentSpec {
     }
 }
 
+function Add-RequestTiming {
+    param($State, $Row, [double]$ElapsedMs)
+    $Row.elapsedMs = $ElapsedMs
+    $Row.at = [DateTime]::UtcNow.ToString('o')
+    if ($Row.stage -like 'uia_*' -or $Row.stage -eq 'composer_matches') {
+        $key = '{0}:{1}' -f $Row.stage, $Row.handle
+        if (-not $State.groups.Contains($key)) {
+            if ($State.groups.Count -ge 128) { $State.truncated = $true; return }
+            $State.groups[$key] = @{stage=$Row.stage;phase='summary';handle=$Row.handle;firstElapsedMs=$ElapsedMs;startedCount=0;completedCount=0;errorCount=0;sampleCount=0;totalDurationMs=0.0;maxDurationMs=0.0}
+        }
+        $summary = $State.groups[$key]
+        $summary.elapsedMs = $ElapsedMs
+        $summary.at = $Row.at
+        if ($Row.phase -eq 'start') { $summary.startedCount++ }
+        if ($Row.phase -eq 'end') {
+            $summary.completedCount++
+            $summary.totalDurationMs += [double]$Row.durationMs
+            $summary.maxDurationMs = [Math]::Max($summary.maxDurationMs, [double]$Row.durationMs)
+            if ($Row.status -eq 'error') { $summary.errorCount++ }
+        }
+        if ($Row.stage -eq 'composer_matches') {
+            $summary.sampleCount++
+            $summary.composerCount = $Row.composerCount
+            $summary.visible = $Row.visible
+            if ($Row.composerCount -gt 0 -and -not $summary.ContainsKey('firstMatchElapsedMs')) { $summary.firstMatchElapsedMs = $ElapsedMs }
+        }
+    } else {
+        # Separate budget: scan volume cannot evict focus, pin or completion milestones.
+        if ($State.milestones.Count -ge 128) { $State.milestones.RemoveAt(0); $State.truncated = $true }
+        $State.milestones.Add($Row)
+    }
+}
+
 $script:RequestTimingSink = $null
 function Update-PopupPinHotkeyTarget {
     # Only the same verified, controller-hidden native instance can retain its
@@ -877,17 +910,13 @@ try {
                 if ($claimed.request) {
                     $completed = $false
                     $diagnostics = @{ status='helper_exception'; decision='not_reported' }
-                    $timingRows = [Collections.Generic.List[object]]::new()
+                    $timingState = @{groups=[ordered]@{};milestones=[Collections.Generic.List[object]]::new();truncated=$false}
                     $timingClock = [Diagnostics.Stopwatch]::StartNew()
                     $script:RequestTimingSink = $null
                     if ($listing.PSObject.Properties['diagnosticCapture'] -and $listing.diagnosticCapture) {
                         $script:RequestTimingSink = {
                             param($row)
-                            if ($timingRows.Count -lt 256) {
-                                $row.elapsedMs = $timingClock.Elapsed.TotalMilliseconds
-                                $row.at = [DateTime]::UtcNow.ToString('o')
-                                $timingRows.Add($row)
-                            }
+                            Add-RequestTiming $timingState $row $timingClock.Elapsed.TotalMilliseconds
                         }.GetNewClosure()
                     }
                     $message = 'The standalone ChatGPT Popout could not be opened.'
@@ -960,9 +989,9 @@ try {
                         if ($script:RequestTimingSink) { [void](& $script:RequestTimingSink @{stage='final_verification';phase='end'}) }
                         $script:RequestTimingSink = $null
                     }
-                    if ($timingRows.Count -gt 0) {
-                        $diagnostics.timings = @($timingRows.ToArray())
-                        $diagnostics.timingTruncated = $timingRows.Count -ge 256
+                    if ($timingState.milestones.Count -gt 0 -or $timingState.groups.Count -gt 0) {
+                        $diagnostics.timings = @(@($timingState.milestones.ToArray()) + @($timingState.groups.Values) | Sort-Object elapsedMs)
+                        $diagnostics.timingTruncated = $timingState.truncated
                     }
                     [void](Invoke-PopoutApi -Method Patch -Path "/api/plugin/desktop-popout-actions$query" -Token $token -Body @{
                         requestId = [string]$request.id
