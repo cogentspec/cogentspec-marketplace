@@ -81,10 +81,16 @@ using System.Threading;
 namespace CogentSpec {
  public sealed class PopoutLifecycleModel {
   public bool ControllerHidden, ManualReveal;
+  public bool HandoffActive, HandoffCancelled;
+  public void BeginHandoff(){HandoffActive=true;HandoffCancelled=false;}
+  public void ReceiveDuringHandoff(string state){
+   if(HandoffActive&&(state=="hidden"||state=="departed"||state=="close"))HandoffCancelled=true;
+  }
   public string Decide(string state, bool exists, bool visible, bool popupForeground, bool workspaceForeground) {
    if (!exists) {ControllerHidden=false; ManualReveal=false; return "none";}
    if (state=="close") return "close";
    if (state=="active") {
+    if (HandoffActive) return "none";
     if (!workspaceForeground) return "none";
     ManualReveal=false;
     if (ControllerHidden && !visible) return "restore";
@@ -113,6 +119,12 @@ namespace CogentSpec {
   static uint popupPid,browserPid;
   static long browserStarted;
   static string fingerprint="",owner="";
+  static string handoffOwner="";
+  static IntPtr handoffBrowser;
+  static uint handoffBrowserPid;
+  static long handoffBrowserStarted;
+  static DateTime handoffUntil;
+  static IntPtr handoffPopup;
   static long sequence;
   static DateTime received,actionAt;
   static PopoutLifecycleModel model=new PopoutLifecycleModel();
@@ -123,6 +135,40 @@ namespace CogentSpec {
   static volatile bool running;
   public static string State="unknown", LastAction="none", Authority="awaiting_workspace_owner";
   public static string BoundOwner {get {lock(gate){return owner;}}}
+  public static bool BeginHandoff(string id) {
+   lock(gate) {
+    Guid parsed;if(!Guid.TryParseExact(id,"D",out parsed)||model.HandoffActive)return false;
+    var h=GetForegroundWindow();uint p;GetWindowThreadProcessId(h,out p);
+    var title=new StringBuilder(512);GetWindowText(h,title,title.Capacity);
+    try {using(var process=Process.GetProcessById((int)p)) {
+     if((process.ProcessName!="chrome"&&process.ProcessName!="msedge")||title.ToString().IndexOf("CogentSpec",StringComparison.OrdinalIgnoreCase)<0)return false;
+     handoffBrowser=h;handoffBrowserPid=p;handoffBrowserStarted=process.StartTime.ToUniversalTime().Ticks;
+    }}catch{return false;}
+    handoffOwner=id;handoffPopup=IntPtr.Zero;handoffUntil=DateTime.MinValue;
+    model.BeginHandoff();return true;
+   }
+  }
+  public static bool ContinueHandoff(long h) {
+   lock(gate) {
+    var foreground=GetForegroundWindow();
+    if(foreground!=handoffBrowser&&foreground!=new IntPtr(h))model.HandoffCancelled=true;
+    if(foreground==handoffBrowser){
+     var title=new StringBuilder(512);GetWindowText(foreground,title,title.Capacity);
+     if(title.ToString().IndexOf("CogentSpec",StringComparison.OrdinalIgnoreCase)<0)model.HandoffCancelled=true;
+    }
+    return model.HandoffActive&&!model.HandoffCancelled;
+   }
+  }
+  public static void EndHandoff(bool successful) {
+   lock(gate) {
+    bool grant=successful&&!model.HandoffCancelled&&Matches();
+    model.HandoffActive=false;
+    handoffPopup=grant?popup:IntPtr.Zero;
+    handoffUntil=grant?DateTime.UtcNow.AddSeconds(10):DateTime.MinValue;
+    if(!grant)handoffOwner="";
+    wake.Set();
+   }
+  }
   public static string[] ControlAcknowledgment() {
    lock(gate){return new string[]{owner,sequence.ToString(System.Globalization.CultureInfo.InvariantCulture),LastAction};}
   }
@@ -146,7 +192,9 @@ namespace CogentSpec {
     uint actual;var handle=new IntPtr(h);
     if(handle==IntPtr.Zero||!IsWindow(handle)||GetWindowThreadProcessId(handle,out actual)==0||actual!=(uint)pid)return;
     if(popup!=handle||popupPid!=actual) {
-     model=new PopoutLifecycleModel();owner="";sequence=0;browser=IntPtr.Zero;
+     var oldModel=model;model=new PopoutLifecycleModel();
+     model.HandoffActive=oldModel.HandoffActive;model.HandoffCancelled=oldModel.HandoffCancelled;
+     owner="";sequence=0;browser=IntPtr.Zero;
      LastAction="none";State="unknown";Authority="awaiting_workspace_owner";
     }
     popup=handle;popupPid=actual;fingerprint=key;
@@ -162,17 +210,22 @@ namespace CogentSpec {
      if(String.IsNullOrEmpty(key)&&String.IsNullOrEmpty(owner))return;
      // Bind only on an active work-page handshake while a CogentSpec browser
      // window is foreground. No remote/hidden page can establish ownership.
-     if(state!="active")return;
-     var h=GetForegroundWindow();uint p;GetWindowThreadProcessId(h,out p);
+     bool handoff=state=="blurred"&&id==handoffOwner&&popup==handoffPopup&&
+      DateTime.UtcNow<=handoffUntil&&GetForegroundWindow()==popup;
+     if(state!="active"&&!handoff)return;
+     var h=handoff?handoffBrowser:GetForegroundWindow();uint p;GetWindowThreadProcessId(h,out p);
      var title=new StringBuilder(512);GetWindowText(h,title,title.Capacity);
      if(title.ToString().IndexOf("CogentSpec",StringComparison.OrdinalIgnoreCase)<0)return;
      try {using(var process=Process.GetProcessById((int)p)) {
       if(process.ProcessName!="chrome"&&process.ProcessName!="msedge")return;
+      if(handoff&&(p!=handoffBrowserPid||process.StartTime.ToUniversalTime().Ticks!=handoffBrowserStarted))return;
       browser=h;browserPid=p;browserStarted=process.StartTime.ToUniversalTime().Ticks;
      }}catch{return;}
      owner=id;sequence=0;Authority="bound_workspace_document";
+     handoffOwner="";handoffUntil=DateTime.MinValue;
     }
     if(seq<sequence)return;
+    model.ReceiveDuringHandoff(state);
     if(state!=State&&(LastAction=="hide_requested"||LastAction=="restore_requested"||LastAction=="hide_failed"||LastAction=="restore_failed"||
        (LastAction=="close_failed"&&state!="close")))LastAction="none";
     if(seq!=sequence || state!=State)commandReceived=Stopwatch.GetTimestamp();
@@ -956,21 +1009,30 @@ try {
                                 })
                             }
                         }
+                        $handoffStarted = $false
+                        $continueHandoff = $null
+                        if (-not $TestToken) {
+                            $handoffOwner = if ($claimed.request.PSObject.Properties['initializationOwnerId']) { [string]$claimed.request.initializationOwnerId } else { '' }
+                            if (-not $handoffOwner) { $handoffOwner = [CogentSpec.PopoutWorkspaceLifecycle]::BoundOwner }
+                            $handoffStarted = [CogentSpec.PopoutWorkspaceLifecycle]::BeginHandoff($handoffOwner)
+                            if (-not $handoffStarted) { throw 'Popout startup requires its originating CogentSpec work tab to be foreground. No input was sent.' }
+                            $continueHandoff = { param($handle) [CogentSpec.PopoutWorkspaceLifecycle]::ContinueHandoff([long]$handle) }
+                        }
                         if ($script:RequestTimingSink) { [void](& $script:RequestTimingSink @{stage='opener';phase='start'}) }
                         $helperOutput = if ($script:ClientUnavailable -and $target -eq 'chatgpt-desktop-popup:connect' -and
                             $requestConversationKey -and $requestConversationKey -eq $script:CurrentConversationKey -and
                             $recoverThreadId -match '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$') {
                             @(& $popupHelper -TimingSink $script:RequestTimingSink -Mode recover -ThreadId $recoverThreadId 2>&1)
                         } elseif ($target -eq 'chatgpt-desktop-popup:connect') {
-                            @(& $popupHelper -TimingSink $script:RequestTimingSink -Mode open -UseRetainedChat -OpenWithShortcut -KeepPinned -PasteClipboard -ReturnFocusToWorkspace -StartupProgress $startupProgress 2>&1)
+                            @(& $popupHelper -TimingSink $script:RequestTimingSink -ContinueHandoff $continueHandoff -Mode open -UseRetainedChat -OpenWithShortcut -KeepPinned -PasteClipboard -StartupProgress $startupProgress 2>&1)
                         } elseif ($target -eq 'chatgpt-desktop-popup:update') {
-                            @(& $popupHelper -TimingSink $script:RequestTimingSink -Mode open -UseRetainedChat -KeepPinned -PasteClipboard 2>&1)
+                            @(& $popupHelper -TimingSink $script:RequestTimingSink -ContinueHandoff $continueHandoff -Mode open -UseRetainedChat -KeepPinned -PasteClipboard 2>&1)
                         } elseif ($claimed.request.PSObject.Properties['initializationOwnerId'] -and $claimed.request.initializationOwnerId) {
                             # Fresh work-area initialization opens once and pins explicitly.
                             # No composer text, connection claim, or shortcut toggle loop.
-                            @(& $popupHelper -TimingSink $script:RequestTimingSink -Mode open -UseRetainedChat -OpenWithShortcut -KeepPinned -ReturnFocusToWorkspace -StartupProgress $startupProgress 2>&1)
+                            @(& $popupHelper -TimingSink $script:RequestTimingSink -ContinueHandoff $continueHandoff -Mode open -UseRetainedChat -OpenWithShortcut -KeepPinned -StartupProgress $startupProgress 2>&1)
                         } else {
-                            @(& $popupHelper -TimingSink $script:RequestTimingSink -Mode open -UseRetainedChat -KeepPinned 2>&1)
+                            @(& $popupHelper -TimingSink $script:RequestTimingSink -ContinueHandoff $continueHandoff -Mode open -UseRetainedChat -KeepPinned 2>&1)
                         }
                         if ($script:RequestTimingSink) { [void](& $script:RequestTimingSink @{stage='opener';phase='end'}) }
                         $helperJson = @($helperOutput | ForEach-Object { [string]$_ } | Where-Object { $_.Trim().StartsWith('{') } | Select-Object -Last 1)
@@ -990,6 +1052,16 @@ try {
                     }
                     if ($script:RequestTimingSink) { [void](& $script:RequestTimingSink @{stage='final_verification';phase='start'}) }
                     try { Update-PopupPinHotkeyTarget } finally {
+                        if (-not $TestToken) { [CogentSpec.PopoutWorkspaceLifecycle]::EndHandoff($completed) }
+                        if ($script:RequestTimingSink -and -not $TestToken -and $script:CurrentPopupWindowHandle -ne 0) {
+                            try {
+                                $h = [IntPtr]$script:CurrentPopupWindowHandle
+                                [void](& $script:RequestTimingSink @{stage='handoff_release';phase='point';handle=$h.ToInt64();
+                                    foreground=[CogentSpec.ChatGptPopupNative]::IsForeground($h);
+                                    visible=[CogentSpec.ChatGptPopupNative]::IsVisible($h);
+                                    pinned=[CogentSpec.ChatGptPopupNative]::IsTopmost($h)})
+                            } catch { $timingState.truncated = $true }
+                        }
                         if ($script:RequestTimingSink) { [void](& $script:RequestTimingSink @{stage='final_verification';phase='end'}) }
                         $script:RequestTimingSink = $null
                     }

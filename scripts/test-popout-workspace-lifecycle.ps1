@@ -51,6 +51,21 @@ Check $m 'active' $false $false $false $true 'none'
 Check $m 'active' $true $false $false $true 'none'
 Check $m 'close' $true $false $false $false 'close'
 Check $m 'close' $false $false $false $false 'none'
+$m=[CogentSpec.PopoutLifecycleModel]::new()
+$m.ControllerHidden=$true;$m.BeginHandoff()
+Check $m 'active' $true $false $false $true 'none'
+Check $m 'blurred' $true $true $true $false 'none'
+Check $m 'hidden' $true $true $true $false 'hide'
+Check $m 'close' $true $false $true $false 'close'
+foreach($state in @('hidden','departed','close')) {
+ $m.BeginHandoff();$m.ReceiveDuringHandoff($state)
+ if(-not $m.HandoffCancelled){throw "Handoff ignored $state"}
+ $count++
+}
+$m.BeginHandoff();$m.ReceiveDuringHandoff('blurred')
+if($m.HandoffCancelled){throw 'Composer focus cancelled handoff'}
+$m.HandoffActive=$false;$m.ControllerHidden=$true
+Check $m 'active' $true $false $false $true 'restore'
 $mirror=Join-Path $PSScriptRoot '..\plugins\cogentstack\skills\cogentstack\scripts\watch-cogentspec-popout-bridge.ps1'
 if(-not $source.Contains('WorkspacePinAllowed(target.ToInt64())')){throw 'Owner-scoped workspace pin target missing'}
 if(-not $source.Contains('ToggleTopmost(target)')){throw 'Pin must toggle the verified Popout, not the browser'}

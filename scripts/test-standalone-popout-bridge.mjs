@@ -146,7 +146,7 @@ assert.doesNotMatch(productionHelperSource, /found the retained ChatGPT popout b
 assert.doesNotMatch(popupWindowFinder, /bool isPopupToolWindow/);
 
 await writeFile(helper, `
-param([string]$Mode, [switch]$UseRetainedChat, [switch]$OpenWithShortcut, [switch]$KeepPinned, [switch]$PasteClipboard, [switch]$ReturnFocusToWorkspace, [long]$PreferredWindowHandle = 0, [scriptblock]$StartupProgress, [scriptblock]$TimingSink)
+param([string]$Mode, [switch]$UseRetainedChat, [switch]$OpenWithShortcut, [switch]$KeepPinned, [switch]$PasteClipboard, [switch]$ReturnFocusToWorkspace, [long]$PreferredWindowHandle = 0, [scriptblock]$StartupProgress, [scriptblock]$TimingSink, [scriptblock]$ContinueHandoff)
 if($TimingSink){[void](& $TimingSink @{stage='uia_composer_search';phase='end';durationMs=123.5;handle=1234;status='ok'})}
 ${timingFailure ? "if($TimingSink){[void](& $TimingSink @{stage='uia_root';phase='end';durationMs='invalid-fixture-duration';handle=77;status='ok'})}" : ''}
 if ($Mode -eq 'inspect') {
@@ -280,7 +280,7 @@ try {
     assert.equal(completion.diagnostics.timingTruncated,timingFailure);
   }else assert.deepEqual(completion.diagnostics,{status:'opened',decision:'open_once'});
   const helperResult = JSON.parse((await readFile(helperArguments, "utf8")).replace(/^\uFEFF/, ""));
-  assert.deepEqual(helperResult, { mode: "open", useRetainedChat: true, openWithShortcut: true, keepPinned: true, pasteClipboard: !initialization, returnFocusToWorkspace: true });
+  assert.deepEqual(helperResult, { mode: "open", useRetainedChat: true, openWithShortcut: true, keepPinned: true, pasteClipboard: !initialization, returnFocusToWorkspace: false });
   const ready = JSON.parse((await readFile(readyPath, "utf8")).replace(/^\uFEFF/, ""));
   assert.equal(ready.serverAcknowledged, true);
   assert.equal(ready.startupStage, 'service_acknowledgment');

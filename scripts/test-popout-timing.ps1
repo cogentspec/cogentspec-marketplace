@@ -32,6 +32,14 @@ function Invoke-RestMethod {param($Method,$Uri,$Headers,$TimeoutSec,$ContentType
 $result=Invoke-PopoutApi Patch '/fixture' 'fixture-only' @{diagnostics=@{timings=@(@{stage='composer_focus';durationMs=42})}}
 if($result.diagnostics.timings[0].durationMs -ne 42){throw 'API serialization lost nested timings'}
 Write-Output 'PASS: syntax, disabled tracing, collection preservation, target/duration, operation failures, failed sink isolation and real API serialization. No native UI accessed.'
+$rows.Clear();$TimingSink={param($row)$rows.Add($row)}
+$r=Measure-PopupStage 'composer_focus' { @{status='focus_failed';focused=$false} }
+if($rows[1].status -ne 'focus_failed' -or $r.focused){throw 'Returned failure was recorded as ok'}
+$ContinueHandoff={param($h)$false}
+try {Measure-PopupStage 'composer_focus' {throw 'Operation should not run'} -Handle 42;throw 'Cancellation ignored'}
+catch {if($_.Exception.Message -notmatch 'startup was interrupted'){throw}}
+$ContinueHandoff=$null
+Write-Output 'PASS: returned focus failure and cancellation are truthful; no input after interruption.'
 
 $state=@{groups=[ordered]@{};milestones=[Collections.Generic.List[object]]::new();truncated=$false}
 Add-RequestTiming $state @{stage='opener';phase='start'} 0
