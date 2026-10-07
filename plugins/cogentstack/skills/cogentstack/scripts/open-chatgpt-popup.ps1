@@ -741,6 +741,15 @@ function Select-ChatGptPopupWindowMatch([object[]]$Evidence, [long]$PreferredWin
     }
 }
 
+function Test-ChatGptPopupSpecificComposer([bool]$IsMainWindow, [string]$ComposerName) {
+    # Modern standalone Popouts use the same composer name as the main app.
+    # The verified native tool-window boundary, not an obsolete placeholder,
+    # distinguishes them. Main app windows still require the dismiss control.
+    return -not $IsMainWindow -and $ComposerName -in @(
+        'Work with ChatGPT', 'Ask ChatGPT anything locally', 'Ask ChatGPT anything', 'Do anything'
+    )
+}
+
 function Find-ChatGptPopupWindowMatch(
     [int[]]$ProcessIds,
     [long[]]$MainWindowHandles,
@@ -774,14 +783,24 @@ function Find-ChatGptPopupWindowMatch(
             [pscustomobject]@{
                 window = $window
                 strict = $matches.Count -eq 1 -and $null -ne $dismissButton
-                popupSpecific = $matches.Count -eq 1 -and -not $isMainWindow -and
-                    $composerName -in @('Work with ChatGPT', 'Ask ChatGPT anything locally')
+                popupSpecific = $matches.Count -eq 1 -and
+                    (Test-ChatGptPopupSpecificComposer -IsMainWindow $isMainWindow -ComposerName $composerName)
                 visible = [CogentSpec.ChatGptPopupNative]::IsVisible($window)
                 foreground = [CogentSpec.ChatGptPopupNative]::IsForeground($window)
             }
         } catch { }
     })
-    return Select-ChatGptPopupWindowMatch -Evidence $evidence -PreferredWindowHandle $PreferredWindowHandle
+    $match = Select-ChatGptPopupWindowMatch -Evidence $evidence -PreferredWindowHandle $PreferredWindowHandle
+    # A native tool window can exist before its accessibility tree is ready.
+    # Do not toggle that window closed just because its composer is still loading.
+    # This is observation only: it grants no authority to focus, pin or paste.
+    if (-not $match.candidateDetected -and @($nativeCandidates | Where-Object {
+        $MainWindowHandles -notcontains ([IntPtr]$_).ToInt64()
+    }).Count -gt 0) {
+        $match.candidateDetected = $true
+        $match.verification = 'awaiting_composer'
+    }
+    return $match
 }
 
 function Find-VerifiedChatGptComposer([IntPtr]$Window) {
@@ -1230,17 +1249,20 @@ if (-not $UseRetainedChat) {
     }
 }
 
-if (-not $activatedExisting -and -not $popupCandidateDetected) {
-    for ($attempt = 1; $attempt -le 2; $attempt++) {
+if (-not $activatedExisting) {
+    # Ctrl+Shift+Space is a TOGGLE, not an idempotent open operation. Send it
+    # at most once, then observe. A delayed window must never receive a retry
+    # which hides it again. Candidate evidence is not completed verification.
+    if (-not $popupCandidateDetected -and $popupWindow -eq [IntPtr]::Zero) {
         if (-not [CogentSpec.ChatGptPopupNative]::SendControlShiftSpace()) {
             Write-Failure -Status 'shortcut_failed' -Reason 'CogentSpec could not send the popout shortcut. Press Ctrl + Shift + Space.'
             return
         }
         $shortcutSent = $true
-        $shortcutAttempts = $attempt
-
-        $popupDeadline = [DateTime]::UtcNow.AddSeconds(3)
-        do {
+        $shortcutAttempts = 1
+    }
+    $popupDeadline = [DateTime]::UtcNow.AddSeconds(12)
+    do {
             Start-Sleep -Milliseconds 100
             $popupMatch = Find-ChatGptPopupWindowMatch -ProcessIds $chatGptProcessIds -MainWindowHandles $chatGptMainWindowHandles `
                 -PreferredWindowHandle $PreferredWindowHandle
@@ -1249,11 +1271,8 @@ if (-not $activatedExisting -and -not $popupCandidateDetected) {
             $popupCandidateDetected = $popupCandidateDetected -or [bool]$popupMatch.candidateDetected
             $popupCandidateAmbiguous = $popupCandidateAmbiguous -or [bool]$popupMatch.ambiguous
             $popupVisible = [CogentSpec.ChatGptPopupNative]::IsVisible($popupWindow)
-        } while (($popupWindow -eq [IntPtr]::Zero -or -not $popupVisible) -and
-            -not [bool]$popupMatch.candidateDetected -and [DateTime]::UtcNow -lt $popupDeadline)
-
-        if (($popupWindow -ne [IntPtr]::Zero -and $popupVisible) -or [bool]$popupMatch.candidateDetected) { break }
-    }
+    } while (($popupWindow -eq [IntPtr]::Zero -or -not $popupVisible) -and
+        -not $popupCandidateAmbiguous -and [DateTime]::UtcNow -lt $popupDeadline)
 } else {
     $popupVisible = [CogentSpec.ChatGptPopupNative]::IsVisible($popupWindow)
 }
@@ -1275,10 +1294,12 @@ if (-not $activatedExisting -and $popupWindow -ne [IntPtr]::Zero -and $popupVisi
     Start-Sleep -Milliseconds 150
 }
 
-if (-not $activatedExisting -and $popupWindow -ne [IntPtr]::Zero -and $popupVisible) {
+$popupFollowerSettleMilliseconds = 0
+if (-not $UseRetainedChat -and -not $activatedExisting -and $popupWindow -ne [IntPtr]::Zero -and $popupVisible) {
     # The popout is a follower of the main task window. Let its first owner snapshot settle
     # before focusing or pasting so a close-and-reopen cycle cannot submit through a stale client.
-    Start-Sleep -Milliseconds 1200
+    $popupFollowerSettleMilliseconds = 1200
+    Start-Sleep -Milliseconds $popupFollowerSettleMilliseconds
 }
 
 if ($popupWindow -eq [IntPtr]::Zero -or -not $popupVisible) {
@@ -1389,7 +1410,7 @@ Write-CompactJson ([ordered]@{
     desktopWindowLaunched = $false
     ownerTaskReady = [bool]$taskOwner.ready
     ownerTaskStableMilliseconds = [int]$taskOwner.stableMilliseconds
-    popupFollowerSettleMilliseconds = 1200
+    popupFollowerSettleMilliseconds = $popupFollowerSettleMilliseconds
     existingPopupDismissed = $existingPopupDismissed
     restoredHidden = $restoredHidden
     popupVerified = $true

@@ -76,8 +76,8 @@ assert.match(productionHelperSource, /pinned = \$popupPinned/);
 assert.match(productionHelperSource, /\$popupPinned -ne \$shouldPin/);
 assert.match(productionHelperSource, /the ChatGPT popout remained pinned/);
 assert.match(productionHelperSource, /Ctrl\+Shift\+Space is a toggle/);
-assert.match(productionHelperSource, /if \(-not \$activatedExisting -and -not \$popupCandidateDetected\)/);
-assert.match(productionHelperSource, /-or \[bool\]\$popupMatch\.candidateDetected\) \{ break \}/);
+assert.match(productionHelperSource, /if \(-not \$popupCandidateDetected -and \$popupWindow -eq \[IntPtr\]::Zero\)/);
+assert.doesNotMatch(productionHelperSource, /\$attempt -le 2/); // A global toggle must never be retried.
 assert.match(productionHelperSource, /A newly exposed Popout may omit its dismiss control while unpinned/);
 assert.match(productionHelperSource, /CogentSpec opened the ChatGPT Popout but Windows could not pin it for composer input/);
 assert.match(productionHelperSource, /popupVerification = \$popupVerification/);
@@ -256,7 +256,7 @@ try {
   assert.equal(calls.some((call) => call.method === "PATCH" && JSON.parse(call.body).action === "claim"), true);
   assert.equal(calls.some((call) => call.method === "PATCH" && JSON.parse(call.body).action === "complete"), true);
   const helperResult = JSON.parse((await readFile(helperArguments, "utf8")).replace(/^\uFEFF/, ""));
-  assert.deepEqual(helperResult, { mode: "open", useRetainedChat: true, openWithShortcut: true, keepPinned: true, pasteClipboard: !initialization, returnFocusToWorkspace: initialization });
+  assert.deepEqual(helperResult, { mode: "open", useRetainedChat: true, openWithShortcut: true, keepPinned: true, pasteClipboard: !initialization, returnFocusToWorkspace: true });
   const ready = JSON.parse((await readFile(readyPath, "utf8")).replace(/^\uFEFF/, ""));
   assert.equal(ready.serverAcknowledged, true);
   assert.equal(ready.startupStage, 'service_acknowledgment');

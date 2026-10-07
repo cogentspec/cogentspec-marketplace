@@ -860,7 +860,13 @@ try {
                         # Refresh before dispatch: a user may have switched chats
                         # after the web request. Do not recover a different chat.
                         $requestConversationKey = if ($claimed.request.PSObject.Properties['recoveryChatFingerprint']) { [string]$claimed.request.recoveryChatFingerprint } else { '' }
-                        Update-PopupPinHotkeyTarget
+                        # Existing-chat/recovery requests need a fresh snapshot.
+                        # A closed-window startup has no chat target to recover;
+                        # the opener independently verifies before any input.
+                        # Do not delay it with a duplicate conversation scan.
+                        if ($composerRequired -and ($script:CurrentPopupWindowHandle -ne 0 -or $requestConversationKey)) {
+                            Update-PopupPinHotkeyTarget
+                        }
                         $recoverThreadId = if ($claimed.request.PSObject.Properties['recoveryThreadId']) { [string]$claimed.request.recoveryThreadId } else { '' }
                         if ($script:ClientUnavailable -and ($target -ne 'chatgpt-desktop-popup:connect' -or
                             -not $requestConversationKey -or $requestConversationKey -ne $script:CurrentConversationKey -or
@@ -872,7 +878,7 @@ try {
                             $recoverThreadId -match '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$') {
                             @(& $popupHelper -Mode recover -ThreadId $recoverThreadId 2>&1)
                         } elseif ($target -eq 'chatgpt-desktop-popup:connect') {
-                            @(& $popupHelper -Mode open -UseRetainedChat -OpenWithShortcut -KeepPinned -PasteClipboard 2>&1)
+                            @(& $popupHelper -Mode open -UseRetainedChat -OpenWithShortcut -KeepPinned -PasteClipboard -ReturnFocusToWorkspace 2>&1)
                         } elseif ($target -eq 'chatgpt-desktop-popup:update') {
                             @(& $popupHelper -Mode open -UseRetainedChat -KeepPinned -PasteClipboard 2>&1)
                         } elseif ($claimed.request.PSObject.Properties['initializationOwnerId'] -and $claimed.request.initializationOwnerId) {
