@@ -14,6 +14,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+$script:StartupDecision = 'not_reached'
 
 function Write-CompactJson($Value) {
     $Value | ConvertTo-Json -Depth 5 -Compress | Write-Output
@@ -32,6 +33,7 @@ function Write-Failure(
         reason = $Reason
         popupDetected = $PopupDetected
         popupVerification = $PopupVerification
+        decision = $script:StartupDecision
         manualShortcut = 'Ctrl+Shift+Space'
     })
 }
@@ -753,12 +755,20 @@ function Test-ChatGptPopupSpecificComposer([bool]$IsMainWindow, [string]$Compose
 function Resolve-ChatGptPopupDiscovery([object[]]$Evidence) {
     # Native style / an unreadable UIA tree alone proves neither Popout nor
     # absence. Keep uncertainty separate from an authenticated composer target.
-    $items = @($Evidence)
+    $items = @($Evidence | ForEach-Object { [pscustomobject]$_ } | Select-Object window,strict,popupSpecific,visible,foreground,isMainWindow,inspectionSucceeded)
     $verified = @($items | Where-Object { $_.strict -or $_.popupSpecific })
-    $unknown = @($items | Where-Object { -not $_.strict -and -not $_.popupSpecific })
+    # Inspected main windows cannot be Popout targets. Hidden inspected shells
+    # may belong to a closed Popout: allow one opening toggle, never restore,
+    # pin or type into them until positive composer identity is available.
+    $unverified = @($items | Where-Object { -not $_.strict -and -not $_.popupSpecific })
+    $unknown = @($unverified | Where-Object {
+        -not ($_.inspectionSucceeded -eq $true -and ($_.isMainWindow -eq $true -or $_.visible -eq $false))
+    })
+    $shells = @($unverified | Where-Object { $_.inspectionSucceeded -eq $true -and $_.isMainWindow -ne $true -and $_.visible -eq $false })
     $state = if ($verified.Count -gt 1) { 'ambiguous' }
-        elseif ($verified.Count -eq 1) { if ($verified[0].visible) { 'visible' } else { 'hidden' } }
         elseif ($unknown.Count -gt 0) { 'unknown' }
+        elseif ($verified.Count -eq 1) { if ($verified[0].visible) { 'visible' } else { 'hidden' } }
+        elseif ($shells.Count -gt 0) { 'hidden_shells' }
         else { 'absent' }
     return [ordered]@{
         state = $state
@@ -774,6 +784,7 @@ function Get-ChatGptPopupStartupDecision([string]$State, [bool]$ShortcutSent) {
         'visible' { return 'use_verified' }
         'hidden' { return 'restore_verified' }
         'absent' { if ($ShortcutSent) { return 'observe' } else { return 'open_once' } }
+        'hidden_shells' { if ($ShortcutSent) { return 'observe' } else { return 'open_once' } }
         'unknown' { if ($ShortcutSent) { return 'observe' } else { return 'stop_unverified' } }
         'ambiguous' { return 'stop_ambiguous' }
         default { return 'stop_unverified' }
@@ -816,11 +827,13 @@ function Find-ChatGptPopupWindowMatch(
                 popupSpecific = $matches.Count -eq 1 -and
                     (Test-ChatGptPopupSpecificComposer -IsMainWindow $isMainWindow -ComposerName $composerName)
                 visible = [CogentSpec.ChatGptPopupNative]::IsVisible($window)
+                isMainWindow = $isMainWindow
+                inspectionSucceeded = $true
                 foreground = [CogentSpec.ChatGptPopupNative]::IsForeground($window)
             }
         } catch {
             # A failed inspection must never disappear from the evidence set.
-            [pscustomobject]@{ window = $window; strict = $false; popupSpecific = $false; visible = $false; foreground = $false }
+            [pscustomobject]@{ window = $window; strict = $false; popupSpecific = $false; visible = [CogentSpec.ChatGptPopupNative]::IsVisible($window); foreground = $false; isMainWindow = $false; inspectionSucceeded = $false }
         }
     })
     $match = Select-ChatGptPopupWindowMatch -Evidence $evidence -PreferredWindowHandle $PreferredWindowHandle
@@ -832,6 +845,7 @@ function Find-ChatGptPopupWindowMatch(
         $match.ambiguous = $true
         $match.verification = 'ambiguous_verified_windows'
     } elseif ($discovery.state -eq 'unknown') {
+        $match.window = [IntPtr]::Zero
         $match.verification = 'unclassified_native_windows'
     }
     return $match
@@ -1288,6 +1302,7 @@ if (-not $activatedExisting) {
     # at most once, then observe. A delayed window must never receive a retry
     # which hides it again. Candidate evidence is not completed verification.
     $startupDecision = Get-ChatGptPopupStartupDecision -State $popupMatch.discoveryState -ShortcutSent $shortcutSent
+    $script:StartupDecision = $startupDecision
     if ($startupDecision -in @('stop_unverified', 'stop_ambiguous')) {
         Write-Failure -Status 'popup_identity_unresolved' -Reason 'Desktop Bridge could not distinguish one Popout from the other ChatGPT windows. No opening shortcut or composer input was sent.' -PopupVerification $popupVerification
         return
@@ -1439,6 +1454,7 @@ Write-CompactJson ([ordered]@{
     status = 'opened'
     opened = $true
     processId = [int]$chatGpt.Id
+    decision = $script:StartupDecision
     publisherVerified = $true
     shortcutSent = $shortcutSent
     shortcutAttempts = $shortcutAttempts

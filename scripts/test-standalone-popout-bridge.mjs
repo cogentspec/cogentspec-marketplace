@@ -151,7 +151,7 @@ if ($Mode -eq 'inspect') {
 }
 [ordered]@{ mode = $Mode; useRetainedChat = [bool]$UseRetainedChat; openWithShortcut = [bool]$OpenWithShortcut; keepPinned = [bool]$KeepPinned; pasteClipboard = [bool]$PasteClipboard; returnFocusToWorkspace = [bool]$ReturnFocusToWorkspace } |
   ConvertTo-Json -Compress | Set-Content -LiteralPath '${helperArguments.replaceAll("'", "''")}' -Encoding UTF8
-[ordered]@{ status = 'opened'; opened = $true; composerPopulated = [bool]$PasteClipboard } | ConvertTo-Json -Compress
+[ordered]@{ status = 'opened'; opened = $true; decision = 'open_once'; composerPopulated = [bool]$PasteClipboard } | ConvertTo-Json -Compress
 `, "utf8");
 
 const request = {
@@ -255,6 +255,8 @@ try {
   assert.ok(windowPresence.every(p=>p.get('lifecycleWindowKey')!==p.get('currentConversationKey')));
   assert.equal(calls.some((call) => call.method === "PATCH" && JSON.parse(call.body).action === "claim"), true);
   assert.equal(calls.some((call) => call.method === "PATCH" && JSON.parse(call.body).action === "complete"), true);
+  const completion=JSON.parse(calls.find(call=>call.method==='PATCH' && JSON.parse(call.body).action==='complete').body);
+  assert.deepEqual(completion.diagnostics,{status:'opened',decision:'open_once'});
   const helperResult = JSON.parse((await readFile(helperArguments, "utf8")).replace(/^\uFEFF/, ""));
   assert.deepEqual(helperResult, { mode: "open", useRetainedChat: true, openWithShortcut: true, keepPinned: true, pasteClipboard: !initialization, returnFocusToWorkspace: true });
   const ready = JSON.parse((await readFile(readyPath, "utf8")).replace(/^\uFEFF/, ""));

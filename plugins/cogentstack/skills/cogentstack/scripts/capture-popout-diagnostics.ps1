@@ -102,7 +102,7 @@ if($SnapshotKind -eq 'uia') {
         } catch {$row.errorType=$_.Exception.GetType().Name}
         $strict=$row.inspectionSucceeded -and $row.composerCount -eq 1 -and $row.dismiss
         $fallback=$row.inspectionSucceeded -and $row.composerCount -eq 1 -and (Test-ChatGptPopupSpecificComposer (!$w.tool) $row.composerLabel)
-        $evidence+=@{window=[IntPtr]$w.handle;strict=$strict;popupSpecific=$fallback;visible=$w.visible;foreground=$w.foreground}
+        $evidence+=@{window=[IntPtr]$w.handle;strict=$strict;popupSpecific=$fallback;visible=$w.visible;foreground=$w.foreground;isMainWindow=(!$w.tool);inspectionSucceeded=$row.inspectionSucceeded}
         $row.strict=$strict;$row.fallback=$fallback;$rows+=$row
     }
     $proposed=Resolve-ChatGptPopupDiscovery -Evidence $evidence

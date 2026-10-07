@@ -27,6 +27,26 @@ foreach($name in @('Work with ChatGPT','Ask ChatGPT anything locally','Ask ChatG
 }
 if(Test-ChatGptPopupSpecificComposer $false 'Unrelated editor'){throw 'Unknown composer accepted'}
 Write-Output 'PASS: all four composer variants, with main-window and unrelated-window rejection.'
+# Sanitized replay of the uploaded 2026-10-07 capture. No native UI is read.
+$captured=@(
+ @{window=1246424;strict=$false;popupSpecific=$false;visible=$true;isMainWindow=$true;inspectionSucceeded=$true},
+ @{window=1049284;strict=$false;popupSpecific=$false;visible=$false;isMainWindow=$false;inspectionSucceeded=$true},
+ @{window=132598;strict=$false;popupSpecific=$false;visible=$false;isMainWindow=$false;inspectionSucceeded=$true},
+ @{window=197228;strict=$false;popupSpecific=$false;visible=$false;isMainWindow=$true;inspectionSucceeded=$true}
+)
+$discovery=Resolve-ChatGptPopupDiscovery $captured
+if($discovery.state -ne 'hidden_shells' -or $discovery.window -ne [IntPtr]::Zero -or
+ (Get-ChatGptPopupStartupDecision $discovery.state $false) -ne 'open_once' -or
+ (Get-ChatGptPopupStartupDecision $discovery.state $true) -ne 'observe'){throw 'Captured hidden shells must open once without being adopted'}
+foreach($bad in @(
+ @{window=44;strict=$false;popupSpecific=$false;visible=$true;isMainWindow=$false;inspectionSucceeded=$true},
+ @{window=44;strict=$false;popupSpecific=$false;visible=$false;isMainWindow=$false;inspectionSucceeded=$false}
+)) {
+ if((Resolve-ChatGptPopupDiscovery ($captured+@($bad))).state -ne 'unknown'){throw 'Visible/unreadable candidate must block a toggle'}
+ if((Resolve-ChatGptPopupDiscovery @($bad,@{window=55;strict=$true;popupSpecific=$false;visible=$false})).state -ne 'unknown'){throw 'Verified hidden target must not override unresolved competing evidence'}
+}
+if((Resolve-ChatGptPopupDiscovery @($captured[0],$captured[3])).state -ne 'absent'){throw 'Inspected main windows must not block startup'}
+Write-Output 'PASS: captured main/hidden-shell replay, visible competitor and failed-inspection fences.'
 $start = $source.IndexOf('if (-not $activatedExisting) {', $source.IndexOf('$taskOwner = [ordered]'))
 $end = $source.IndexOf('if (-not $activatedExisting -and $popupWindow', $start)
 if ($start -lt 0 -or $end -le $start) { throw 'Production opening branch not found' }
@@ -58,6 +78,7 @@ function Find-ChatGptPopupWindowMatch {
 function Check($condition,$message) { if(!$condition){throw $message} }
 $cases=@(
  @{name='cold-fast';ready=.2;candidate=.1;toggles=1},
+ @{name='captured-hidden-shells';ready=.2;candidate=0;toggles=1;state='hidden_shells'},
  @{name='cold-delayed-beyond-old-retry';ready=8;candidate=4;toggles=1},
  @{name='accessibility-delayed';ready=5;candidate=0;toggles=0;unknown=$true},
  @{name='already-visible';ready=0;candidate=0;toggles=0;activated=$true},
@@ -74,7 +95,7 @@ foreach($case in $cases) {
  $activatedExisting=[bool]$case.activated;$popupCandidateDetected=$case.candidate -eq 0;$popupCandidateAmbiguous=$false
  $chatGptProcessIds=@(5678);$chatGptMainWindowHandles=@(9000);$PreferredWindowHandle=0
  $shortcutSent=$false;$shortcutAttempts=0;$popupVisible=$false
- $popupMatch=@{discoveryState=$(if($case.ambiguous){'ambiguous'}elseif($case.unknown){'unknown'}else{'absent'})}
+ $popupMatch=@{discoveryState=$(if($case.state){$case.state}elseif($case.ambiguous){'ambiguous'}elseif($case.unknown){'unknown'}else{'absent'})}
  . $block
  Check ([StartupFixture]::Toggles -eq $case.toggles) "$($case.name): wrong number of global toggles"
  if($case.sendFailure) { Check ($failure -eq 'shortcut_failed') 'Input failure must be explicit' }
@@ -87,7 +108,7 @@ foreach($case in $cases) {
  }
  Write-Output "PASS: $($case.name)"
 }
-Write-Output 'PASS: startup production branch; 8 scenarios; no native UI accessed.'
+Write-Output 'PASS: startup production branch; 9 scenarios; no native UI accessed.'
 $settleStart=$source.IndexOf('$popupFollowerSettleMilliseconds = 0')
 $settleEnd=$source.IndexOf('if ($popupWindow -eq [IntPtr]::Zero -or -not $popupVisible)', $settleStart)
 if($settleStart -lt 0 -or $settleEnd -le $settleStart){throw 'Production settle branch not found'}

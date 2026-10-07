@@ -875,6 +875,7 @@ try {
                 }
                 if ($claimed.request) {
                     $completed = $false
+                    $diagnostics = @{ status='helper_exception'; decision='not_reported' }
                     $message = 'The standalone ChatGPT Popout could not be opened.'
                     try {
                         $target = [string]$claimed.request.targetRequestId
@@ -916,6 +917,8 @@ try {
                         $helperJson = @($helperOutput | ForEach-Object { [string]$_ } | Where-Object { $_.Trim().StartsWith('{') } | Select-Object -Last 1)
                         if (-not $helperJson) { throw 'The verified ChatGPT Popout helper returned no result.' }
                         $result = $helperJson | ConvertFrom-Json
+                        $diagnostics = @{ status=[string]$result.status; decision='not_reported' }
+                        if ($result.PSObject.Properties['decision']) { $diagnostics.decision=[string]$result.decision }
                         $completed = [string]$result.status -eq 'opened' -and [bool]$result.opened -and
                             (-not $composerRequired -or [bool]$result.composerPopulated)
                         $message = if ($completed) {
@@ -931,6 +934,7 @@ try {
                         requestId = [string]$request.id
                         action = if ($completed) { 'complete' } else { 'fail' }
                         statusMessage = $message
+                        diagnostics = $diagnostics
                     })
                 }
             }
