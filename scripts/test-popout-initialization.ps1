@@ -3,6 +3,12 @@ $ErrorActionPreference = 'Stop'
 # No real window inspection, input injection, credentials or Desktop UI access.
 $path = Join-Path $PSScriptRoot '..\plugins\cogentspec\skills\cogentspec\scripts\open-chatgpt-popup.ps1'
 $source = Get-Content -LiteralPath $path -Raw
+$tokens=$null;$errors=$null
+$ast=[Management.Automation.Language.Parser]::ParseInput($source,[ref]$tokens,[ref]$errors)
+if($errors.Count){throw ($errors|Out-String)}
+$timing=$ast.Find({param($n)$n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Measure-PopupStage'},$true)
+Invoke-Expression $timing.Extent.Text
+$TimingSink=$null
 $native = [regex]::Match($source, "(?s)Add-Type -TypeDefinition @'\r?\n(.*?)\r?\n'@").Groups[1].Value
 if (-not $native) { throw 'Production native code not found' }
 # Compile the full production native helper without invoking any native method.

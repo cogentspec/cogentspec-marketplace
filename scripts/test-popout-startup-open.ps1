@@ -153,7 +153,7 @@ Write-Output 'PASS: retained startup has no follower delay; non-retained owner h
 
 # Exercise real terminal classification, not just an assertion on its text.
 $failureStart=$source.IndexOf('if ($popupWindow -eq [IntPtr]::Zero -or -not $popupVisible)', $settleStart)
-$failureEnd=$source.IndexOf('if (-not $activatedExisting -and -not (Invoke-PopupActivation', $failureStart)
+$failureEnd=$source.IndexOf('if (-not $activatedExisting -and -not (Measure-PopupStage', $failureStart)
 $failureBlock=[scriptblock]::Create($source.Substring($failureStart,$failureEnd-$failureStart))
 function Restore-ChatGptPopupTopmost { param($PopupWindow,$Required) return $true }
 foreach($case in @(

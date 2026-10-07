@@ -39,6 +39,7 @@ foreach($scenario in @('stop','wrong-session','wrong-worker','lost-claim','uploa
   return @{capture=@{id=$config.id;worker=$null}}
  }
  function Start-Reader([string]$Kind) {
+  if($Kind -eq 'uia'){throw 'Passive capture must not start a competing accessibility inspector'}
   $script:started++;$p=[DiagnosticFixtureProcess]::new();$script:processes+=,$p
   $pending=[Threading.Tasks.TaskCompletionSource[string]]::new()
   return @{process=$p;line=$pending.Task;started=[DateTime]::UtcNow}
@@ -48,7 +49,7 @@ foreach($scenario in @('stop','wrong-session','wrong-worker','lost-claim','uploa
  try {. $block}catch{if($scenario -ne 'upload-fails'){throw}}
  if($scenario -in @('wrong-session','wrong-worker','lost-claim') -and $started -ne 0){throw 'Unowned capture inspected native UI'}
  if($scenario -in @('stop','upload-fails')) {
-  if($writes -ne 2 -or $started -ne 2){throw 'Capture pipeline was not exercised'}
+  if($writes -ne 2 -or $started -ne 1){throw 'Capture pipeline was not exercised'}
   if(@($processes|Where-Object {!$_.Killed}).Count){throw 'Owned reader process leaked'}
  }
  Write-Output "PASS: collector $scenario"

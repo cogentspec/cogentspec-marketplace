@@ -10,12 +10,26 @@ param(
     [ValidatePattern('^$|^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')]
     [string]$ThreadId = '',
     [long]$PreferredWindowHandle = 0,
-    [scriptblock]$StartupProgress
+    [scriptblock]$StartupProgress,
+    [scriptblock]$TimingSink
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $script:StartupDecision = 'not_reached'
+
+# Optional, bounded production timing. Never inspect extra UI or emit private data.
+function Measure-PopupStage {
+    param([string]$Stage, [scriptblock]$Operation, [long]$Handle = 0)
+    if (-not $TimingSink) { return (& $Operation) }
+    $watch = [Diagnostics.Stopwatch]::StartNew()
+    try { [void](& $TimingSink @{stage=$Stage;phase='start';handle=$Handle}) } catch { }
+    $outcome = 'error'
+    try { & $Operation; $outcome = 'ok' }
+    finally {
+        try { [void](& $TimingSink @{stage=$Stage;phase='end';handle=$Handle;durationMs=$watch.Elapsed.TotalMilliseconds;status=$outcome}) } catch { }
+    }
+}
 
 function Write-CompactJson($Value) {
     $Value | ConvertTo-Json -Depth 5 -Compress | Write-Output
@@ -76,14 +90,14 @@ function Set-ChatGptComposerFocus($Composer) {
 function Focus-ChatGptComposer([IntPtr]$PopupWindow) {
     try {
         Add-Type -AssemblyName UIAutomationClient -ErrorAction Stop
-        $root = [System.Windows.Automation.AutomationElement]::FromHandle($PopupWindow)
+        $root = Measure-PopupStage 'uia_root' { [System.Windows.Automation.AutomationElement]::FromHandle($PopupWindow) } -Handle $PopupWindow.ToInt64()
         if (-not $root) { throw 'The verified popout did not expose an accessible window.' }
 
         $composer = $null
         $deadline = [DateTime]::UtcNow.AddSeconds(3)
         $composerCondition = Get-ChatGptComposerCondition
         do {
-            $matches = @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $composerCondition) | Where-Object {
+            $matches = @((Measure-PopupStage 'uia_composer_search' { $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $composerCondition) } -Handle $PopupWindow.ToInt64()) | Where-Object {
                 Test-IsChatGptComposer -Element $_
             })
             if ($matches.Count -eq 1) { $composer = $matches[0]; break }
@@ -125,7 +139,7 @@ function Reset-ChatGptPopupInteraction([IntPtr]$PopupWindow) {
         }
 
         Add-Type -AssemblyName UIAutomationClient -ErrorAction Stop
-        $root = [System.Windows.Automation.AutomationElement]::FromHandle($PopupWindow)
+        $root = Measure-PopupStage 'uia_root' { [System.Windows.Automation.AutomationElement]::FromHandle($PopupWindow) } -Handle $PopupWindow.ToInt64()
         if (-not $root) { throw 'The verified popout did not expose an accessible window.' }
 
         $dismissCondition = [System.Windows.Automation.AndCondition]::new(
@@ -138,7 +152,7 @@ function Reset-ChatGptPopupInteraction([IntPtr]$PopupWindow) {
                 'Dismiss Popout Window'
             )
         )
-        $dismissButton = $root.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $dismissCondition)
+        $dismissButton = (Measure-PopupStage 'uia_dismiss_search' { $root.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $dismissCondition) } -Handle $PopupWindow.ToInt64())
         $hoverCleared = $false
         if ($dismissButton) {
             $cursor = [CogentSpec.ChatGptPopupNative]::GetCursorPosition()
@@ -191,7 +205,7 @@ function Wait-ForChatGptTaskOwner([int[]]$ProcessIds) {
             $ready = $false
             try {
                 $root = [System.Windows.Automation.AutomationElement]::FromHandle($mainWindow)
-                $composer = @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $composerCondition) | Where-Object {
+                $composer = @((Measure-PopupStage 'uia_composer_search' { $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $composerCondition) } -Handle $mainWindow.ToInt64()) | Where-Object {
                     (Test-IsChatGptComposer -Element $_) -and $_.Current.IsEnabled -and $_.Current.IsKeyboardFocusable
                 })
                 $ready = $composer.Count -eq 1
@@ -246,7 +260,7 @@ function Wait-ForChatGptMainWindow([int[]]$ProcessIds) {
 function Enter-ChatGptFullView([IntPtr]$Window) {
     try {
         Add-Type -AssemblyName UIAutomationClient -ErrorAction Stop
-        $root = [System.Windows.Automation.AutomationElement]::FromHandle($Window)
+        $root = Measure-PopupStage 'uia_root' { [System.Windows.Automation.AutomationElement]::FromHandle($Window) } -Handle $Window.ToInt64()
         if (-not $root) { throw 'The verified ChatGPT Desktop window did not expose an accessible interface.' }
 
         $fullViewCondition = [System.Windows.Automation.AndCondition]::new(
@@ -290,7 +304,7 @@ function Enter-ChatGptFullView([IntPtr]$Window) {
         $deadline = [DateTime]::UtcNow.AddSeconds(3)
         do {
             Start-Sleep -Milliseconds 100
-            $root = [System.Windows.Automation.AutomationElement]::FromHandle($Window)
+            $root = Measure-PopupStage 'uia_root' { [System.Windows.Automation.AutomationElement]::FromHandle($Window) } -Handle $Window.ToInt64()
             $fullViewButton = if ($root) { $root.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $fullViewCondition) } else { $null }
         } while ($fullViewButton -and [DateTime]::UtcNow -lt $deadline)
 
@@ -813,11 +827,12 @@ function Find-ChatGptPopupWindowMatch(
     $evidence = @($nativeCandidates | ForEach-Object {
         $window = [IntPtr]$_
         try {
-            $root = [System.Windows.Automation.AutomationElement]::FromHandle($window)
-            $matches = @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $composerCondition) | Where-Object {
+            $root = Measure-PopupStage 'uia_root' { [System.Windows.Automation.AutomationElement]::FromHandle($window) } -Handle $window.ToInt64()
+            $matches = @((Measure-PopupStage 'uia_composer_search' { $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $composerCondition) } -Handle $window.ToInt64()) | Where-Object {
                 Test-IsChatGptComposer -Element $_
             })
-            $dismissButton = $root.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $dismissCondition)
+            $dismissButton = (Measure-PopupStage 'uia_dismiss_search' { $root.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $dismissCondition) } -Handle $window.ToInt64())
+            if ($TimingSink) { try { [void](& $TimingSink @{stage='composer_matches';phase='point';handle=$window.ToInt64();composerCount=$matches.Count;visible=[CogentSpec.ChatGptPopupNative]::IsVisible($window)}) } catch { } }
             $composerName = if ($matches.Count -eq 1) {
                 (([string]$matches[0].Current.Name) -replace '[\u200B-\u200D\uFEFF]', '').Trim()
             } else { '' }
@@ -855,9 +870,9 @@ function Find-ChatGptPopupWindowMatch(
 function Find-VerifiedChatGptComposer([IntPtr]$Window) {
     if ($Window -eq [IntPtr]::Zero) { return $null }
     Add-Type -AssemblyName UIAutomationClient -ErrorAction Stop
-    $root = [System.Windows.Automation.AutomationElement]::FromHandle($Window)
+    $root = Measure-PopupStage 'uia_root' { [System.Windows.Automation.AutomationElement]::FromHandle($Window) } -Handle $Window.ToInt64()
     $composerCondition = Get-ChatGptComposerCondition
-    $matches = @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $composerCondition) | Where-Object {
+    $matches = @((Measure-PopupStage 'uia_composer_search' { $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $composerCondition) } -Handle $Window.ToInt64()) | Where-Object {
         Test-IsChatGptComposer -Element $_
     })
     if ($matches.Count -eq 1) { return $matches[0] }
@@ -895,7 +910,7 @@ function Get-ChatGptConversationObservation([IntPtr]$Window) {
     }
     try {
         Add-Type -AssemblyName UIAutomationClient -ErrorAction Stop
-        $root = [System.Windows.Automation.AutomationElement]::FromHandle($Window)
+        $root = Measure-PopupStage 'uia_root' { [System.Windows.Automation.AutomationElement]::FromHandle($Window) } -Handle $Window.ToInt64()
         if ($null -eq $root) {
             return [ordered]@{ state = 'unknown'; currentConversationKey = ''; chatFingerprint = ''; commandMarkerFound = $false }
         }
@@ -903,7 +918,7 @@ function Get-ChatGptConversationObservation([IntPtr]$Window) {
             [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
             [System.Windows.Automation.ControlType]::Text
         )
-        $textElements = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $textCondition)
+        $textElements = (Measure-PopupStage 'uia_conversation_search' { $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $textCondition) } -Handle $Window.ToInt64())
         $noticeNames = @($textElements | ForEach-Object { [string]$_.Current.Name })
         $clientUnavailable = Test-ChatGptMissingClientNotice -Names $noticeNames
         $markerRuntimeId = ''
@@ -1247,7 +1262,7 @@ if ($popupWindow -ne [IntPtr]::Zero) {
         # Popout requests keep that pin so the composer stays above the browser;
         # other callers retain the prior temporary-pin behavior.
         if (-not [CogentSpec.ChatGptPopupNative]::IsTopmost($popupWindow)) {
-            if (-not [CogentSpec.ChatGptPopupNative]::SetPopupTopmost($popupWindow, $true)) {
+            if (-not (Measure-PopupStage 'pin_window' { [CogentSpec.ChatGptPopupNative]::SetPopupTopmost($popupWindow, $true) } -Handle $popupWindow.ToInt64())) {
                 Write-Failure -Status 'popup_pin_failed' -Reason 'Windows did not make the retained ChatGPT popout available for reconnection.' -Opened $true
                 return
             }
@@ -1262,7 +1277,7 @@ if ($popupWindow -ne [IntPtr]::Zero) {
         # never send it as a composer-discovery fallback because that docks the
         # existing Popout back into ChatGPT Desktop. Keep and activate the
         # already publisher-verified native Popout instead.
-        [void](Invoke-PopupActivation -PopupWindow $popupWindow)
+        [void](Measure-PopupStage 'activate_window' { Invoke-PopupActivation -PopupWindow $popupWindow } -Handle $popupWindow.ToInt64())
         $activatedExisting = $true
     } elseif ($popupWasVisible) {
         [void][CogentSpec.ChatGptPopupNative]::SendControlShiftSpace()
@@ -1339,8 +1354,15 @@ if (-not $activatedExisting) {
                 $openingCandidate = $observedWindow
                 if (-not $appearanceObserved) {
                     $appearanceObserved = $true
+                    if ($TimingSink) { try { [void](& $TimingSink @{stage='native_appearance';phase='point';handle=$observedWindow.ToInt64();visible=$true}) } catch { } }
                     if ($StartupProgress) {
-                        try { [void](& $StartupProgress 'awaiting_verification') } catch { }
+                        $progressClock = [Diagnostics.Stopwatch]::StartNew()
+                        if ($TimingSink) { try { [void](& $TimingSink @{stage='progress_report';phase='start'}) } catch { } }
+                        $progressOutcome = 'ok'
+                        try { [void](& $StartupProgress 'awaiting_verification') } catch { $progressOutcome = 'error' }
+                        finally {
+                            if ($TimingSink) { try { [void](& $TimingSink @{stage='progress_report';phase='end';durationMs=$progressClock.Elapsed.TotalMilliseconds;status=$progressOutcome}) } catch { } }
+                        }
                     }
                 }
             } elseif ($appearanceObserved) {
@@ -1369,7 +1391,7 @@ if (-not $activatedExisting -and $popupWindow -ne [IntPtr]::Zero -and $popupVisi
     # A newly exposed Popout may omit its dismiss control while unpinned. Pin it
     # immediately before activation and composer work. Working-screen requests
     # keep the pin; other callers restore the original unpinned state.
-    if (-not [CogentSpec.ChatGptPopupNative]::SetPopupTopmost($popupWindow, $true)) {
+    if (-not (Measure-PopupStage 'pin_window' { [CogentSpec.ChatGptPopupNative]::SetPopupTopmost($popupWindow, $true) } -Handle $popupWindow.ToInt64())) {
         Write-Failure -Status 'popup_pin_failed' -Reason 'CogentSpec opened the ChatGPT Popout but Windows could not pin it for composer input.' -Opened $true -PopupDetected $true -PopupVerification $popupVerification
         return
     }
@@ -1406,14 +1428,14 @@ if ($popupWindow -eq [IntPtr]::Zero -or -not $popupVisible) {
     }
     return
 }
-if (-not $activatedExisting -and -not (Invoke-PopupActivation -PopupWindow $popupWindow)) {
+if (-not $activatedExisting -and -not (Measure-PopupStage 'activate_window' { Invoke-PopupActivation -PopupWindow $popupWindow } -Handle $popupWindow.ToInt64())) {
     [void](Restore-ChatGptPopupTopmost -PopupWindow $temporaryTopmostWindow -Required $temporaryTopmost)
     Write-Failure -Status 'popup_activation_failed' -Reason 'ChatGPT Popout opened, but Desktop Bridge could not make its composer ready for keyboard input.' -Opened $true -PopupDetected $true -PopupVerification $popupVerification
     return
 }
 $restoredHidden = ($null -ne $popupWasVisible -and -not $popupWasVisible)
 
-$interaction = Reset-ChatGptPopupInteraction -PopupWindow $popupWindow
+$interaction = Measure-PopupStage 'interaction_reset' { Reset-ChatGptPopupInteraction -PopupWindow $popupWindow } -Handle $popupWindow.ToInt64()
 if (-not $interaction.reset) {
     [void](Restore-ChatGptPopupTopmost -PopupWindow $temporaryTopmostWindow -Required $temporaryTopmost)
     Write-Failure -Status ([string]$interaction.status) -Reason ([string]$interaction.reason) -Opened $true
@@ -1423,7 +1445,7 @@ $dismissHoverCleared = [bool]$interaction.dismissHoverCleared
 $topmostCycleReset = $false
 $topmostRestored = $true
 
-$composer = Focus-ChatGptComposer -PopupWindow $popupWindow
+$composer = Measure-PopupStage 'composer_focus' { Focus-ChatGptComposer -PopupWindow $popupWindow } -Handle $popupWindow.ToInt64()
 if (-not $composer.focused -and [string]$composer.status -eq 'focus_failed' -and
     [string]$composer.reason -eq 'ChatGPT did not give keyboard focus to the popout composer.' -and
     [CogentSpec.ChatGptPopupNative]::IsTopmost($popupWindow)) {
@@ -1438,10 +1460,10 @@ if (-not $composer.focused -and [string]$composer.status -eq 'focus_failed' -and
     $recoveryInteraction = Reset-ChatGptPopupInteraction -PopupWindow $popupWindow
     $dismissHoverCleared = $dismissHoverCleared -or [bool]$recoveryInteraction.dismissHoverCleared
     if ($recoveryInteraction.reset) {
-        $composer = Focus-ChatGptComposer -PopupWindow $popupWindow
+        $composer = Measure-PopupStage 'composer_focus' { Focus-ChatGptComposer -PopupWindow $popupWindow } -Handle $popupWindow.ToInt64()
     }
 
-    $topmostRestored = [CogentSpec.ChatGptPopupNative]::SetPopupTopmost($popupWindow, $true)
+    $topmostRestored = (Measure-PopupStage 'pin_window' { [CogentSpec.ChatGptPopupNative]::SetPopupTopmost($popupWindow, $true) } -Handle $popupWindow.ToInt64())
     if (-not $topmostRestored) {
         [void](Restore-ChatGptPopupTopmost -PopupWindow $temporaryTopmostWindow -Required $temporaryTopmost)
         Write-Failure -Status 'popup_interaction_recovery_failed' -Reason 'CogentSpec recovered the ChatGPT popout but Windows did not restore its pinned state.' -Opened $true
@@ -1459,7 +1481,7 @@ if (-not $composer.focused) {
     return
 }
 
-if (-not $activatedExisting -and -not (Invoke-PopupActivation -PopupWindow $popupWindow)) {
+if (-not $activatedExisting -and -not (Measure-PopupStage 'activate_window' { Invoke-PopupActivation -PopupWindow $popupWindow } -Handle $popupWindow.ToInt64())) {
     [void](Restore-ChatGptPopupTopmost -PopupWindow $temporaryTopmostWindow -Required $temporaryTopmost)
     Write-Failure -Status 'popup_activation_failed' -Reason 'CogentSpec opened the ChatGPT popout but could not make it ready for keyboard input. Click the composer once to continue.' -Opened $true
     return
@@ -1468,7 +1490,7 @@ if (-not $activatedExisting -and -not (Invoke-PopupActivation -PopupWindow $popu
 $composerPopulated = $false
 if ($PasteClipboard) {
     try {
-        $composerPopulated = Set-ChatGptComposerFromClipboard -Window $popupWindow
+        $composerPopulated = Measure-PopupStage 'composer_insert' { Set-ChatGptComposerFromClipboard -Window $popupWindow } -Handle $popupWindow.ToInt64()
     } catch {
         $failureReason = $_.Exception.Message
         # A Popout connection failure must fail in the Popout. Closing a newly

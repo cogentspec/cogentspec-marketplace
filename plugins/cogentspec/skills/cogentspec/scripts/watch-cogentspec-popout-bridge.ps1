@@ -415,7 +415,7 @@ function Invoke-PopoutApi([string]$Method, [string]$Path, [string]$Token, $Body 
     }
     if ($null -ne $Body) {
         $parameters.ContentType = 'application/json'
-        $parameters.Body = $Body | ConvertTo-Json -Compress
+        $parameters.Body = $Body | ConvertTo-Json -Depth 8 -Compress
     }
     return Invoke-RestMethod @parameters
 }
@@ -703,6 +703,7 @@ namespace CogentSpec {
     }
 }
 
+$script:RequestTimingSink = $null
 function Update-PopupPinHotkeyTarget {
     # Only the same verified, controller-hidden native instance can retain its
     # previous exact-chat proof. It cannot be interacted with while hidden.
@@ -715,7 +716,7 @@ function Update-PopupPinHotkeyTarget {
         return
     }
     try {
-        $inspectionArguments = @{ Mode = 'inspect' }
+        $inspectionArguments = @{ Mode = 'inspect'; TimingSink = $script:RequestTimingSink }
         if ($script:CurrentPopupWindowHandle -ne 0) {
             $inspectionArguments.PreferredWindowHandle = [long]$script:CurrentPopupWindowHandle
         }
@@ -876,6 +877,19 @@ try {
                 if ($claimed.request) {
                     $completed = $false
                     $diagnostics = @{ status='helper_exception'; decision='not_reported' }
+                    $timingRows = [Collections.Generic.List[object]]::new()
+                    $timingClock = [Diagnostics.Stopwatch]::StartNew()
+                    $script:RequestTimingSink = $null
+                    if ($listing.PSObject.Properties['diagnosticCapture'] -and $listing.diagnosticCapture) {
+                        $script:RequestTimingSink = {
+                            param($row)
+                            if ($timingRows.Count -lt 256) {
+                                $row.elapsedMs = $timingClock.Elapsed.TotalMilliseconds
+                                $row.at = [DateTime]::UtcNow.ToString('o')
+                                $timingRows.Add($row)
+                            }
+                        }.GetNewClosure()
+                    }
                     $message = 'The standalone ChatGPT Popout could not be opened.'
                     try {
                         $target = [string]$claimed.request.targetRequestId
@@ -909,21 +923,23 @@ try {
                                 })
                             }
                         }
+                        if ($script:RequestTimingSink) { [void](& $script:RequestTimingSink @{stage='opener';phase='start'}) }
                         $helperOutput = if ($script:ClientUnavailable -and $target -eq 'chatgpt-desktop-popup:connect' -and
                             $requestConversationKey -and $requestConversationKey -eq $script:CurrentConversationKey -and
                             $recoverThreadId -match '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$') {
-                            @(& $popupHelper -Mode recover -ThreadId $recoverThreadId 2>&1)
+                            @(& $popupHelper -TimingSink $script:RequestTimingSink -Mode recover -ThreadId $recoverThreadId 2>&1)
                         } elseif ($target -eq 'chatgpt-desktop-popup:connect') {
-                            @(& $popupHelper -Mode open -UseRetainedChat -OpenWithShortcut -KeepPinned -PasteClipboard -ReturnFocusToWorkspace -StartupProgress $startupProgress 2>&1)
+                            @(& $popupHelper -TimingSink $script:RequestTimingSink -Mode open -UseRetainedChat -OpenWithShortcut -KeepPinned -PasteClipboard -ReturnFocusToWorkspace -StartupProgress $startupProgress 2>&1)
                         } elseif ($target -eq 'chatgpt-desktop-popup:update') {
-                            @(& $popupHelper -Mode open -UseRetainedChat -KeepPinned -PasteClipboard 2>&1)
+                            @(& $popupHelper -TimingSink $script:RequestTimingSink -Mode open -UseRetainedChat -KeepPinned -PasteClipboard 2>&1)
                         } elseif ($claimed.request.PSObject.Properties['initializationOwnerId'] -and $claimed.request.initializationOwnerId) {
                             # Fresh work-area initialization opens once and pins explicitly.
                             # No composer text, connection claim, or shortcut toggle loop.
-                            @(& $popupHelper -Mode open -UseRetainedChat -OpenWithShortcut -KeepPinned -ReturnFocusToWorkspace -StartupProgress $startupProgress 2>&1)
+                            @(& $popupHelper -TimingSink $script:RequestTimingSink -Mode open -UseRetainedChat -OpenWithShortcut -KeepPinned -ReturnFocusToWorkspace -StartupProgress $startupProgress 2>&1)
                         } else {
-                            @(& $popupHelper -Mode open -UseRetainedChat -KeepPinned 2>&1)
+                            @(& $popupHelper -TimingSink $script:RequestTimingSink -Mode open -UseRetainedChat -KeepPinned 2>&1)
                         }
+                        if ($script:RequestTimingSink) { [void](& $script:RequestTimingSink @{stage='opener';phase='end'}) }
                         $helperJson = @($helperOutput | ForEach-Object { [string]$_ } | Where-Object { $_.Trim().StartsWith('{') } | Select-Object -Last 1)
                         if (-not $helperJson) { throw 'The verified ChatGPT Popout helper returned no result.' }
                         $result = $helperJson | ConvertFrom-Json
@@ -939,7 +955,15 @@ try {
                     } catch {
                         $message = $_.Exception.Message
                     }
-                    Update-PopupPinHotkeyTarget
+                    if ($script:RequestTimingSink) { [void](& $script:RequestTimingSink @{stage='final_verification';phase='start'}) }
+                    try { Update-PopupPinHotkeyTarget } finally {
+                        if ($script:RequestTimingSink) { [void](& $script:RequestTimingSink @{stage='final_verification';phase='end'}) }
+                        $script:RequestTimingSink = $null
+                    }
+                    if ($timingRows.Count -gt 0) {
+                        $diagnostics.timings = @($timingRows.ToArray())
+                        $diagnostics.timingTruncated = $timingRows.Count -ge 256
+                    }
                     [void](Invoke-PopoutApi -Method Patch -Path "/api/plugin/desktop-popout-actions$query" -Token $token -Body @{
                         requestId = [string]$request.id
                         action = if ($completed) { 'complete' } else { 'fail' }

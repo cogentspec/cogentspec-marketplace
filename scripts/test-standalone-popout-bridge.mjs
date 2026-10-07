@@ -7,6 +7,7 @@ import { spawn } from "node:child_process";
 
 const repositoryRoot = resolve(import.meta.dirname, "..");
 const initialization = process.argv.includes('--initialization');
+const timingCapture = process.argv.includes('--timing');
 const watcher = join(repositoryRoot, "plugins", "cogentspec", "skills", "cogentspec", "scripts", "watch-cogentspec-popout-bridge.ps1");
 const projectWatcher = join(repositoryRoot, "plugins", "cogentspec", "skills", "cogentspec", "scripts", "watch-cogentstack-bridge.ps1");
 const productionHelper = join(repositoryRoot, "plugins", "cogentspec", "skills", "cogentspec", "scripts", "open-chatgpt-popup.ps1");
@@ -133,7 +134,7 @@ assert.match(projectWatcherSource, /targetRequestId -eq 'chatgpt-desktop-popup:c
 assert.match(projectWatcherSource, /targetRequestId -eq 'chatgpt-desktop-popup:update'[\s\S]*?\$arguments \+= '-UseRetainedChat'/);
 assert.match(projectWatcherSource, /if \(-not \$desktopUiRequest\) \{[\s\S]*?\$arguments \+= '-KeepPinned'/);
 assert.doesNotMatch(productionHelperSource, /\$verifiedRetainedPopup = Find-VerifiedChatGptPopupWindow -ProcessIds \$chatGptProcessIds -AllowNativeRetainedFallback \$false/);
-assert.match(productionHelperSource, /if \(-not \$activatedExisting -and -not \(Invoke-PopupActivation -PopupWindow \$popupWindow\)\)/);
+assert.match(productionHelperSource, /if \(-not \$activatedExisting -and -not \(Measure-PopupStage 'activate_window' \{ Invoke-PopupActivation -PopupWindow \$popupWindow \} -Handle \$popupWindow.ToInt64\(\)\)\)/);
 const composerFailureSource = productionHelperSource.slice(
   productionHelperSource.lastIndexOf("if ($PasteClipboard)"),
   productionHelperSource.lastIndexOf("$temporaryTopmostRestored ="),
@@ -144,7 +145,8 @@ assert.doesNotMatch(productionHelperSource, /found the retained ChatGPT popout b
 assert.doesNotMatch(popupWindowFinder, /bool isPopupToolWindow/);
 
 await writeFile(helper, `
-param([string]$Mode, [switch]$UseRetainedChat, [switch]$OpenWithShortcut, [switch]$KeepPinned, [switch]$PasteClipboard, [switch]$ReturnFocusToWorkspace, [long]$PreferredWindowHandle = 0, [scriptblock]$StartupProgress)
+param([string]$Mode, [switch]$UseRetainedChat, [switch]$OpenWithShortcut, [switch]$KeepPinned, [switch]$PasteClipboard, [switch]$ReturnFocusToWorkspace, [long]$PreferredWindowHandle = 0, [scriptblock]$StartupProgress, [scriptblock]$TimingSink)
+if($TimingSink){[void](& $TimingSink @{stage='uia_composer_search';phase='end';durationMs=123.5;handle=1234;status='ok'})}
 if ($Mode -eq 'inspect') {
   [ordered]@{ status = 'ready'; publisherVerified = $true; popupVerified = $true; popupVisible = $false; popupWindowHandle = 1234; popupProcessId = 5678; conversationState = 'identified'; currentConversationKey = '${"a".repeat(64)}'; chatFingerprint = '${"a".repeat(64)}' } | ConvertTo-Json -Compress
   return
@@ -186,7 +188,7 @@ const server = createServer(async (incoming, response) => {
     return;
   }
   if (incoming.method === "GET") {
-    response.end(JSON.stringify({ request: lifecycle === "requested" ? request : null, bridge: { ready: true } }));
+    response.end(JSON.stringify({ request: lifecycle === "requested" ? request : null, bridge: { ready: true }, ...(timingCapture ? {diagnosticCapture:{id:'aaaaaaaa-1111-1111-1111-111111111111'}} : {}) }));
     return;
   }
   const payload = JSON.parse(body);
@@ -263,7 +265,15 @@ try {
   const stages=calls.filter(c=>c.method==='PATCH').map(c=>JSON.parse(c.body).action);
   assert.deepEqual(stages,['claim','progress','complete']);
   const completion=JSON.parse(calls.find(call=>call.method==='PATCH' && JSON.parse(call.body).action==='complete').body);
-  assert.deepEqual(completion.diagnostics,{status:'opened',decision:'open_once'});
+  if(timingCapture){
+    assert.equal(completion.diagnostics.status,'opened');
+    const rows=completion.diagnostics.timings;
+    assert.ok(rows.some(r=>r.stage==='uia_composer_search'&&r.durationMs===123.5&&r.handle===1234));
+    assert.ok(rows.some(r=>r.stage==='opener'&&r.phase==='start'));
+    assert.ok(rows.some(r=>r.stage==='final_verification'&&r.phase==='end'));
+    assert.ok(rows.every(r=>typeof r.elapsedMs==='number'&&r.elapsedMs>=0));
+    assert.equal(completion.diagnostics.timingTruncated,false);
+  }else assert.deepEqual(completion.diagnostics,{status:'opened',decision:'open_once'});
   const helperResult = JSON.parse((await readFile(helperArguments, "utf8")).replace(/^\uFEFF/, ""));
   assert.deepEqual(helperResult, { mode: "open", useRetainedChat: true, openWithShortcut: true, keepPinned: true, pasteClipboard: !initialization, returnFocusToWorkspace: true });
   const ready = JSON.parse((await readFile(readyPath, "utf8")).replace(/^\uFEFF/, ""));

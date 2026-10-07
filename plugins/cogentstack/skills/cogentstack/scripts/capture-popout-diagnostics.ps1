@@ -166,7 +166,8 @@ try {
         $active=(Request Get).capture
         if(!$active -or $active.id -ne $config.id -or ($active.worker -and $active.worker -ne $config.worker)){break}
         $samples=[Collections.Generic.List[object]]::new()
-        if(!$jobs.uia -and ([DateTime]::UtcNow-$lastUia).TotalSeconds -ge 5){$jobs.uia=Start-Reader 'uia';$lastUia=[DateTime]::UtcNow}
+        # Passive timing capture: do not contend with the production opener's UIA provider.
+        # Standalone SnapshotKind uia remains available for explicit offline diagnostics.
         foreach($kind in @('native','uia')) {
             $job=$jobs[$kind];if(!$job){continue}
             while($job.line.IsCompleted -and $samples.Count -lt 80) {
