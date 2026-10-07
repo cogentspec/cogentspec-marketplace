@@ -8,6 +8,7 @@ import { spawn } from "node:child_process";
 const repositoryRoot = resolve(import.meta.dirname, "..");
 const initialization = process.argv.includes('--initialization');
 const timingCapture = process.argv.includes('--timing');
+const timingFailure = process.argv.includes('--timing-failure');
 const watcher = join(repositoryRoot, "plugins", "cogentspec", "skills", "cogentspec", "scripts", "watch-cogentspec-popout-bridge.ps1");
 const projectWatcher = join(repositoryRoot, "plugins", "cogentspec", "skills", "cogentspec", "scripts", "watch-cogentstack-bridge.ps1");
 const productionHelper = join(repositoryRoot, "plugins", "cogentspec", "skills", "cogentspec", "scripts", "open-chatgpt-popup.ps1");
@@ -147,6 +148,7 @@ assert.doesNotMatch(popupWindowFinder, /bool isPopupToolWindow/);
 await writeFile(helper, `
 param([string]$Mode, [switch]$UseRetainedChat, [switch]$OpenWithShortcut, [switch]$KeepPinned, [switch]$PasteClipboard, [switch]$ReturnFocusToWorkspace, [long]$PreferredWindowHandle = 0, [scriptblock]$StartupProgress, [scriptblock]$TimingSink)
 if($TimingSink){[void](& $TimingSink @{stage='uia_composer_search';phase='end';durationMs=123.5;handle=1234;status='ok'})}
+${timingFailure ? "if($TimingSink){[void](& $TimingSink @{stage='uia_root';phase='end';durationMs='invalid-fixture-duration';handle=77;status='ok'})}" : ''}
 if ($Mode -eq 'inspect') {
   [ordered]@{ status = 'ready'; publisherVerified = $true; popupVerified = $true; popupVisible = $false; popupWindowHandle = 1234; popupProcessId = 5678; conversationState = 'identified'; currentConversationKey = '${"a".repeat(64)}'; chatFingerprint = '${"a".repeat(64)}' } | ConvertTo-Json -Compress
   return
@@ -228,12 +230,15 @@ try {
   let output;
   try {
     output = await new Promise((resolveProcess, rejectProcess) => {
-    const child = spawn("powershell.exe", [
-      "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", watcher,
+    const workerArgs = [
       "-PluginId", "cogentspec", "-PluginVersion", "0.6.58",
       "-ReadyPath", readyPath, "-PollMilliseconds", "500", "-MaxPolls", "3",
       "-ServiceUrl", serviceUrl, "-TestToken", "fixture-token", "-TestHelperPath", helper,
-    ], { windowsHide: true });
+    ];
+    // Match the installed launcher's encoded command and child script scope.
+    const quote = value => "'" + value.replaceAll("'", "''") + "'";
+    const invocation = `& ${quote(watcher)} ${workerArgs.map((v,i)=>i%2===0?v:quote(v)).join(' ')}`;
+    const child = spawn("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-EncodedCommand", Buffer.from(invocation,'utf16le').toString('base64')], { windowsHide: true });
     let stdout = "";
     let stderr = "";
     child.stdout.on("data", (chunk) => { stdout += chunk; });
@@ -272,7 +277,7 @@ try {
     assert.ok(rows.some(r=>r.stage==='opener'&&r.phase==='start'));
     assert.ok(rows.some(r=>r.stage==='final_verification'&&r.phase==='end'));
     assert.ok(rows.every(r=>typeof r.elapsedMs==='number'&&r.elapsedMs>=0));
-    assert.equal(completion.diagnostics.timingTruncated,false);
+    assert.equal(completion.diagnostics.timingTruncated,timingFailure);
   }else assert.deepEqual(completion.diagnostics,{status:'opened',decision:'open_once'});
   const helperResult = JSON.parse((await readFile(helperArguments, "utf8")).replace(/^\uFEFF/, ""));
   assert.deepEqual(helperResult, { mode: "open", useRetainedChat: true, openWithShortcut: true, keepPinned: true, pasteClipboard: !initialization, returnFocusToWorkspace: true });

@@ -914,9 +914,13 @@ try {
                     $timingClock = [Diagnostics.Stopwatch]::StartNew()
                     $script:RequestTimingSink = $null
                     if ($listing.PSObject.Properties['diagnosticCapture'] -and $listing.diagnosticCapture) {
+                        # Capture the implementation itself: GetNewClosure's module
+                        # cannot resolve script-local function names under & launch.
+                        $timingWriter = ${function:Add-RequestTiming}
                         $script:RequestTimingSink = {
                             param($row)
-                            Add-RequestTiming $timingState $row $timingClock.Elapsed.TotalMilliseconds
+                            try { [void](& $timingWriter $timingState $row $timingClock.Elapsed.TotalMilliseconds) }
+                            catch { $timingState.truncated = $true }
                         }.GetNewClosure()
                     }
                     $message = 'The standalone ChatGPT Popout could not be opened.'
@@ -989,9 +993,15 @@ try {
                         if ($script:RequestTimingSink) { [void](& $script:RequestTimingSink @{stage='final_verification';phase='end'}) }
                         $script:RequestTimingSink = $null
                     }
-                    if ($timingState.milestones.Count -gt 0 -or $timingState.groups.Count -gt 0) {
-                        $diagnostics.timings = @(@($timingState.milestones.ToArray()) + @($timingState.groups.Values) | Sort-Object elapsedMs)
-                        $diagnostics.timingTruncated = $timingState.truncated
+                    if ($timingState.milestones.Count -gt 0 -or $timingState.groups.Count -gt 0 -or $timingState.truncated) {
+                        try {
+                            $diagnostics.timings = @(@($timingState.milestones.ToArray()) + @($timingState.groups.Values) | Sort-Object elapsedMs)
+                            $diagnostics.timingTruncated = $timingState.truncated
+                        } catch {
+                            # Optional evidence must never prevent terminal reporting.
+                            $diagnostics.timings = @()
+                            $diagnostics.timingTruncated = $true
+                        }
                     }
                     [void](Invoke-PopoutApi -Method Patch -Path "/api/plugin/desktop-popout-actions$query" -Token $token -Body @{
                         requestId = [string]$request.id

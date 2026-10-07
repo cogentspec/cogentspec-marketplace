@@ -13,6 +13,7 @@ foreach($name in @('open-chatgpt-popup.ps1','watch-cogentspec-popout-bridge.ps1'
   Invoke-Expression $fn.Extent.Text
   $aggregate=$ast.Find({param($n)$n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Add-RequestTiming'},$true)
   Invoke-Expression $aggregate.Extent.Text
+  $sinkExpression=$ast.Find({param($n)$n -is [Management.Automation.Language.ScriptBlockExpressionAst] -and $n.Extent.Text -match 'param\(\$row\)' -and $n.Extent.Text -match '& \$timingWriter'},$true).Extent.Text
  }
 }
 $TimingSink=$null
@@ -49,3 +50,19 @@ if($summary.startedCount -ne 2001 -or $summary.completedCount -ne 2000){throw 'U
 for($i=0;$i -lt 200;$i++){Add-RequestTiming $state @{stage='uia_root';phase='start';handle=(100+$i)} 26000}
 if(-not $state.truncated -or $state.groups.Count -ne 128 -or $state.milestones[-1].stage -ne 'final_verification'){throw 'Group overflow corrupted milestones'}
 Write-Output 'PASS: 6000 scan events retain late milestones, full totals, first match, incomplete calls, and explicit bounded overflow.'
+
+# Construct the actual callback inside a child scope, then invoke after that
+# scope has gone away. No global function lookup may be required.
+$fixture = & {
+ param($writer,$expression)
+ $timingWriter=$writer
+ $timingState=@{groups=[ordered]@{};milestones=[Collections.Generic.List[object]]::new();truncated=$false}
+ $timingClock=[Diagnostics.Stopwatch]::StartNew()
+ $callback=(Invoke-Expression $expression).GetNewClosure()
+ @{sink=$callback;state=$timingState}
+} ${function:Add-RequestTiming} $sinkExpression
+& $fixture.sink @{stage='opener';phase='start'}
+& $fixture.sink @{stage='uia_root';phase='end';handle=77;durationMs='invalid-fixture-duration';status='ok'}
+& $fixture.sink @{stage='final_verification';phase='end'}
+if($fixture.state.milestones.Count -ne 2 -or -not $fixture.state.truncated){throw 'Scoped callback lost milestones or leaked diagnostics failure'}
+Write-Output 'PASS: production callback survives child-scope exit and contains injected aggregation failure.'
