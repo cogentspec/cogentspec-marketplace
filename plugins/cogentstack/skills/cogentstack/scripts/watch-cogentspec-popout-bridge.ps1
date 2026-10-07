@@ -45,7 +45,7 @@ function Write-MarkerJson($Value) {
     if ($parent) { [void](New-Item -ItemType Directory -Path $parent -Force) }
     $temporary = "$ReadyPath.$PID.tmp"
     try {
-        [IO.File]::WriteAllText($temporary, ($Value | ConvertTo-Json), [Text.UTF8Encoding]::new($false))
+        [IO.File]::WriteAllText($temporary, ($Value | ConvertTo-Json -Depth 6), [Text.UTF8Encoding]::new($false))
         for ($attempt=0; $attempt -lt 10; $attempt++) {
             try {
                 if ([IO.File]::Exists($ReadyPath)) { [IO.File]::Replace($temporary,$ReadyPath,[System.Management.Automation.Language.NullString]::Value) }
@@ -447,6 +447,8 @@ function Write-ReadyMarker([bool]$ServerAcknowledged, [string]$Status = 'ready',
         pinHotkeyReady = [bool]$script:PinHotkeyReady
         pinHotkeyScope = 'verified_popout_or_bound_active_workspace'
         pinHotkeyError = [string]$script:PinHotkeyError
+        pinCaptureSession = if (-not $TestToken -and $script:PinHotkeyReady) { [CogentSpec.ChatGptPopupPinHotkey]::CaptureSession } else { '' }
+        pinAttempts = if (-not $TestToken -and $script:PinHotkeyReady) { @([CogentSpec.ChatGptPopupPinHotkey]::Attempts()) } else { @() }
         popupVisible = [bool]$script:VerifiedPopupVisible
         conversationState = [string]$script:CurrentConversationState
         currentConversationKey = [string]$script:CurrentConversationKey
@@ -590,7 +592,7 @@ namespace CogentSpec {
         [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")]
         private static extern IntPtr GetWindowLongPtr(IntPtr window, int index);
 
-        [DllImport("user32.dll")]
+        [DllImport("user32.dll", SetLastError = true)]
         private static extern bool SetWindowPos(IntPtr window, IntPtr insertAfter, int x, int y, int width, int height, uint flags);
 
         [DllImport("user32.dll")]
@@ -624,6 +626,26 @@ namespace CogentSpec {
         private static string lastToggleStatus = "idle";
         private static int lastTogglePinned;
         private static long lastToggleUtcTicks;
+        public sealed class PinAttempt {
+            public long sequence,handle,foregroundHandle; public string at,status;
+            public bool verified,nativeCalled,applied,beforePinned,requestedPinned,afterPinned;
+            public int win32Error;
+        }
+        private static readonly object TraceLock=new object();
+        private static readonly System.Collections.Generic.Queue<PinAttempt> trace=new System.Collections.Generic.Queue<PinAttempt>();
+        private static string captureSession=""; private static DateTime captureUntil;
+        private static long attemptSequence;
+        public static void ConfigureCapture(string session) {
+            lock(TraceLock){if(session!=captureSession){trace.Clear();attemptSequence=0;}
+                captureSession=session??"";captureUntil=DateTime.UtcNow.AddSeconds(10);}
+        }
+        public static string CaptureSession {get {lock(TraceLock){return DateTime.UtcNow<captureUntil?captureSession:"";}}}
+        public static PinAttempt[] Attempts(){lock(TraceLock){return CaptureSession!=""?trace.ToArray():new PinAttempt[0];}}
+        private static void RecordAttempt(PinAttempt attempt) {
+            // Only this known shortcut; no text, other keys, UIA, I/O or network.
+            lock(TraceLock){if(CaptureSession=="")return;attempt.sequence=++attemptSequence;
+                attempt.at=DateTime.UtcNow.ToString("o");if(trace.Count==64)trace.Dequeue();trace.Enqueue(attempt);}
+        }
 
         public static bool Start() {
             lock (Sync) {
@@ -714,34 +736,42 @@ namespace CogentSpec {
         }
 
         private static bool IsVerifiedPopup(IntPtr window) {
+            return VerificationFailure(window)=="";
+        }
+        private static string VerificationFailure(IntPtr window) {
             long expectedWindow = Interlocked.Read(ref verifiedPopupWindow);
             int expectedProcess = Interlocked.CompareExchange(ref verifiedProcessId, 0, 0);
-            if (expectedWindow == 0 || expectedProcess <= 0 || window.ToInt64() != expectedWindow) return false;
-            if (!IsWindow(window) || !IsWindowVisible(window)) return false;
+            if (expectedWindow == 0 || expectedProcess <= 0 || window.ToInt64() != expectedWindow) return "no_verified_target";
+            if (!IsWindow(window)) return "window_destroyed";
+            if (!IsWindowVisible(window)) return "target_hidden";
             uint processId;
             GetWindowThreadProcessId(window, out processId);
-            if (processId != (uint)expectedProcess) return false;
+            if (processId != (uint)expectedProcess) return "process_mismatch";
             // Reject a destroyed/recycled HWND even before the next inspection.
             foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies()) {
                 var controller = assembly.GetType("CogentSpec.PopoutWorkspaceLifecycle");
                 if (controller == null) continue;
-                try { return (bool)controller.GetMethod("MatchesWindow").Invoke(null, new object[] { expectedWindow }); }
-                catch { return false; }
+                try { return (bool)controller.GetMethod("MatchesWindow").Invoke(null, new object[] { expectedWindow })?"":"window_lifetime_mismatch"; }
+                catch { return "controller_check_failed"; }
             }
-            return false;
+            return "controller_unavailable";
         }
 
-        private static void ToggleTopmost(IntPtr window) {
+        private static void ToggleTopmost(IntPtr window, IntPtr foreground) {
             bool shouldPin = !IsTopmost(window);
             IntPtr position = shouldPin ? HWND_TOPMOST : HWND_NOTOPMOST;
             uint flags = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE;
             bool applied = SetWindowPos(window, position, 0, 0, 0, 0, flags);
+            int error = applied ? 0 : Marshal.GetLastWin32Error();
             bool finalPinned = IsTopmost(window);
             lastTogglePinned = finalPinned ? 1 : 0;
             lastToggleStatus = applied && finalPinned == shouldPin
                 ? (finalPinned ? "pinned" : "unpinned")
                 : "pin_failed";
             Interlocked.Exchange(ref lastToggleUtcTicks, DateTime.UtcNow.Ticks);
+            RecordAttempt(new PinAttempt{handle=window.ToInt64(),foregroundHandle=foreground.ToInt64(),
+                verified=true,nativeCalled=true,applied=applied,beforePinned=!shouldPin,requestedPinned=shouldPin,
+                afterPinned=finalPinned,win32Error=error,status=lastToggleStatus});
         }
 
         private static IntPtr HookCallback(int code, IntPtr wParam, IntPtr lParam) {
@@ -761,9 +791,12 @@ namespace CogentSpec {
                             IsVerifiedForegroundPopup(foreground), true, true, true,
                             WorkspacePinAllowed(target.ToInt64()))) {
                             Interlocked.Exchange(ref capturedY, 1);
-                            ToggleTopmost(target);
+                            ToggleTopmost(target,foreground);
                             return new IntPtr(1);
                         }
+                        string reason=VerificationFailure(target);
+                        RecordAttempt(new PinAttempt{handle=target.ToInt64(),foregroundHandle=foreground.ToInt64(),
+                            verified=reason=="",status=reason==""?"workspace_not_authorized":reason});
                     }
                 }
             }
@@ -969,6 +1002,7 @@ try {
             # the lifecycle controller thread and is armed only by website opt-in.
             if (-not $TestToken -and $listing.PSObject.Properties['diagnosticCapture']) {
                 $capture = $listing.diagnosticCapture
+                if ($script:PinHotkeyReady) { [CogentSpec.ChatGptPopupPinHotkey]::ConfigureCapture($(if ($capture) { [string]$capture.id } else { '' })) }
                 if ($capture -and [string]$capture.id -ne $diagnosticSession) {
                     if ($diagnosticProcess) { $diagnosticProcess.Dispose() }
                     $diagnosticSession = [string]$capture.id

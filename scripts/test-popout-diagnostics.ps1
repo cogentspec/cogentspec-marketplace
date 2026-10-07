@@ -55,3 +55,20 @@ foreach($scenario in @('stop','wrong-session','wrong-worker','lost-claim','uploa
  Write-Output "PASS: collector $scenario"
 }
 Write-Output 'PASS: policy import, privacy, read-only contract, opt-in/session/worker fences, real orchestration and child cleanup; no native UI accessed.'
+
+# Execute marker ingestion, including legacy and cross-session markers, without
+# touching real worker state. Pin evidence must survive JSON and stay scoped.
+$reader=$ast.Find({param($n)$n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Read-Worker'},$true)
+Invoke-Expression $reader.Extent.Text
+$config=@{id='aaaaaaaa-1111-1111-1111-111111111111'}
+$script:fixtureMarker=@{pluginVersion='fixture';pinCaptureSession=$config.id;pinAttempts=@(@{sequence=1;status='no_verified_target';nativeCalled=$false})}|ConvertTo-Json -Depth 6
+function Get-Content {param($LiteralPath,[switch]$Raw) $script:fixtureMarker}
+try {
+ $m=Read-Worker
+ if(!$m.pinTraceAvailable -or $m.pinAttempts[0].status -ne 'no_verified_target'){throw 'Pin trace lost in collector'}
+ $config.id='bbbbbbbb-1111-1111-1111-111111111111';$m=Read-Worker
+ if($m.pinTraceAvailable -or $m.pinAttempts.Count){throw 'Foreign capture evidence leaked'}
+ $script:fixtureMarker='{"pluginVersion":"legacy"}';$m=Read-Worker
+ if($m.pinTraceAvailable -or $m.pinAttempts.Count){throw 'Legacy marker fabricated trace coverage'}
+} finally {Remove-Item Function:\Get-Content}
+Write-Output 'PASS: pin attempt ingestion, unavailable legacy coverage and capture-session isolation.'

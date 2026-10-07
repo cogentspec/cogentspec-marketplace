@@ -115,7 +115,7 @@ assert.match(watcherSource, /WH_KEYBOARD_LL/);
 assert.doesNotMatch(watcherSource, /RegisterHotKey/);
 assert.match(watcherSource, /IsVerifiedForegroundPopup\(foreground\)/);
 assert.match(watcherSource, /window\.ToInt64\(\) != expectedWindow/);
-assert.match(watcherSource, /if \(processId != \(uint\)expectedProcess\) return false;/);
+assert.match(watcherSource, /if \(processId != \(uint\)expectedProcess\) return "process_mismatch";/);
 assert.match(watcherSource, /GetMethod\("MatchesWindow"\)/);
 assert.match(watcherSource, /\[int\]\$inspection\.popupProcessId/);
 assert.match(watcherSource, /private const int VK_Y = 0x59/);

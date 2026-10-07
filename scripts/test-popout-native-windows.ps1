@@ -46,9 +46,9 @@ try {
   $allow=[CogentSpec.ChatGptPopupPinHotkey].GetMethod('WorkspacePinAllowed',$flags).Invoke($null,@($handle.ToInt64()))
   Check $allow "workspace hotkey target accepted (pinned=$pinned)"
   $toggle=[CogentSpec.ChatGptPopupPinHotkey].GetMethod('ToggleTopmost',$flags)
-  $toggle.Invoke($null,@($handle));Pump
+  $toggle.Invoke($null,@($handle,$work.Handle));Pump
   Check ((Pinned $handle) -eq (-not $pinned)) "first native pin toggle changes state (pinned=$pinned)"
-  $toggle.Invoke($null,@($handle));Pump
+  $toggle.Invoke($null,@($handle,$work.Handle));Pump
   Check ((Pinned $handle) -eq $pinned) "second native pin toggle restores state (pinned=$pinned)"
   [CogentSpec.PopoutWorkspaceLifecycle]::Receive('fixture-owner',('a'*64),2,'hidden',0)
   [CogentSpec.PopoutWorkspaceLifecycle]::Tick('');Pump;[CogentSpec.PopoutWorkspaceLifecycle]::Tick('')

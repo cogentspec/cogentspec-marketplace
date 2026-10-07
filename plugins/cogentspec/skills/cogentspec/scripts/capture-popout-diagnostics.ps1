@@ -21,7 +21,9 @@ function Read-Worker {
         return @{kind='worker';available=$true;version=$m.pluginVersion;pid=$m.processId;at=$m.acknowledgedAt;
             handle=$m.popupWindowHandle;visible=$m.popupVisible;verified=$m.windowControlVerified;
             state=$m.workspaceLifecycleState;action=$m.workspaceLifecycleAction;pinHotkeyReady=$m.pinHotkeyReady;
-            fastControlConnected=$m.fastControlConnected;nativeDispatchMilliseconds=$m.nativeDispatchMilliseconds}
+            fastControlConnected=$m.fastControlConnected;nativeDispatchMilliseconds=$m.nativeDispatchMilliseconds;
+            pinTraceAvailable=($m.pinCaptureSession -eq $config.id -and [bool]$m.pinCaptureSession);
+            pinAttempts=if($m.pinCaptureSession -eq $config.id -and $m.pinCaptureSession){@($m.pinAttempts)}else{@()}}
     } catch {return @{kind='worker';inspectionComplete=$false;status='marker_unavailable_or_incomplete'}}
 }
 

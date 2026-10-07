@@ -36,7 +36,7 @@ namespace CogentSpecHandoffFixture {
  }
  public static class NativeFixture {
   public static long Foreground=10;public static bool Visible=false;public static int Shows,Closes;
-  public static bool RejectProperty,Pinned;public static int PinCalls;
+  public static bool RejectProperty,Pinned,RejectPin;public static int PinCalls;
   public static System.Collections.Generic.Dictionary<long,IntPtr> Properties=new System.Collections.Generic.Dictionary<long,IntPtr>();
   public static FakeProcess Process(int p){return new FakeProcess{ProcessName=p==10?"chrome":"ChatGPT"};}
  }
@@ -118,7 +118,7 @@ $hookBodies=@{
  IsWindowVisible='return NativeFixture.Visible;'
  GetWindowThreadProcessId='processId=(uint)window.ToInt64();return processId;'
  GetWindowLongPtr='return new IntPtr(NativeFixture.Pinned?8:0);'
- SetWindowPos='NativeFixture.PinCalls++;NativeFixture.Pinned=insertAfter.ToInt64()==-1;return true;'
+ SetWindowPos='NativeFixture.PinCalls++;if(NativeFixture.RejectPin)return false;NativeFixture.Pinned=insertAfter.ToInt64()==-1;return true;'
  GetMessage='message=new Message();return 0;'
  TranslateMessage='return true;'
  DispatchMessage='return IntPtr.Zero;'
@@ -134,7 +134,7 @@ $hookCode=[regex]::Replace($hookCode,'\[DllImport\([^\n]+?\)\]\s+private static 
 })
 if($hookCode -match 'DllImport|extern '){throw 'Native hook call escaped fixture'}
 # Compile together so the hook can reference the native fixture without an on-disk assembly.
-$hookCode=$hookCode.Replace('CogentSpecHandoffFixture','CogentSpecPinFixture')
+$hookCode=$hookCode.Replace('CogentSpecHandoffFixture','CogentSpecPinFixture').Replace('Marshal.GetLastWin32Error()','5')
 $combined=$code.Replace('CogentSpecHandoffFixture','CogentSpecPinFixture')+"`n"+$hookCode
 $usings=([regex]::Matches($combined,'(?m)^using [^;]+;')|ForEach-Object {$_.Value}|Select-Object -Unique)-join "`n"
 Add-Type -TypeDefinition ($usings+"`n"+[regex]::Replace($combined,'(?m)^using [^;]+;',''))
@@ -152,6 +152,14 @@ function Press-PinFixture {
   $null=$hookCallback.Invoke($null,@(0,[IntPtr]0x101,$data))
  } finally {[Runtime.InteropServices.Marshal]::FreeHGlobal($data)}
 }
+Press-PinFixture
+Check ($hook::Attempts().Length -eq 0) 'Diagnostics recorded before opt-in'
+$hook::ConfigureCapture($owner)
+Press-PinFixture
+$blankAttempt=$hook::Attempts()[-1]
+Check ($blankAttempt.status -eq 'no_verified_target' -and !$blankAttempt.nativeCalled -and $native::PinCalls -eq 0) 'Fresh unverified blank attempt was not diagnosed without input'
+$hook::ConfigureCapture($other)
+Check ($hook::Attempts().Length -eq 0) 'Previous capture leaked into new session'
 foreach($name in @('Restore-PopoutWindowControlTarget','Update-PopupPinHotkeyTarget')) {
  $definition=$ast.Find({param($n)$n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name},$true)
  Invoke-Expression ($definition.Extent.Text.Replace('CogentSpec.','CogentSpecPinFixture.'))
@@ -178,6 +186,8 @@ foreach($pinned in @($false,$true)) {
  Check ($type::MatchesWindow($h)) 'New composer revoked composer-focused shortcut identity'
  $calls=$native::PinCalls;Press-PinFixture
  Check ($native::Pinned -ne $pinned -and $native::PinCalls -eq $calls+1) 'Workspace shortcut did not toggle exactly once'
+ $attempt=$hook::Attempts()[-1]
+ Check ($attempt.nativeCalled -and $attempt.applied -and $attempt.beforePinned -eq $pinned -and $attempt.afterPinned -ne $pinned -and $attempt.foregroundHandle -eq 10) 'Native pin attempt evidence incorrect'
  Press-PinFixture
  Check ($native::Pinned -eq $pinned -and $native::PinCalls -eq $calls+2) 'Workspace shortcut could not toggle back'
  $native::Foreground=$h;Press-PinFixture;Press-PinFixture
@@ -207,6 +217,17 @@ foreach($pinned in @($false,$true)) {
  $script:inspectionFixture.popupVerified=$true;Update-PopupPinHotkeyTarget
  Check ($script:LifecycleWindowKey -ne $key -and $script:LifecycleWorkerId -ne $worker -and $type::BoundOwner -eq '') 'Freshly verified replacement inherited old ownership'
 }
+$native::Visible=$true;$native::Foreground=$h;$native::RejectPin=$true
+Press-PinFixture
+$failed=$hook::Attempts()[-1]
+Check ($failed.nativeCalled -and !$failed.applied -and $failed.win32Error -eq 5 -and $failed.status -eq 'pin_failed') 'Failed native call lost Windows error'
+$native::RejectPin=$false
+for($i=0;$i -lt 70;$i++){Press-PinFixture}
+Check ($hook::Attempts().Length -eq 64 -and $hook::Attempts()[0].sequence -gt 1) 'Trace bound or sequence gap lost'
+$hook.GetField('captureUntil',[Reflection.BindingFlags]'NonPublic,Static').SetValue($null,[DateTime]::UtcNow.AddSeconds(-1))
+Press-PinFixture;Check ($hook::Attempts().Length -eq 0 -and $hook::CaptureSession -eq '') 'Expired capture still exposed evidence'
+$hook::ConfigureCapture('');Press-PinFixture
+Check ($hook::Attempts().Length -eq 0) 'Stopped capture still records'
 $native::RejectProperty=$true
 Check (!$type::Observe(26,26,'denied')) 'Failed lifetime registration accepted'
 $native::RejectProperty=$false

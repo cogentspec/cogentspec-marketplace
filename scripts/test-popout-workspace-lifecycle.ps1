@@ -68,6 +68,6 @@ $m.HandoffActive=$false;$m.ControllerHidden=$true
 Check $m 'active' $true $false $false $true 'restore'
 $mirror=Join-Path $PSScriptRoot '..\plugins\cogentstack\skills\cogentstack\scripts\watch-cogentspec-popout-bridge.ps1'
 if(-not $source.Contains('WorkspacePinAllowed(target.ToInt64())')){throw 'Owner-scoped workspace pin target missing'}
-if(-not $source.Contains('ToggleTopmost(target)')){throw 'Pin must toggle the verified Popout, not the browser'}
+if(-not $source.Contains('ToggleTopmost(target,foreground)')){throw 'Pin must toggle the verified Popout, not the browser'}
 if((Get-Content -Raw $mirror) -ne $source){throw 'Watcher mirrors differ'}
 @{status='passed';assertions=$count;nativeWindowCallsPerformed=$false;physicalAcceptance='not_performed'}|ConvertTo-Json -Compress
