@@ -66,7 +66,7 @@ assert.match(productionHelperSource, /\$Element\.Current\.IsEnabled -and \$Eleme
 assert.match(productionHelperSource, /'Do anything'/);
 const composerConditionSource = productionHelperSource.slice(
   productionHelperSource.indexOf("function Get-ChatGptComposerCondition"),
-  productionHelperSource.indexOf("function Set-ChatGptComposerFocus"),
+  productionHelperSource.indexOf("function Get-ChatGptComposerMatches"),
 );
 assert.doesNotMatch(composerConditionSource, /ControlTypeProperty/);
 assert.match(productionHelperSource, /Working-screen[\s\S]*?Popout requests keep that pin/);
@@ -270,6 +270,7 @@ try {
   const stages=calls.filter(c=>c.method==='PATCH').map(c=>JSON.parse(c.body).action);
   assert.deepEqual(stages,['claim','progress','complete']);
   const completion=JSON.parse(calls.find(call=>call.method==='PATCH' && JSON.parse(call.body).action==='complete').body);
+  assert.equal(completion.windowControlReady,false,'Test transport without native handoff cannot claim window-control readiness');
   if(timingCapture){
     assert.equal(completion.diagnostics.status,'opened');
     const rows=completion.diagnostics.timings;

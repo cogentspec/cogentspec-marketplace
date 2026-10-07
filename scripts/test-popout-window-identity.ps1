@@ -80,3 +80,28 @@ $composer=$null
 $unknown=& ([scriptblock]::Create($guard.Extent.Text))
 if($unknown.state -ne 'unknown' -or $unknown.currentConversationKey -or $unknown.chatFingerprint -or $unknown.commandMarkerFound){throw 'New composer inherited a connection'}
 @{status='passed';scenarios=18;nativeWindowCallsPerformed=$false;physicalAcceptance='not_performed'}|ConvertTo-Json -Compress
+
+Add-Type -AssemblyName UIAutomationClient
+foreach($name in @('Get-ChatGptComposerCondition','Test-IsChatGptComposer','Get-ChatGptComposerMatches')) {
+ $definition=$helperAst.Find({param($n)$n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name},$true)
+ Invoke-Expression $definition.Extent.Text
+}
+function Measure-PopupStage {param($Stage,$Operation,$Handle) & $Operation}
+$TimingSink=$null
+$mockRoot=[pscustomobject]@{Calls=0;Exact=@();Fallback=@()}
+$mockRoot|Add-Member ScriptMethod FindAll {param($scope,$condition) $this.Calls++;if($this.Calls -eq 1){return $this.Exact};return $this.Fallback}
+function Field($name,$enabled=$true,$focusable=$true){[pscustomobject]@{Current=[pscustomobject]@{Name=$name;IsEnabled=$enabled;IsKeyboardFocusable=$focusable}}}
+foreach($case in @(
+ @{fields=@((Field (' '+[char]0x200B+'Do anything ')));expected=1},
+ @{fields=@((Field 'Private draft text'));expected=0},
+ @{fields=@((Field 'Do anything' $false));expected=0},
+ @{fields=@((Field 'Do anything' $true $false));expected=0},
+ @{fields=@((Field 'Do anything'),(Field 'Work with ChatGPT'));expected=2}
+)) {
+ $mockRoot.Calls=0;$mockRoot.Exact=@();$mockRoot.Fallback=$case.fields
+ $matches=@(Get-ChatGptComposerMatches $mockRoot 1234)
+ if($matches.Count -ne $case.expected){throw 'Normalized composer selection or fail-closed guard failed'}
+}
+$mockRoot.Calls=0;$mockRoot.Exact=@((Field 'Do anything'));$mockRoot.Fallback=@()
+if(@(Get-ChatGptComposerMatches $mockRoot 1234).Count -ne 1 -or $mockRoot.Calls -ne 1){throw 'Exact ready composer unnecessarily rescanned'}
+Write-Output 'PASS: normalized-name fallback, unrelated/disabled/unfocusable rejection, duplicate ambiguity, exact fast path; no native UI calls.'

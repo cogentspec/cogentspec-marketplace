@@ -124,6 +124,7 @@ namespace CogentSpec {
   static uint handoffBrowserPid;
   static long handoffBrowserStarted;
   static DateTime handoffUntil;
+  static IntPtr handoffTarget;
   static IntPtr handoffPopup;
   static long sequence;
   static DateTime received,actionAt;
@@ -144,7 +145,7 @@ namespace CogentSpec {
      if((process.ProcessName!="chrome"&&process.ProcessName!="msedge")||title.ToString().IndexOf("CogentSpec",StringComparison.OrdinalIgnoreCase)<0)return false;
      handoffBrowser=h;handoffBrowserPid=p;handoffBrowserStarted=process.StartTime.ToUniversalTime().Ticks;
     }}catch{return false;}
-    handoffOwner=id;handoffPopup=IntPtr.Zero;handoffUntil=DateTime.MinValue;
+    handoffOwner=id;handoffPopup=IntPtr.Zero;handoffTarget=IntPtr.Zero;handoffUntil=DateTime.MinValue;
     model.BeginHandoff();return true;
    }
   }
@@ -156,17 +157,20 @@ namespace CogentSpec {
      var title=new StringBuilder(512);GetWindowText(foreground,title,title.Capacity);
      if(title.ToString().IndexOf("CogentSpec",StringComparison.OrdinalIgnoreCase)<0)model.HandoffCancelled=true;
     }
+    if(model.HandoffActive&&!model.HandoffCancelled&&h!=0)handoffTarget=new IntPtr(h);
     return model.HandoffActive&&!model.HandoffCancelled;
    }
   }
-  public static void EndHandoff(bool successful) {
+  public static bool EndHandoff(bool windowHandoffAllowed) {
    lock(gate) {
-    bool grant=successful&&!model.HandoffCancelled&&Matches();
+    bool grant=windowHandoffAllowed&&model.HandoffActive&&!model.HandoffCancelled&&Matches()&&
+     popup==handoffTarget&&GetForegroundWindow()==popup;
     model.HandoffActive=false;
     handoffPopup=grant?popup:IntPtr.Zero;
     handoffUntil=grant?DateTime.UtcNow.AddSeconds(10):DateTime.MinValue;
     if(!grant)handoffOwner="";
     wake.Set();
+    return grant;
    }
   }
   public static string[] ControlAcknowledgment() {
@@ -962,6 +966,7 @@ try {
                 }
                 if ($claimed.request) {
                     $completed = $false
+                    $handoffStarted = $false
                     $diagnostics = @{ status='helper_exception'; decision='not_reported' }
                     $timingState = @{groups=[ordered]@{};milestones=[Collections.Generic.List[object]]::new();truncated=$false}
                     $timingClock = [Diagnostics.Stopwatch]::StartNew()
@@ -1052,7 +1057,12 @@ try {
                     }
                     if ($script:RequestTimingSink) { [void](& $script:RequestTimingSink @{stage='final_verification';phase='start'}) }
                     try { Update-PopupPinHotkeyTarget } finally {
-                        if (-not $TestToken) { [CogentSpec.PopoutWorkspaceLifecycle]::EndHandoff($completed) }
+                        $windowControlReady = $false
+                        if (-not $TestToken) {
+                            # Positive identity from final inspection plus the exact
+                            # guarded startup target; independent of paste success.
+                            $windowControlReady = [CogentSpec.PopoutWorkspaceLifecycle]::EndHandoff($handoffStarted -and $script:CurrentPopupWindowHandle -ne 0)
+                        }
                         if ($script:RequestTimingSink -and -not $TestToken -and $script:CurrentPopupWindowHandle -ne 0) {
                             try {
                                 $h = [IntPtr]$script:CurrentPopupWindowHandle
@@ -1079,6 +1089,7 @@ try {
                         requestId = [string]$request.id
                         action = if ($completed) { 'complete' } else { 'fail' }
                         statusMessage = $message
+                        windowControlReady = $windowControlReady
                         diagnostics = $diagnostics
                     })
                 }

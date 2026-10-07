@@ -48,7 +48,7 @@ function Write-CompactJson($Value) {
 
 function Test-PopupInteractionReady([IntPtr]$PopupWindow) {
     $root = [System.Windows.Automation.AutomationElement]::FromHandle($PopupWindow)
-    $matches = @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, (Get-ChatGptComposerCondition)) | Where-Object { Test-IsChatGptComposer $_ })
+    $matches = @(Get-ChatGptComposerMatches $root $PopupWindow.ToInt64())
     $focused = $matches.Count -eq 1 -and $matches[0].Current.HasKeyboardFocus
     $foreground = [CogentSpec.ChatGptPopupNative]::IsForeground($PopupWindow)
     $visible = [CogentSpec.ChatGptPopupNative]::IsVisible($PopupWindow)
@@ -98,6 +98,36 @@ function Get-ChatGptComposerCondition {
     return [System.Windows.Automation.OrCondition]::new($conditions)
 }
 
+function Get-ChatGptComposerMatches($Root, [long]$Handle) {
+    $condition = Get-ChatGptComposerCondition
+    $candidates = @(Measure-PopupStage 'uia_composer_search' { $Root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condition) } -Handle $Handle)
+    $matches = @($candidates | Where-Object { Test-IsChatGptComposer $_ })
+    $fallbackCount = 0
+    if ($matches.Count -eq 0) {
+        # Exact-name filtering precedes normalization. Restrict the fallback to
+        # editable/document roles on this root, then apply the SAME name and
+        # input-readiness rules. Never accept an arbitrary editable field.
+        $roles = [System.Windows.Automation.OrCondition]::new(
+            [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Edit),
+            [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Document))
+        $fallback = @(Measure-PopupStage 'uia_composer_search' { $Root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $roles) } -Handle $Handle)
+        $fallbackCount = $fallback.Count
+        $matches = @($fallback | Where-Object { Test-IsChatGptComposer $_ })
+    }
+    if ($TimingSink) {
+        $disabled = @($candidates | Where-Object { -not $_.Current.IsEnabled }).Count
+        $unfocusable = @($candidates | Where-Object { -not $_.Current.IsKeyboardFocusable }).Count
+        $signature = "$Handle|$($candidates.Count)|$fallbackCount|$disabled|$unfocusable|$($matches.Count)"
+        if (-not (Get-Variable ComposerProbeSignatures -Scope Script -ErrorAction SilentlyContinue)) { $script:ComposerProbeSignatures = @{} }
+        if ($script:ComposerProbeSignatures[$Handle] -ne $signature) {
+            $script:ComposerProbeSignatures[$Handle] = $signature
+            # Counts only, never control names, conversation text or draft values.
+            try { [void](& $TimingSink @{stage='composer_probe';phase='point';handle=$Handle;exactCount=$candidates.Count;fallbackCount=$fallbackCount;disabledCount=$disabled;unfocusableCount=$unfocusable;composerCount=$matches.Count}) } catch {}
+        }
+    }
+    return $matches
+}
+
 function Set-ChatGptComposerFocus($Composer) {
     $Composer.SetFocus()
     $deadline = [DateTime]::UtcNow.AddSeconds(1)
@@ -118,9 +148,7 @@ function Focus-ChatGptComposer([IntPtr]$PopupWindow) {
         $deadline = [DateTime]::UtcNow.AddSeconds(3)
         $composerCondition = Get-ChatGptComposerCondition
         do {
-            $matches = @((Measure-PopupStage 'uia_composer_search' { $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $composerCondition) } -Handle $PopupWindow.ToInt64()) | Where-Object {
-                Test-IsChatGptComposer -Element $_
-            })
+            $matches = @(Get-ChatGptComposerMatches $root $PopupWindow.ToInt64())
             if ($matches.Count -eq 1) { $composer = $matches[0]; break }
             Start-Sleep -Milliseconds 100
         } while ([DateTime]::UtcNow -lt $deadline)
@@ -865,9 +893,7 @@ function Find-ChatGptPopupWindowMatch(
         $window = [IntPtr]$_
         try {
             $root = Measure-PopupStage 'uia_root' { [System.Windows.Automation.AutomationElement]::FromHandle($window) } -Handle $window.ToInt64()
-            $matches = @((Measure-PopupStage 'uia_composer_search' { $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $composerCondition) } -Handle $window.ToInt64()) | Where-Object {
-                Test-IsChatGptComposer -Element $_
-            })
+            $matches = @(Get-ChatGptComposerMatches $root $window.ToInt64())
             $dismissButton = (Measure-PopupStage 'uia_dismiss_search' { $root.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $dismissCondition) } -Handle $window.ToInt64())
             if ($TimingSink) { try { [void](& $TimingSink @{stage='composer_matches';phase='point';handle=$window.ToInt64();composerCount=$matches.Count;visible=[CogentSpec.ChatGptPopupNative]::IsVisible($window)}) } catch { } }
             $composerName = if ($matches.Count -eq 1) {
@@ -910,9 +936,7 @@ function Find-VerifiedChatGptComposer([IntPtr]$Window) {
     Add-Type -AssemblyName UIAutomationClient -ErrorAction Stop
     $root = Measure-PopupStage 'uia_root' { [System.Windows.Automation.AutomationElement]::FromHandle($Window) } -Handle $Window.ToInt64()
     $composerCondition = Get-ChatGptComposerCondition
-    $matches = @((Measure-PopupStage 'uia_composer_search' { $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $composerCondition) } -Handle $Window.ToInt64()) | Where-Object {
-        Test-IsChatGptComposer -Element $_
-    })
+    $matches = @(Get-ChatGptComposerMatches $root $Window.ToInt64())
     if ($matches.Count -eq 1) { return $matches[0] }
     return $null
 }

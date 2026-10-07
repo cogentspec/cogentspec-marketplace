@@ -81,6 +81,23 @@ $type::Receive($owner,'next',1,'blurred',0)
 Check ($type::BoundOwner -eq '') 'Failed handoff granted ownership'
 $native::Foreground=30
 Check (-not $type::BeginHandoff($owner)) 'Unrelated application authorized startup'
+# Captured partial failure: native window verified, composer insertion failed.
+# Window control handoff is independently eligible, no input success required.
+$native::Foreground=10
+Check ($type::BeginHandoff($owner)) 'Partial-failure handoff denied'
+$type::Observe(22,22,'partial');$native::Foreground=22;$native::Visible=$true
+Check ($type::ContinueHandoff(22)) 'Verified partial target lost'
+Check ($type::EndHandoff($true)) 'Composer failure must not discard window handoff'
+$type::Receive($owner,'partial',1,'blurred',0)
+Check ($type::BoundOwner -eq $owner) 'Partial window did not bind'
+$native::Foreground=30;$type::Receive($owner,'partial',2,'hidden',0);$type::Tick('')
+Check (-not $native::Visible) 'Partial-failure window remained visible after departure'
+$type::Receive($owner,'partial',3,'close',0);$type::Tick('')
+Check ($native::Closes -eq 2) 'Partial-failure window could not close'
+$native::Foreground=10;Check ($type::BeginHandoff($owner)) 'Replacement test handoff denied'
+$native::Foreground=22;Check ($type::ContinueHandoff(22)) 'Replacement test target denied'
+$type::Observe(23,23,'replacement');$native::Foreground=23
+Check (-not $type::EndHandoff($true)) 'Replaced native target inherited partial handoff'
 Write-Output 'PASS: production native controller handoff, retained restore exclusion, exact owner, focus, hide, close and taskbar cancellation; all native calls mocked.'
 
 # Execute the real final helper branch for fresh/retained and pin permutations.
