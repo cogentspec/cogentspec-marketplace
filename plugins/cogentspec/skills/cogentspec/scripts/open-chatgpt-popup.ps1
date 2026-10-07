@@ -6,6 +6,7 @@ param(
     [switch]$UseRetainedChat,
     [switch]$OpenWithShortcut,
     [switch]$KeepPinned,
+    [switch]$ReturnFocusToWorkspace,
     [ValidatePattern('^$|^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')]
     [string]$ThreadId = '',
     [long]$PreferredWindowHandle = 0
@@ -417,7 +418,7 @@ namespace CogentSpec {
         private static extern bool IsIconic(IntPtr window);
 
         [DllImport("user32.dll")]
-        private static extern bool ShowWindowAsync(IntPtr window, int command);
+        public static extern bool ShowWindowAsync(IntPtr window, int command);
 
         [DllImport("user32.dll")]
         private static extern bool BringWindowToTop(IntPtr window);
@@ -653,6 +654,27 @@ namespace CogentSpec {
             }
 
             return IsWindowVisible(window) && GetForegroundWindow() == window;
+        }
+
+        // Initialization may foreground the Popout while opening it. Return only
+        // to the exact originating CogentSpec browser, and only if the Popout
+        // still has focus. Never steal focus back from another app the user chose.
+        public static IntPtr CaptureWorkspaceForeground() {
+            IntPtr h = GetForegroundWindow();
+            uint pid; GetWindowThreadProcessId(h, out pid);
+            var title = new StringBuilder(512); GetWindowText(h, title, title.Capacity);
+            if (title.ToString().IndexOf("CogentSpec", StringComparison.OrdinalIgnoreCase) < 0) return IntPtr.Zero;
+            try { using (var p = System.Diagnostics.Process.GetProcessById((int)pid)) {
+                return p.ProcessName == "chrome" || p.ProcessName == "msedge" ? h : IntPtr.Zero;
+            }} catch { return IntPtr.Zero; }
+        }
+        public static void RestoreWorkspaceForeground(IntPtr workspace, IntPtr popup, int processId) {
+            if (workspace == IntPtr.Zero || GetForegroundWindow() != popup) return;
+            uint currentPid; GetWindowThreadProcessId(workspace, out currentPid);
+            if (currentPid != (uint)processId) return;
+            var title = new StringBuilder(512); GetWindowText(workspace, title, title.Capacity);
+            if (title.ToString().IndexOf("CogentSpec", StringComparison.OrdinalIgnoreCase) < 0) return;
+            SetForegroundWindow(workspace);
         }
     }
 }
@@ -1123,6 +1145,8 @@ if ($Mode -in @('pin', 'unpin')) {
     return
 }
 
+$initializationWorkspace = if ($ReturnFocusToWorkspace) { [CogentSpec.ChatGptPopupNative]::CaptureWorkspaceForeground() } else { [IntPtr]::Zero }
+$initializationWorkspacePid = if ($initializationWorkspace -ne [IntPtr]::Zero) { [CogentSpec.ChatGptPopupNative]::GetProcessId($initializationWorkspace) } else { 0 }
 $existingPopupDismissed = $false
 if ($UseRetainedChat -and $popupWindow -ne [IntPtr]::Zero) {
     $retainedObservation = Get-ChatGptConversationObservation -Window $popupWindow
@@ -1138,7 +1162,18 @@ if (-not $ThreadId -and -not $UseRetainedChat) {
 
 if ($popupWindow -ne [IntPtr]::Zero) {
     $popupWasVisible = [CogentSpec.ChatGptPopupNative]::IsVisible($popupWindow)
-    if ($popupWasVisible -and $UseRetainedChat) {
+    if (-not $popupWasVisible -and $UseRetainedChat -and $OpenWithShortcut) {
+        # Restore this already verified hidden window directly. The global
+        # shortcut is a toggle and must not be used to restore a known handle.
+        [void][CogentSpec.ChatGptPopupNative]::ShowWindowAsync($popupWindow, 9)
+        $restoreDeadline = [DateTime]::UtcNow.AddSeconds(2)
+        do { Start-Sleep -Milliseconds 50 } while (-not [CogentSpec.ChatGptPopupNative]::IsVisible($popupWindow) -and [DateTime]::UtcNow -lt $restoreDeadline)
+        if (-not [CogentSpec.ChatGptPopupNative]::IsVisible($popupWindow)) {
+            Write-Failure -Status 'popup_restore_failed' -Reason 'The verified hidden Popout could not be restored. No toggle shortcut was sent.'
+            return
+        }
+    }
+    if ([CogentSpec.ChatGptPopupNative]::IsVisible($popupWindow) -and $UseRetainedChat) {
         # Clicking the web LED leaves the retained popout behind the browser.
         # Pin the verified window before looking for its composer. Working-screen
         # Popout requests keep that pin so the composer stays above the browser;
@@ -1377,3 +1412,6 @@ Write-CompactJson ([ordered]@{
     composerDraftPreserved = [bool]$composer.draftPreserved
     shortcut = 'Ctrl+Shift+Space'
 })
+if ($ReturnFocusToWorkspace) {
+    [CogentSpec.ChatGptPopupNative]::RestoreWorkspaceForeground($initializationWorkspace, $popupWindow, $initializationWorkspacePid)
+}

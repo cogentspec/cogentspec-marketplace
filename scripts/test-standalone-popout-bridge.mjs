@@ -6,6 +6,7 @@ import { join, resolve } from "node:path";
 import { spawn } from "node:child_process";
 
 const repositoryRoot = resolve(import.meta.dirname, "..");
+const initialization = process.argv.includes('--initialization');
 const watcher = join(repositoryRoot, "plugins", "cogentspec", "skills", "cogentspec", "scripts", "watch-cogentspec-popout-bridge.ps1");
 const projectWatcher = join(repositoryRoot, "plugins", "cogentspec", "skills", "cogentspec", "scripts", "watch-cogentstack-bridge.ps1");
 const productionHelper = join(repositoryRoot, "plugins", "cogentspec", "skills", "cogentspec", "scripts", "open-chatgpt-popup.ps1");
@@ -143,12 +144,12 @@ assert.doesNotMatch(productionHelperSource, /found the retained ChatGPT popout b
 assert.doesNotMatch(popupWindowFinder, /bool isPopupToolWindow/);
 
 await writeFile(helper, `
-param([string]$Mode, [switch]$UseRetainedChat, [switch]$OpenWithShortcut, [switch]$KeepPinned, [switch]$PasteClipboard, [long]$PreferredWindowHandle = 0)
+param([string]$Mode, [switch]$UseRetainedChat, [switch]$OpenWithShortcut, [switch]$KeepPinned, [switch]$PasteClipboard, [switch]$ReturnFocusToWorkspace, [long]$PreferredWindowHandle = 0)
 if ($Mode -eq 'inspect') {
   [ordered]@{ status = 'ready'; publisherVerified = $true; popupVerified = $true; popupVisible = $false; popupWindowHandle = 1234; popupProcessId = 5678; conversationState = 'identified'; currentConversationKey = '${"a".repeat(64)}'; chatFingerprint = '${"a".repeat(64)}' } | ConvertTo-Json -Compress
   return
 }
-[ordered]@{ mode = $Mode; useRetainedChat = [bool]$UseRetainedChat; openWithShortcut = [bool]$OpenWithShortcut; keepPinned = [bool]$KeepPinned; pasteClipboard = [bool]$PasteClipboard } |
+[ordered]@{ mode = $Mode; useRetainedChat = [bool]$UseRetainedChat; openWithShortcut = [bool]$OpenWithShortcut; keepPinned = [bool]$KeepPinned; pasteClipboard = [bool]$PasteClipboard; returnFocusToWorkspace = [bool]$ReturnFocusToWorkspace } |
   ConvertTo-Json -Compress | Set-Content -LiteralPath '${helperArguments.replaceAll("'", "''")}' -Encoding UTF8
 [ordered]@{ status = 'opened'; opened = $true; composerPopulated = [bool]$PasteClipboard } | ConvertTo-Json -Compress
 `, "utf8");
@@ -156,7 +157,8 @@ if ($Mode -eq 'inspect') {
 const request = {
   id: "fixture-popout-action",
   action: "open_chatgpt_popup",
-  targetRequestId: "chatgpt-desktop-popup:connect",
+  targetRequestId: initialization ? "chatgpt-desktop-popup" : "chatgpt-desktop-popup:connect",
+  ...(initialization ? {initializationOwnerId:'cccccccc-1111-1111-1111-111111111111'} : {}),
   status: "requested",
   statusMessage: "",
 };
@@ -254,7 +256,7 @@ try {
   assert.equal(calls.some((call) => call.method === "PATCH" && JSON.parse(call.body).action === "claim"), true);
   assert.equal(calls.some((call) => call.method === "PATCH" && JSON.parse(call.body).action === "complete"), true);
   const helperResult = JSON.parse((await readFile(helperArguments, "utf8")).replace(/^\uFEFF/, ""));
-  assert.deepEqual(helperResult, { mode: "open", useRetainedChat: true, openWithShortcut: true, keepPinned: true, pasteClipboard: true });
+  assert.deepEqual(helperResult, { mode: "open", useRetainedChat: true, openWithShortcut: true, keepPinned: true, pasteClipboard: !initialization, returnFocusToWorkspace: initialization });
   const ready = JSON.parse((await readFile(readyPath, "utf8")).replace(/^\uFEFF/, ""));
   assert.equal(ready.serverAcknowledged, true);
   assert.equal(ready.startupStage, 'service_acknowledgment');

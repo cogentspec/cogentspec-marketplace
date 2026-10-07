@@ -875,6 +875,10 @@ try {
                             @(& $popupHelper -Mode open -UseRetainedChat -OpenWithShortcut -KeepPinned -PasteClipboard 2>&1)
                         } elseif ($target -eq 'chatgpt-desktop-popup:update') {
                             @(& $popupHelper -Mode open -UseRetainedChat -KeepPinned -PasteClipboard 2>&1)
+                        } elseif ($claimed.request.PSObject.Properties['initializationOwnerId'] -and $claimed.request.initializationOwnerId) {
+                            # Fresh work-area initialization opens once and pins explicitly.
+                            # No composer text, connection claim, or shortcut toggle loop.
+                            @(& $popupHelper -Mode open -UseRetainedChat -OpenWithShortcut -KeepPinned -ReturnFocusToWorkspace 2>&1)
                         } else {
                             @(& $popupHelper -Mode open -UseRetainedChat -KeepPinned 2>&1)
                         }
