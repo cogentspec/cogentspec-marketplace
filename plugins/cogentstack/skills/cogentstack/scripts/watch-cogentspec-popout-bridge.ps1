@@ -117,9 +117,15 @@ namespace CogentSpec {
   static DateTime received,actionAt;
   static PopoutLifecycleModel model=new PopoutLifecycleModel();
   static Thread thread;
+  static AutoResetEvent wake=new AutoResetEvent(false);
+  static long commandReceived;
+  public static double LastDispatchMilliseconds;
   static volatile bool running;
   public static string State="unknown", LastAction="none", Authority="awaiting_workspace_owner";
   public static string BoundOwner {get {lock(gate){return owner;}}}
+  public static string[] ControlAcknowledgment() {
+   lock(gate){return new string[]{owner,sequence.ToString(System.Globalization.CultureInfo.InvariantCulture),LastAction};}
+  }
   public static bool AllowsWorkspacePin(long h) {
    lock(gate){return owner!="" && popup.ToInt64()==h && Matches() &&
     State=="active" && (DateTime.UtcNow-received).TotalSeconds<=10 &&
@@ -167,9 +173,11 @@ namespace CogentSpec {
      owner=id;sequence=0;Authority="bound_workspace_document";
     }
     if(seq<sequence)return;
-    if(state!=State&&(LastAction=="hide_failed"||LastAction=="restore_failed"||
+    if(state!=State&&(LastAction=="hide_requested"||LastAction=="restore_requested"||LastAction=="hide_failed"||LastAction=="restore_failed"||
        (LastAction=="close_failed"&&state!="close")))LastAction="none";
+    if(seq!=sequence || state!=State)commandReceived=Stopwatch.GetTimestamp();
     sequence=seq;State=state;received=DateTime.UtcNow.AddMilliseconds(-age);
+    wake.Set();
    }
   }
   public static void Tick(string ignored) {
@@ -199,12 +207,13 @@ namespace CogentSpec {
     if(LastAction=="restore_requested"&&visible)LastAction="restore_confirmed";
     var action=model.Decide(State,true,visible,GetForegroundWindow()==popup,WorkspaceForeground());
     if(action=="hide"||action=="restore") {
+     LastDispatchMilliseconds=(Stopwatch.GetTimestamp()-commandReceived)*1000.0/Stopwatch.Frequency;
      var ok=ShowWindowAsync(popup,action=="hide"?0:4);
      LastAction=action+(ok?"_requested":"_failed");actionAt=DateTime.UtcNow;
      if(!ok&&action=="hide")model.ControllerHidden=false;
     } else if(action=="close") {
-     // Only an explicit owner command reaches this path. Never close on
-     // pagehide, timeout, browser destruction, focus loss or network failure.
+     // Explicit close or the server's accepted 15-second owner expiry policy.
+     // Never infer closure from a local stream/network disconnection.
      var ok=PostMessage(popup,0x0010,IntPtr.Zero,IntPtr.Zero);
      LastAction=ok?"close_requested":"close_failed";actionAt=DateTime.UtcNow;
     }
@@ -212,11 +221,134 @@ namespace CogentSpec {
   }
   public static void Start() {
    lock(gate){if(running)return;running=true;
-    thread=new Thread(delegate(){while(running){try{Tick(null);}catch{State="unknown";}Thread.Sleep(250);}});
+    thread=new Thread(delegate(){while(running){try{Tick(null);}catch{State="unknown";}wake.WaitOne(50);}});
     thread.IsBackground=true;thread.Start();
    }
   }
-  public static void Stop(){running=false;if(thread!=null)thread.Join(1000);}
+  public static void Stop(){running=false;wake.Set();if(thread!=null)thread.Join(1000);}
+ }
+ // Independent of PowerShell inspection/action execution. No UI Automation,
+ // synthetic keys, project access or LED confirmation runs on these threads.
+ public sealed class PopoutControlFrame {
+  public string Worker,Owner,Key,State;
+  public long Sequence,IssuedAt;
+  public int Age;
+  public static PopoutControlFrame Parse(string line,string worker,string key) {
+   if(line==null||line.Length>512||!line.StartsWith("data: v1\t",StringComparison.Ordinal))return null;
+   var p=line.Substring(6).Split('\t');long seq,issued;int age;Guid id;
+   if(p.Length!=8||p[1]!=worker||p[3]!=key||
+    (p[2]!=""&&!Guid.TryParseExact(p[2],"D",out id))||
+    !long.TryParse(p[4],out seq)||seq<0||!int.TryParse(p[6],out age)||age<0||
+    !long.TryParse(p[7],out issued)||issued<0||
+    Array.IndexOf(new[]{"active","hidden","blurred","departed","close","unknown"},p[5])<0)return null;
+   return new PopoutControlFrame{Worker=p[1],Owner=p[2],Key=p[3],Sequence=seq,State=p[5],Age=age,IssuedAt=issued};
+  }
+ }
+ public static class PopoutControlTransport {
+  static readonly object gate=new object();
+  static string service="",token="",worker="",key="";
+  static int generation;
+  static volatile bool running;
+  static Thread receiver,acknowledger;
+  static System.Net.HttpWebRequest streamRequest,ackRequest;
+  static DateTime streamSeen=DateTime.MinValue,ackSeen=DateTime.MinValue;
+  public static bool IsFresh {get {lock(gate){return (DateTime.UtcNow-streamSeen).TotalSeconds<3 && (DateTime.UtcNow-ackSeen).TotalSeconds<4;}}}
+  public static void Configure(string url,string credential,string workerId,string windowKey) {
+   url=url.TrimEnd('/');
+   var uri=new Uri(url);
+   if(uri.Scheme!="https"&&!uri.IsLoopback)throw new ArgumentException("Secure control endpoint required");
+   lock(gate) {
+    if(service!=url||token!=credential||worker!=workerId||key!=windowKey) {
+     service=url.TrimEnd('/');token=credential;worker=workerId;key=windowKey;generation++;
+     streamSeen=ackSeen=DateTime.MinValue;
+     if(streamRequest!=null)streamRequest.Abort();if(ackRequest!=null)ackRequest.Abort();
+    }
+    if(running)return;running=true;
+    receiver=new Thread(ReceiveLoop);receiver.IsBackground=true;receiver.Start();
+    acknowledger=new Thread(AcknowledgeLoop);acknowledger.IsBackground=true;acknowledger.Start();
+   }
+  }
+  static string[] Configuration(out int version) {
+   lock(gate){version=generation;return new[]{service,token,worker,key};}
+  }
+  static bool Current(int version){lock(gate){return running&&version==generation;}}
+  static System.Net.HttpWebRequest Request(string[] c,string method,string extra) {
+   // This worker also runs on Windows PowerShell 5.1/.NET Framework. Retain
+   // its shared transport API until both runtimes can use the same HttpClient.
+#pragma warning disable
+   var r=(System.Net.HttpWebRequest)System.Net.WebRequest.Create(c[0]+"/api/plugin/desktop-popout-control-stream?workerId="+
+    Uri.EscapeDataString(c[2])+"&fingerprint="+Uri.EscapeDataString(c[3])+extra);
+#pragma warning restore
+   r.Method=method;r.Headers["Authorization"]="Bearer "+c[1];r.AllowAutoRedirect=false;
+   r.Accept=method=="GET"?"text/event-stream":"application/json";
+   r.Timeout=4000;r.ReadWriteTimeout=4000;r.ServicePoint.ConnectionLimit=Math.Max(6,r.ServicePoint.ConnectionLimit);
+   if(method=="POST")r.ContentLength=0;
+   return r;
+  }
+  static void ReceiveLoop() {
+   int failures=0;
+   while(running) {
+    int version;var c=Configuration(out version);
+    if(c[3]==""){Thread.Sleep(100);continue;}
+    try {
+     var r=Request(c,"GET","");lock(gate){if(!Current(version))continue;streamRequest=r;}
+     using(var response=(System.Net.HttpWebResponse)r.GetResponse()) {
+      if(response.StatusCode!=System.Net.HttpStatusCode.OK||!response.ContentType.StartsWith("text/event-stream",StringComparison.OrdinalIgnoreCase))throw new System.IO.IOException("Stream unavailable");
+      DateTimeOffset serverDate;
+      long serverStart=DateTimeOffset.TryParse(response.Headers["Date"],out serverDate)?serverDate.ToUnixTimeMilliseconds():DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+      var elapsed=Stopwatch.StartNew();
+      using(var reader=new System.IO.StreamReader(response.GetResponseStream())) {
+       string line;
+       while(Current(version)&&(line=reader.ReadLine())!=null) {
+        var frame=PopoutControlFrame.Parse(line,c[2],c[3]);if(frame==null)continue;
+        // Account for proxy backlog using the response clock, not local clock
+        // agreement. HTTP Date has one-second resolution. Never replay backlog.
+        long transit=serverStart+elapsed.ElapsedMilliseconds-frame.IssuedAt;
+        if(transit>2000||transit < -2000)throw new System.IO.IOException("Stale stream frame");
+        lock(gate) {
+         if(!Current(version))break;
+         streamSeen=DateTime.UtcNow;failures=0;
+         int age=(int)Math.Min(10001,(long)frame.Age+Math.Max(0,transit));
+         PopoutWorkspaceLifecycle.Receive(frame.Owner,frame.Key,frame.Sequence,
+          age>10000?"unknown":frame.State,age>10000?0:age);
+        }
+       }
+      }
+     }
+    } catch {failures=Math.Min(4,failures+1);}
+    finally {lock(gate){if(version==generation){streamRequest=null;streamSeen=DateTime.MinValue;}}}
+    // Normal bounded stream rotation reconnects immediately with a fresh state;
+    // failures back off, without changing visibility or closing a window.
+    if(failures>0)Thread.Sleep(Math.Min(5000,250*(1<<failures)));
+   }
+  }
+  static void AcknowledgeLoop() {
+   string last="";DateTime sent=DateTime.MinValue;int lastGeneration=-1;
+   while(running) {
+    int version;var c=Configuration(out version);
+    var a=PopoutWorkspaceLifecycle.ControlAcknowledgment();var identity=String.Join("|",a);
+    if(version!=lastGeneration||identity!=last||(DateTime.UtcNow-sent).TotalMilliseconds>=1500) {
+     try {
+      var r=Request(c,"POST","&ownerId="+Uri.EscapeDataString(a[0])+"&sequence="+a[1]+"&outcome="+Uri.EscapeDataString(a[2]));
+      lock(gate){if(!Current(version))continue;ackRequest=r;}
+      using(var response=(System.Net.HttpWebResponse)r.GetResponse()) {
+       // Drain tiny response so connection reuse does not wait for finalization.
+       using(var reader=new System.IO.StreamReader(response.GetResponseStream())){reader.ReadToEnd();}
+       if(response.StatusCode!=System.Net.HttpStatusCode.OK)throw new System.IO.IOException("Acknowledgment rejected");
+      }
+      lock(gate){if(Current(version))ackSeen=DateTime.UtcNow;}
+      last=identity;lastGeneration=version;sent=DateTime.UtcNow;
+     } catch {sent=DateTime.UtcNow;last=identity;lastGeneration=version;}
+     finally {lock(gate){if(version==generation)ackRequest=null;}}
+    }
+    Thread.Sleep(50);
+   }
+  }
+  public static void Stop() {
+   lock(gate){running=false;generation++;if(streamRequest!=null)streamRequest.Abort();if(ackRequest!=null)ackRequest.Abort();}
+   if(receiver!=null)receiver.Join(5500);if(acknowledger!=null)acknowledger.Join(4500);
+   lock(gate){token="";streamSeen=ackSeen=DateTime.MinValue;}
+  }
  }
 }
 '@
@@ -255,6 +387,8 @@ function Write-ReadyMarker([bool]$ServerAcknowledged, [string]$Status = 'ready',
         workspaceLifecycleState = if ($TestToken) { [string]$script:WorkspaceLifecycleState } else { [CogentSpec.PopoutWorkspaceLifecycle]::State }
         workspaceLifecycleAction = if ($TestToken) { 'test' } else { [CogentSpec.PopoutWorkspaceLifecycle]::LastAction }
         workspaceLifecycleAuthority = if ($TestToken) { 'test' } else { [CogentSpec.PopoutWorkspaceLifecycle]::Authority }
+        fastControlConnected = if ($TestToken) { $false } else { [CogentSpec.PopoutControlTransport]::IsFresh }
+        nativeDispatchMilliseconds = if ($TestToken) { 0 } else { [CogentSpec.PopoutWorkspaceLifecycle]::LastDispatchMilliseconds }
     })
 }
 
@@ -576,7 +710,8 @@ function Update-PopupPinHotkeyTarget {
     if (-not $TestToken -and $script:CurrentPopupWindowHandle -ne 0 -and
         [CogentSpec.PopoutWorkspaceLifecycle]::IsControllerHidden([long]$script:CurrentPopupWindowHandle)) {
         $script:VerifiedPopupVisible = $false
-        if ($script:PinHotkeyReady) { [CogentSpec.ChatGptPopupPinHotkey]::SetVerifiedPopup(0, 0) }
+        # Retain the exact verified target. The hook itself checks actual native
+        # visibility and PID, so it is usable immediately after fast restoration.
         return
     }
     try {
@@ -626,7 +761,7 @@ function Update-PopupPinHotkeyTarget {
             }
         }
         if ($script:PinHotkeyReady) {
-            if ($visible) {
+            if ($verified) {
                 [CogentSpec.ChatGptPopupPinHotkey]::SetVerifiedPopup([long]$inspection.popupWindowHandle, [int]$inspection.popupProcessId)
             } else {
                 [CogentSpec.ChatGptPopupPinHotkey]::SetVerifiedPopup(0, 0)
@@ -669,14 +804,19 @@ Write-StartupMarker 'service_acknowledgment'
 try {
     while ($true) {
         try {
+            if (-not $TestToken) {
+                $controlKey = if ($script:CurrentPopupWindowHandle -ne 0) { $script:LifecycleWindowKey } else { '' }
+                [CogentSpec.PopoutControlTransport]::Configure($ServiceUrl,$token,$script:LifecycleWorkerId,$controlKey)
+            }
             $presenceQuery = $query + '&popupVisible=' + $script:VerifiedPopupVisible.ToString().ToLowerInvariant()
             $presenceQuery += '&conversationState=' + [Uri]::EscapeDataString($script:CurrentConversationState)
             $presenceQuery += '&lifecycleWorkerId=' + $script:LifecycleWorkerId
-            $presenceQuery += '&lifecycleProtocol=window-v1'
+            $fastControl = -not $TestToken -and [CogentSpec.PopoutControlTransport]::IsFresh
+            if (-not $fastControl) { $presenceQuery += '&lifecycleProtocol=window-v1' }
             if ($script:CurrentPopupWindowHandle -ne 0) {
                 $presenceQuery += '&lifecycleWindowKey=' + $script:LifecycleWindowKey
             }
-            if (-not $TestToken) {
+            if (-not $TestToken -and -not [CogentSpec.PopoutControlTransport]::IsFresh) {
                 $presenceQuery += '&lifecycleOutcome=' + [CogentSpec.PopoutWorkspaceLifecycle]::LastAction
                 $presenceQuery += '&lifecycleBoundOwner=' + [CogentSpec.PopoutWorkspaceLifecycle]::BoundOwner
             }
@@ -689,7 +829,7 @@ try {
             $script:StartupStage = 'service_acknowledgment'
             $listing = Invoke-PopoutApi -Method Get -Path "/api/plugin/desktop-popout-actions$presenceQuery" -Token $token
             $consecutiveFailures = 0
-            if (-not $TestToken) {
+            if (-not $TestToken -and -not [CogentSpec.PopoutControlTransport]::IsFresh) {
                 if ($listing.PSObject.Properties['control'] -and $listing.control.PSObject.Properties['ownerId']) {
                     [CogentSpec.PopoutWorkspaceLifecycle]::Receive([string]$listing.control.ownerId,
                         [string]$listing.control.fingerprint, [long]$listing.control.sequence,
@@ -790,6 +930,7 @@ try {
         } while ([DateTime]::UtcNow -lt $waitDeadline)
     }
 } finally {
+    if (-not $TestToken) { [CogentSpec.PopoutControlTransport]::Stop() }
     if (-not $TestToken) { [CogentSpec.PopoutWorkspaceLifecycle]::Stop() }
     if ($script:PinHotkeyReady) {
         [CogentSpec.ChatGptPopupPinHotkey]::Stop()
