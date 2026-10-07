@@ -111,12 +111,18 @@ namespace CogentSpec {
   [DllImport("user32.dll")] static extern bool IsWindow(IntPtr h);
   [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr h);
   [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr h,out uint p);
+  [DllImport("user32.dll",CharSet=CharSet.Unicode)] static extern bool SetProp(IntPtr h,string name,IntPtr value);
+  [DllImport("user32.dll",CharSet=CharSet.Unicode)] static extern IntPtr GetProp(IntPtr h,string name);
+  [DllImport("user32.dll",CharSet=CharSet.Unicode)] static extern IntPtr RemoveProp(IntPtr h,string name);
   [DllImport("user32.dll",CharSet=CharSet.Unicode)] static extern int GetWindowText(IntPtr h,StringBuilder b,int n);
   [DllImport("user32.dll")] static extern bool ShowWindowAsync(IntPtr h,int command);
   [DllImport("user32.dll")] static extern bool PostMessage(IntPtr h,uint m,IntPtr w,IntPtr l);
   static object gate=new object();
   static IntPtr popup, browser;
   static uint popupPid,browserPid;
+  // Windows destroys window properties with the native instance. Unlike a
+  // cached HWND/PID pair this cannot survive handle reuse in the same process.
+  static readonly string lifetimeProperty="CogentSpec.Popout."+Guid.NewGuid().ToString("N");
   static long browserStarted;
   static string fingerprint="",owner="";
   static string handoffOwner="";
@@ -181,7 +187,11 @@ namespace CogentSpec {
     State=="active" && (DateTime.UtcNow-received).TotalSeconds<=10 &&
     WorkspaceForeground();}
   }
-  static bool Matches() {uint p;return popup!=IntPtr.Zero&&IsWindow(popup)&&GetWindowThreadProcessId(popup,out p)!=0&&p==popupPid;}
+  static bool Matches() {uint p;return popup!=IntPtr.Zero&&IsWindow(popup)&&GetWindowThreadProcessId(popup,out p)!=0&&p==popupPid&&GetProp(popup,lifetimeProperty)==new IntPtr(1);}
+  public static bool MatchesWindow(long h) {lock(gate){return popup.ToInt64()==h&&Matches();}}
+  public static long[] RetainedWindow() {
+   lock(gate){return Matches()?new long[]{popup.ToInt64(),popupPid,IsWindowVisible(popup)?1:0}:new long[0];}
+  }
   static bool WorkspaceForeground() {
    if (browser==IntPtr.Zero||GetForegroundWindow()!=browser||!IsWindow(browser))return false;
    uint p;GetWindowThreadProcessId(browser,out p);
@@ -191,17 +201,20 @@ namespace CogentSpec {
    var title=new StringBuilder(512);GetWindowText(browser,title,title.Capacity);
    return title.ToString().IndexOf("CogentSpec",StringComparison.OrdinalIgnoreCase)>=0;
   }
-  public static void Observe(long h,int pid,string key) {
+  public static bool Observe(long h,int pid,string key) {
    lock(gate) {
     uint actual;var handle=new IntPtr(h);
-    if(handle==IntPtr.Zero||!IsWindow(handle)||GetWindowThreadProcessId(handle,out actual)==0||actual!=(uint)pid)return;
-    if(popup!=handle||popupPid!=actual) {
+    if(handle==IntPtr.Zero||!IsWindow(handle)||GetWindowThreadProcessId(handle,out actual)==0||actual!=(uint)pid)return false;
+    if(popup!=handle||popupPid!=actual||!Matches()) {
+     if(!SetProp(handle,lifetimeProperty,new IntPtr(1)))return false;
+     if(popup!=handle&&Matches())RemoveProp(popup,lifetimeProperty);
      var oldModel=model;model=new PopoutLifecycleModel();
      model.HandoffActive=oldModel.HandoffActive;model.HandoffCancelled=oldModel.HandoffCancelled;
      owner="";sequence=0;browser=IntPtr.Zero;
      LastAction="none";State="unknown";Authority="awaiting_workspace_owner";
     }
     popup=handle;popupPid=actual;fingerprint=key;
+    return true;
    }
   }
   public static bool IsControllerHidden(long h) {
@@ -282,7 +295,7 @@ namespace CogentSpec {
     thread.IsBackground=true;thread.Start();
    }
   }
-  public static void Stop(){running=false;wake.Set();if(thread!=null)thread.Join(1000);}
+  public static void Stop(){running=false;wake.Set();if(thread!=null)thread.Join(1000);lock(gate){if(Matches())RemoveProp(popup,lifetimeProperty);}}
  }
  // Independent of PowerShell inspection/action execution. No UI Automation,
  // synthetic keys, project access or LED confirmation runs on these threads.
@@ -707,7 +720,15 @@ namespace CogentSpec {
             if (!IsWindow(window) || !IsWindowVisible(window)) return false;
             uint processId;
             GetWindowThreadProcessId(window, out processId);
-            return processId == (uint)expectedProcess;
+            if (processId != (uint)expectedProcess) return false;
+            // Reject a destroyed/recycled HWND even before the next inspection.
+            foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies()) {
+                var controller = assembly.GetType("CogentSpec.PopoutWorkspaceLifecycle");
+                if (controller == null) continue;
+                try { return (bool)controller.GetMethod("MatchesWindow").Invoke(null, new object[] { expectedWindow }); }
+                catch { return false; }
+            }
+            return false;
         }
 
         private static void ToggleTopmost(IntPtr window) {
@@ -794,6 +815,23 @@ function Add-RequestTiming {
 }
 
 $script:RequestTimingSink = $null
+function Restore-PopoutWindowControlTarget {
+    if ($TestToken) { return $false }
+    $retained = [CogentSpec.PopoutWorkspaceLifecycle]::RetainedWindow()
+    if ($retained.Length -ne 3 -or $retained[0] -ne $script:LifecyclePopupHandle -or
+        $retained[1] -ne $script:LifecyclePopupProcessId -or -not $script:LifecycleWindowKey) { return $false }
+    # Retain only native controls, never the old chat's connection or input proof.
+    $script:CurrentPopupWindowHandle = [long]$retained[0]
+    $script:VerifiedPopupVisible = $retained[2] -eq 1
+    $script:CurrentConversationState = 'unknown'
+    $script:CurrentConversationKey = ''
+    $script:ActiveChatFingerprint = ''
+    $script:ClientUnavailable = $false
+    if ($script:PinHotkeyReady) {
+        [CogentSpec.ChatGptPopupPinHotkey]::SetVerifiedPopup([long]$retained[0], [int]$retained[1])
+    }
+    return $true
+}
 function Update-PopupPinHotkeyTarget {
     # Only the same verified, controller-hidden native instance can retain its
     # previous exact-chat proof. It cannot be interacted with while hidden.
@@ -817,6 +855,7 @@ function Update-PopupPinHotkeyTarget {
         $verified = [string]$inspection.status -eq 'ready' -and [bool]$inspection.publisherVerified -and
             [bool]$inspection.popupVerified -and
             [long]$inspection.popupWindowHandle -ne 0 -and [int]$inspection.popupProcessId -gt 0
+        if (-not $verified -and (Restore-PopoutWindowControlTarget)) { return }
         $visible = $verified -and [bool]$inspection.popupVisible
         $conversationState = if ($verified -and $inspection.PSObject.Properties['conversationState'] -and
             [string]$inspection.conversationState -in @('blank', 'identified')) { [string]$inspection.conversationState } else { 'unknown' }
@@ -841,14 +880,17 @@ function Update-PopupPinHotkeyTarget {
             # Stable for this native window, including blank/new/disconnected chats.
             # Never use the conversation key as window-control authority.
             if ($script:LifecyclePopupHandle -ne [long]$inspection.popupWindowHandle -or
-                $script:LifecyclePopupProcessId -ne [int]$inspection.popupProcessId) {
+                $script:LifecyclePopupProcessId -ne [int]$inspection.popupProcessId -or
+                (-not $TestToken -and -not [CogentSpec.PopoutWorkspaceLifecycle]::MatchesWindow([long]$inspection.popupWindowHandle))) {
                 $script:LifecycleWorkerId = [Guid]::NewGuid().ToString('D')
                 $script:LifecycleWindowKey = [Guid]::NewGuid().ToString('N') + [Guid]::NewGuid().ToString('N')
             }
             $script:LifecyclePopupHandle = [long]$inspection.popupWindowHandle
             $script:LifecyclePopupProcessId = [int]$inspection.popupProcessId
             if (-not $TestToken) {
-                [CogentSpec.PopoutWorkspaceLifecycle]::Observe([long]$inspection.popupWindowHandle, [int]$inspection.popupProcessId, [string]$script:LifecycleWindowKey)
+                if (-not [CogentSpec.PopoutWorkspaceLifecycle]::Observe([long]$inspection.popupWindowHandle, [int]$inspection.popupProcessId, [string]$script:LifecycleWindowKey)) {
+                    throw 'Verified Popout lifetime could not be registered.'
+                }
             }
         }
         if ($script:PinHotkeyReady) {
@@ -859,6 +901,7 @@ function Update-PopupPinHotkeyTarget {
             }
         }
     } catch {
+        if (Restore-PopoutWindowControlTarget) { return }
         $script:VerifiedPopupVisible = $false
         $script:ClientUnavailable = $false
         $script:CurrentConversationState = 'unknown'

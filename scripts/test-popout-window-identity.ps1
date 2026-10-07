@@ -5,6 +5,8 @@ $ast=[Management.Automation.Language.Parser]::ParseFile($path,[ref]$tokens,[ref]
 if($errors.Count){throw 'Watcher parse failed'}
 $fn=$ast.Find({param($n)$n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Update-PopupPinHotkeyTarget'},$true)
 Invoke-Expression $fn.Extent.Text
+$retention=$ast.Find({param($n)$n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Restore-PopoutWindowControlTarget'},$true)
+Invoke-Expression $retention.Extent.Text
 # Run the real identity/update function against an in-memory inspection fixture.
 # No ChatGPT UI, native window, credential, worker or server is accessed.
 $script:TestToken='fixture'
