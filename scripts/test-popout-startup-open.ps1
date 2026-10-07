@@ -47,6 +47,19 @@ foreach($bad in @(
 }
 if((Resolve-ChatGptPopupDiscovery @($captured[0],$captured[3])).state -ne 'absent'){throw 'Inspected main windows must not block startup'}
 Write-Output 'PASS: captured main/hidden-shell replay, visible competitor and failed-inspection fences.'
+# Execute the production candidate filter against the five-window capture.
+$filter=$ast.Find({param($n)$n -is [Management.Automation.Language.IfStatementAst] -and $n.Extent.Text.StartsWith('if ($StartupCandidateHandle -ne 0)')},$true)
+if(!$filter){throw 'Startup candidate filter missing'}
+$filterBlock=[scriptblock]::Create($filter.Extent.Text)
+$StartupCandidateHandle=20187320
+for($scan=0;$scan -lt 35;$scan++) {
+ $nativeCandidates=@([IntPtr]1246424,[IntPtr]1049284,[IntPtr]132598,[IntPtr]197228,[IntPtr]20187320)
+ . $filterBlock
+ if($nativeCandidates.Count -ne 1 -or $nativeCandidates[0].ToInt64() -ne 20187320){throw 'Startup scanned unrelated windows'}
+}
+$StartupCandidateHandle=0;$nativeCandidates=@([IntPtr]1,[IntPtr]2);. $filterBlock
+if($nativeCandidates.Count -ne 2){throw 'Initial broad discovery was changed'}
+Write-Output 'PASS: five-window capture replay; 35 targeted inspections instead of 175, broad discovery preserved.'
 $start = $source.IndexOf('if (-not $activatedExisting) {', $source.IndexOf('$taskOwner = [ordered]'))
 $end = $source.IndexOf('if (-not $activatedExisting -and $popupWindow', $start)
 if ($start -lt 0 -or $end -le $start) { throw 'Production opening branch not found' }
@@ -78,15 +91,21 @@ namespace CogentSpec {
 function Start-Sleep { param($Milliseconds) [StartupFixture]::Now=[StartupFixture]::Now.AddMilliseconds($Milliseconds) }
 function Write-Failure { param($Status,$Reason) $script:failure=$Status }
 function Find-ChatGptPopupWindowMatch {
- param($ProcessIds,$MainWindowHandles,$PreferredWindowHandle)
+ param($ProcessIds,$MainWindowHandles,$PreferredWindowHandle,$StartupCandidateHandle)
+ if($StartupCandidateHandle -ne 1234){throw 'Startup inspection not restricted to owned candidate'}
  $elapsed=([StartupFixture]::Now-$script:started).TotalMilliseconds
+ if($elapsed -lt ($script:candidateAt*1000)){throw 'UIA polling before native appearance'}
  $ready=$elapsed -ge ($script:readyAt * 1000)
+ [StartupFixture]::Now=[StartupFixture]::Now.AddMilliseconds($script:scanDelay)
  [StartupFixture]::Visible=$ready
  return @{window=$(if($ready){[IntPtr]1234}else{[IntPtr]::Zero});verification=$(if($ready){'dismiss_and_composer'}else{'awaiting_composer'});
   candidateDetected=($ready -or $elapsed -ge ($script:candidateAt * 1000));ambiguous=$script:ambiguous}
 }
 function Check($condition,$message) { if(!$condition){throw $message} }
 $cases=@(
+ @{name='closure-during-inspection';ready=0;candidate=0;disappear=.5;scanDelay=1000;toggles=1},
+ @{name='replacement-during-inspection';ready=0;candidate=0;replace=.5;scanDelay=1000;toggles=1},
+ @{name='competitor-during-inspection';ready=0;candidate=0;multiple=.5;scanDelay=1000;toggles=1},
  @{name='cold-fast';ready=.2;candidate=.1;toggles=1},
  @{name='captured-hidden-shells';ready=.2;candidate=0;toggles=1;state='hidden_shells'},
  @{name='cold-delayed-beyond-old-retry';ready=8;candidate=4;toggles=1},
@@ -104,6 +123,7 @@ $cases=@(
  @{name='shortcut-rejected';ready=99;candidate=99;toggles=1;sendFailure=$true}
 )
 foreach($case in $cases) {
+ $script:scanDelay=if($case.scanDelay){$case.scanDelay}else{0}
  $script:started=[DateTime]'2026-01-01T00:00:00Z';[StartupFixture]::Now=$started
  [StartupFixture]::Started=$started;[StartupFixture]::CandidateAt=$case.candidate
  [StartupFixture]::DisappearAt=if($case.disappear){$case.disappear}else{999}
@@ -129,7 +149,7 @@ foreach($case in $cases) {
  if($case.name -like '*late-verification'){
   Check ($failure -eq '' -and $progressCount -eq 1) 'Late verification must remain pending then succeed, with one progress notification'
  }
- if($case.disappear){Check (([StartupFixture]::Now-$started).TotalSeconds -le 3.1) 'Do not reopen a user-hidden candidate'}
+ if($case.disappear){Check (([StartupFixture]::Now-$started).TotalSeconds -le 3.1) "Do not reopen a user-hidden candidate: $($case.name), elapsed=$(([StartupFixture]::Now-$started).TotalSeconds), delay=$script:scanDelay"}
  if($case.replace -or $case.multiple){Check ($popupCandidateAmbiguous -and !$popupVisible) 'Changed or competing target must never be adopted'}
  if($case.name -eq 'cold-fast') {
   Check (([StartupFixture]::Now-$started).TotalMilliseconds -le 250) "Ready window delayed behind a fixed timeout: $(([StartupFixture]::Now-$started).TotalMilliseconds) ms"

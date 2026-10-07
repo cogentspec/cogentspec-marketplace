@@ -809,7 +809,8 @@ function Get-ChatGptPopupStartupDecision([string]$State, [bool]$ShortcutSent) {
 function Find-ChatGptPopupWindowMatch(
     [int[]]$ProcessIds,
     [long[]]$MainWindowHandles,
-    [long]$PreferredWindowHandle = 0
+    [long]$PreferredWindowHandle = 0,
+    [long]$StartupCandidateHandle = 0
 ) {
     Add-Type -AssemblyName UIAutomationClient -ErrorAction Stop
     $composerCondition = Get-ChatGptComposerCondition
@@ -824,6 +825,11 @@ function Find-ChatGptPopupWindowMatch(
         )
     )
     $nativeCandidates = @([CogentSpec.ChatGptPopupNative]::FindPopupWindows($ProcessIds))
+    # Initial discovery remains broad. Once startup owns one newly visible
+    # candidate, inspect only that handle; the caller fences native competitors.
+    if ($StartupCandidateHandle -ne 0) {
+        $nativeCandidates = @($nativeCandidates | Where-Object { ([IntPtr]$_).ToInt64() -eq $StartupCandidateHandle })
+    }
     $evidence = @($nativeCandidates | ForEach-Object {
         $window = [IntPtr]$_
         try {
@@ -1369,13 +1375,25 @@ if (-not $activatedExisting) {
                 # Respect a user closing/hiding the candidate during startup.
                 break
             }
+            if ($openingCandidate -eq [IntPtr]::Zero) { continue }
             $popupMatch = Find-ChatGptPopupWindowMatch -ProcessIds $chatGptProcessIds -MainWindowHandles $chatGptMainWindowHandles `
-                -PreferredWindowHandle $PreferredWindowHandle
+                -PreferredWindowHandle $PreferredWindowHandle -StartupCandidateHandle $openingCandidate.ToInt64()
             $popupWindow = [IntPtr]$popupMatch.window
             $popupVerification = [string]$popupMatch.verification
             $popupCandidateDetected = $popupCandidateDetected -or [bool]$popupMatch.candidateDetected
             $popupCandidateAmbiguous = $popupCandidateAmbiguous -or [bool]$popupMatch.ambiguous
             $popupVisible = [CogentSpec.ChatGptPopupNative]::IsVisible($popupWindow)
+            # UIA can take time: repeat the cheap native fence after inspection
+            # so a closure, replacement or second candidate cannot pass on stale evidence.
+            $afterCandidates = @([CogentSpec.ChatGptPopupNative]::FindPopupWindows($chatGptProcessIds) | Where-Object {
+                $chatGptMainWindowHandles -notcontains ([IntPtr]$_).ToInt64() -and
+                [CogentSpec.ChatGptPopupNative]::IsVisible([IntPtr]$_)
+            })
+            if ($afterCandidates.Count -ne 1 -or [IntPtr]$afterCandidates[0] -ne $openingCandidate) {
+                $popupWindow = [IntPtr]::Zero; $popupVisible = $false
+                $popupCandidateAmbiguous = $afterCandidates.Count -gt 0
+                break
+            }
             if ($popupWindow -ne [IntPtr]::Zero -and $openingCandidate -ne [IntPtr]::Zero -and $popupWindow -ne $openingCandidate) {
                 $popupWindow = [IntPtr]::Zero; $popupVisible = $false; $popupCandidateAmbiguous = $true
             }
