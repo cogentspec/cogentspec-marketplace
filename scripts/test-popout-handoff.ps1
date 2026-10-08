@@ -211,6 +211,9 @@ foreach($pinned in @($false,$true)) {
  Check ($native::Visible) 'New composer did not return with workspace'
  Check ($native::Pinned -eq $pinned) 'Hide/restore changed pin preference'
  $script:throwInspection=$true;Update-PopupPinHotkeyTarget;$script:throwInspection=$false
+ Check ($script:TargetTrace[-1].decision -eq 'inspection_error_native_retained') 'Missing inspection error retention evidence'
+ Check ($script:TargetTrace[-1].beforeHandle -eq $h -and $script:TargetTrace[-1].handle -eq $h) 'Target trace lost before/after identity'
+ Check ($script:TargetTrace.Count -le 32) 'Target trace must remain bounded'
  Check ($script:CurrentPopupWindowHandle -eq $h -and $type::AllowsWorkspacePin($h)) 'Inspection exception discarded live controls'
  $native::Foreground=30
  Check (!$type::AllowsWorkspacePin($h)) 'Unrelated application gained pin authority'

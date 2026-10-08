@@ -20,6 +20,8 @@ function Read-Worker {
         $m=Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
         return @{kind='worker';available=$true;version=$m.pluginVersion;pid=$m.processId;at=$m.acknowledgedAt;
             handle=$m.popupWindowHandle;visible=$m.popupVisible;verified=$m.windowControlVerified;
+            conversationState=$m.conversationState;conversationIdentified=[bool]$m.currentConversationKey;
+            targetTrace=@($m.targetTrace);
             state=$m.workspaceLifecycleState;action=$m.workspaceLifecycleAction;pinHotkeyReady=$m.pinHotkeyReady;
             fastControlConnected=$m.fastControlConnected;nativeDispatchMilliseconds=$m.nativeDispatchMilliseconds;
             pinTraceAvailable=($m.pinCaptureSession -eq $config.id -and [bool]$m.pinCaptureSession);
@@ -65,6 +67,17 @@ public static class PopoutCaptureNative {
    result.Add(new Window{handle=h.ToInt64(),pid=(int)p,owner=GetWindow(h,4).ToInt64(),visible=IsWindowVisible(h),foreground=h==fg,
      pinned=(style&8)!=0,tool=(style&128)!=0,width=r.right-r.left,height=r.bottom-r.top,kind=kind});return true;
   },IntPtr.Zero);return result.ToArray();
+ }
+ public static string ForegroundKind(int[] ids) {
+  var h=GetForegroundWindow();if(h==IntPtr.Zero)return "none";
+  uint p;GetWindowThreadProcessId(h,out p);
+  if(Array.IndexOf(ids,(int)p)>=0)return "chatgpt";
+  var n=new StringBuilder(128);GetClassName(h,n,n.Capacity);
+  if(n.ToString()=="Shell_TrayWnd"||n.ToString()=="Shell_SecondaryTrayWnd")return "taskbar";
+  try {var name=System.Diagnostics.Process.GetProcessById((int)p).ProcessName;
+   if(name=="chrome"||name=="msedge"||name=="firefox")return "browser";
+  }catch{return "unknown";}
+  return "other_application";
  }
 }
 '@
@@ -123,9 +136,10 @@ if($SnapshotKind -eq 'native') {
     $watch=[Diagnostics.Stopwatch]::StartNew();$last='';$lastChord=0
     while($watch.Elapsed.TotalMinutes -lt 20) {
         $windows=@(Read-Native)
-        $json=$windows|ConvertTo-Json -Depth 4 -Compress
+        $foregroundKind=[PopoutCaptureNative]::ForegroundKind([int[]]@($windows | ForEach-Object pid))
+        $json=(@{windows=$windows;foregroundKind=$foregroundKind}|ConvertTo-Json -Depth 4 -Compress)
         if($json -ne $last) {
-            @{kind='native';at=[DateTime]::UtcNow.ToString('o');elapsedMs=$watch.ElapsedMilliseconds;inspectionComplete=$true;windows=$windows}|ConvertTo-Json -Depth 6 -Compress
+            @{kind='native';at=[DateTime]::UtcNow.ToString('o');elapsedMs=$watch.ElapsedMilliseconds;inspectionComplete=$true;foregroundKind=$foregroundKind;windows=$windows}|ConvertTo-Json -Depth 6 -Compress
             $last=$json
         }
         $chord=[PopoutCaptureNative]::Chord()

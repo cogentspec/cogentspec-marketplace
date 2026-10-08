@@ -451,6 +451,7 @@ function Write-ReadyMarker([bool]$ServerAcknowledged, [string]$Status = 'ready',
         # Keep zero/single attempts as JSON arrays, not null or a lone object.
         pinAttempts = @(if (-not $TestToken -and $script:PinHotkeyReady) { [CogentSpec.ChatGptPopupPinHotkey]::Attempts() })
         popupVisible = [bool]$script:VerifiedPopupVisible
+        targetTrace = @(if (Get-Variable TargetTrace -Scope Script -ErrorAction SilentlyContinue) { $script:TargetTrace })
         conversationState = [string]$script:CurrentConversationState
         currentConversationKey = [string]$script:CurrentConversationKey
         connectedChatMarkerFound = [bool]$script:ActiveChatFingerprint
@@ -873,12 +874,17 @@ function Restore-PopoutWindowControlTarget {
     return $true
 }
 function Update-PopupPinHotkeyTarget {
+    $beforeHandle = $script:CurrentPopupWindowHandle
+    $decision = 'inspection_started'
+    $errorType = ''
+    try {
     # Only the same verified, controller-hidden native instance can retain its
     # previous exact-chat proof. It cannot be interacted with while hidden.
     # Once visible, normal inspection runs before the next server presence POST.
     if (-not $TestToken -and $script:CurrentPopupWindowHandle -ne 0 -and
         [CogentSpec.PopoutWorkspaceLifecycle]::IsControllerHidden([long]$script:CurrentPopupWindowHandle)) {
         $script:VerifiedPopupVisible = $false
+        $decision = 'controller_hidden_retained'
         # Retain the exact verified target. The hook itself checks actual native
         # visibility and PID, so it is usable immediately after fast restoration.
         return
@@ -898,7 +904,8 @@ function Update-PopupPinHotkeyTarget {
         $verified = [string]$inspection.status -eq 'ready' -and [bool]$inspection.publisherVerified -and
             [bool]$inspection.popupVerified -and
             [long]$inspection.popupWindowHandle -ne 0 -and [int]$inspection.popupProcessId -gt 0
-        if (-not $verified -and (Restore-PopoutWindowControlTarget)) { return }
+        if (-not $verified -and (Restore-PopoutWindowControlTarget)) { $decision = 'native_target_retained_chat_unknown'; return }
+        $decision = if ($verified) { 'inspection_verified' } else { 'inspection_unverified_target_cleared' }
         $visible = $verified -and [bool]$inspection.popupVisible
         $conversationState = if ($verified -and $inspection.PSObject.Properties['conversationState'] -and
             [string]$inspection.conversationState -in @('blank', 'identified')) { [string]$inspection.conversationState } else { 'unknown' }
@@ -944,7 +951,9 @@ function Update-PopupPinHotkeyTarget {
             }
         }
     } catch {
-        if (Restore-PopoutWindowControlTarget) { return }
+        $errorType = $_.Exception.GetType().Name
+        if (Restore-PopoutWindowControlTarget) { $decision = 'inspection_error_native_retained'; return }
+        $decision = 'inspection_error_target_cleared'
         $script:VerifiedPopupVisible = $false
         $script:ClientUnavailable = $false
         $script:CurrentConversationState = 'unknown'
@@ -952,6 +961,18 @@ function Update-PopupPinHotkeyTarget {
         $script:ActiveChatFingerprint = ''
         $script:CurrentPopupWindowHandle = 0
         if ($script:PinHotkeyReady) { [CogentSpec.ChatGptPopupPinHotkey]::SetVerifiedPopup(0, 0) }
+    }
+    } finally {
+        # Passive bounded trace only: no input, inspection, authority or lifecycle changes.
+        try {
+            if (-not (Get-Variable TargetTrace -Scope Script -ErrorAction SilentlyContinue)) { $script:TargetTrace = @() }
+            $script:TargetTrace = @($script:TargetTrace | Select-Object -Last 31) + @(@{
+                at=[DateTime]::UtcNow.ToString('o'); decision=$decision; errorType=$errorType
+                beforeHandle=[long]$beforeHandle; handle=[long]$script:CurrentPopupWindowHandle
+                visible=[bool]$script:VerifiedPopupVisible; conversationState=[string]$script:CurrentConversationState
+                conversationIdentified=[bool]$script:CurrentConversationKey
+            })
+        } catch { } # Diagnostic failure must never change production behaviour.
     }
 }
 
