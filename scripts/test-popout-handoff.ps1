@@ -160,14 +160,18 @@ $blankAttempt=$hook::Attempts()[-1]
 Check ($blankAttempt.status -eq 'no_verified_target' -and !$blankAttempt.nativeCalled -and $native::PinCalls -eq 0) 'Fresh unverified blank attempt was not diagnosed without input'
 $hook::ConfigureCapture($other)
 Check ($hook::Attempts().Length -eq 0) 'Previous capture leaked into new session'
-foreach($name in @('Restore-PopoutWindowControlTarget','Update-PopupPinHotkeyTarget')) {
+foreach($name in @('Register-PopupPinWindow','Restore-PopoutWindowControlTarget','Update-PopupPinHotkeyTarget')) {
  $definition=$ast.Find({param($n)$n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name},$true)
  Invoke-Expression ($definition.Extent.Text.Replace('CogentSpec.','CogentSpecPinFixture.'))
 }
 $script:TestToken='';$script:PinHotkeyReady=$true;$script:RequestTimingSink=$null
 $script:CurrentPopupWindowHandle=0;$script:LifecyclePopupHandle=0;$script:LifecyclePopupProcessId=0;$script:LifecycleWindowKey=''
 $script:popupHelper='Read-NewComposerFixture';$script:throwInspection=$false
-function Read-NewComposerFixture {param($Mode,$TimingSink,$PreferredWindowHandle)
+function Read-NewComposerFixture {param($Mode,$TimingSink,$PreferredWindowHandle,$WindowVerified)
+ if($WindowVerified -and $script:inspectionFixture.popupVerified) {
+  & $WindowVerified $script:inspectionFixture.popupWindowHandle $script:inspectionFixture.popupProcessId
+  Check ($hookTarget.GetValue($null) -eq $script:inspectionFixture.popupWindowHandle) 'Pin target waited for conversation inspection'
+ }
  if($script:throwInspection){throw 'Accessibility temporarily unavailable'}
  $script:inspectionFixture|ConvertTo-Json -Compress
 }
@@ -176,6 +180,13 @@ foreach($pinned in @($false,$true)) {
  $script:inspectionFixture=@{status='ready';publisherVerified=$true;popupVerified=$true;popupWindowHandle=$h;popupProcessId=$h;popupVisible=$true;conversationState='identified';currentConversationKey=('a'*64);chatFingerprint=('b'*64)}
  Update-PopupPinHotkeyTarget
  $key=$script:LifecycleWindowKey;$worker=$script:LifecycleWorkerId
+ $native::Foreground=$h
+ $pinCallsBefore=$native::PinCalls
+ Press-PinFixture
+ Check ($native::PinCalls -eq $pinCallsBefore+1 -and $native::Pinned -ne $pinned) 'Foreground Popout could not pin before first workspace handshake'
+ Press-PinFixture
+ Check ($native::Pinned -eq $pinned) 'Foreground Popout could not unpin before first workspace handshake'
+ $native::Foreground=10
  $type::Receive($owner,$key,1,'active',0)
  Check ($type::AllowsWorkspacePin($h)) 'Initial workspace pin denied'
  $script:inspectionFixture.popupVerified=$false

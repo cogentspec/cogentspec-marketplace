@@ -872,6 +872,26 @@ function Restore-PopoutWindowControlTarget {
     }
     return $true
 }
+function Register-PopupPinWindow {
+    param([long]$WindowHandle, [int]$ProcessId)
+    if ($WindowHandle -eq 0 -or $ProcessId -le 0) { return }
+    if ($script:LifecyclePopupHandle -ne $WindowHandle -or
+        $script:LifecyclePopupProcessId -ne $ProcessId -or
+        -not [CogentSpec.PopoutWorkspaceLifecycle]::MatchesWindow($WindowHandle)) {
+        $script:LifecycleWorkerId = [Guid]::NewGuid().ToString('D')
+        $script:LifecycleWindowKey = [Guid]::NewGuid().ToString('N') + [Guid]::NewGuid().ToString('N')
+    }
+    if (-not [CogentSpec.PopoutWorkspaceLifecycle]::Observe($WindowHandle, $ProcessId, $script:LifecycleWindowKey)) {
+        throw 'Verified Popout lifetime could not be registered.'
+    }
+    $script:LifecyclePopupHandle = $WindowHandle
+    $script:LifecyclePopupProcessId = $ProcessId
+    $script:CurrentPopupWindowHandle = $WindowHandle
+    if ($script:PinHotkeyReady) {
+        [CogentSpec.ChatGptPopupPinHotkey]::SetVerifiedPopup($WindowHandle, $ProcessId)
+    }
+}
+
 function Update-PopupPinHotkeyTarget {
     # Only the same verified, controller-hidden native instance can retain its
     # previous exact-chat proof. It cannot be interacted with while hidden.
@@ -885,6 +905,12 @@ function Update-PopupPinHotkeyTarget {
     }
     try {
         $inspectionArguments = @{ Mode = 'inspect'; TimingSink = $script:RequestTimingSink }
+        if (-not $TestToken) {
+            $inspectionArguments.WindowVerified = {
+                param([long]$windowHandle, [int]$processId)
+                Register-PopupPinWindow -WindowHandle $windowHandle -ProcessId $processId
+            }
+        }
         if ($script:CurrentPopupWindowHandle -ne 0) {
             $inspectionArguments.PreferredWindowHandle = [long]$script:CurrentPopupWindowHandle
         }
