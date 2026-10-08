@@ -160,25 +160,18 @@ $blankAttempt=$hook::Attempts()[-1]
 Check ($blankAttempt.status -eq 'no_verified_target' -and !$blankAttempt.nativeCalled -and $native::PinCalls -eq 0) 'Fresh unverified blank attempt was not diagnosed without input'
 $hook::ConfigureCapture($other)
 Check ($hook::Attempts().Length -eq 0) 'Previous capture leaked into new session'
-foreach($name in @('Register-PopupPinWindow','Restore-PopoutWindowControlTarget','Update-PopupPinHotkeyTarget')) {
+foreach($name in @('Restore-PopoutWindowControlTarget','Update-PopupPinHotkeyTarget')) {
  $definition=$ast.Find({param($n)$n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name},$true)
  Invoke-Expression ($definition.Extent.Text.Replace('CogentSpec.','CogentSpecPinFixture.'))
 }
 $script:TestToken='';$script:PinHotkeyReady=$true;$script:RequestTimingSink=$null
 $script:CurrentPopupWindowHandle=0;$script:LifecyclePopupHandle=0;$script:LifecyclePopupProcessId=0;$script:LifecycleWindowKey=''
-$script:popupHelper='Read-NewComposerFixture';$script:throwInspection=$false
-function Read-NewComposerFixture {param($Mode,$TimingSink,$PreferredWindowHandle,$WindowVerified)
- if($WindowVerified -and $script:inspectionFixture.popupVerified) {
-  & $WindowVerified $script:inspectionFixture.popupWindowHandle $script:inspectionFixture.popupProcessId
-  Check ($hookTarget.GetValue($null) -eq $script:inspectionFixture.popupWindowHandle) 'Pin target waited for conversation inspection'
- }
- if($script:throwInspection){throw 'Accessibility temporarily unavailable'}
- $script:inspectionFixture|ConvertTo-Json -Compress
-}
+$script:popupHelper=Join-Path $PSScriptRoot 'fixtures/popout-inspection-child.ps1';$script:throwInspection=$false
 foreach($pinned in @($false,$true)) {
  $h=if($pinned){25}else{24};$native::Foreground=10;$native::Visible=$true;$native::Pinned=$pinned
  $script:inspectionFixture=@{status='ready';publisherVerified=$true;popupVerified=$true;popupWindowHandle=$h;popupProcessId=$h;popupVisible=$true;conversationState='identified';currentConversationKey=('a'*64);chatFingerprint=('b'*64)}
  Update-PopupPinHotkeyTarget
+ Check ($script:CurrentPopupWindowHandle -eq $h -and $hookTarget.GetValue($null) -eq $h) 'Real child-script inspection failed to register the parent watcher pin target'
  $key=$script:LifecycleWindowKey;$worker=$script:LifecycleWorkerId
  $native::Foreground=$h
  $pinCallsBefore=$native::PinCalls

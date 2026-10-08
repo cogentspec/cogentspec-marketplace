@@ -12,7 +12,6 @@ param(
     [long]$PreferredWindowHandle = 0,
     [scriptblock]$StartupProgress,
     [scriptblock]$TimingSink,
-    [scriptblock]$WindowVerified,
     [scriptblock]$ContinueHandoff
 )
 
@@ -1119,11 +1118,6 @@ $temporaryTopmostWindow = [IntPtr]::Zero
 $workflowPinApplied = $false
 
 if ($Mode -eq 'inspect') {
-    # Window-only control must not wait for conversation/composer accessibility.
-    # This callback runs only after the existing publisher and window selection gates.
-    if ($WindowVerified -and $popupWindow -ne [IntPtr]::Zero) {
-        [void](& $WindowVerified $popupWindow.ToInt64() ([CogentSpec.ChatGptPopupNative]::GetProcessId($popupWindow)))
-    }
     $conversation = Get-ChatGptConversationObservation -Window $popupWindow
     $chatFingerprint = [string]$conversation.chatFingerprint
     Write-CompactJson ([ordered]@{
