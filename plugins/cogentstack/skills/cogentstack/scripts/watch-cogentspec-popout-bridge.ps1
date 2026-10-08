@@ -448,7 +448,8 @@ function Write-ReadyMarker([bool]$ServerAcknowledged, [string]$Status = 'ready',
         pinHotkeyScope = 'verified_popout_or_bound_active_workspace'
         pinHotkeyError = [string]$script:PinHotkeyError
         pinCaptureSession = if (-not $TestToken -and $script:PinHotkeyReady) { [CogentSpec.ChatGptPopupPinHotkey]::CaptureSession } else { '' }
-        pinAttempts = if (-not $TestToken -and $script:PinHotkeyReady) { @([CogentSpec.ChatGptPopupPinHotkey]::Attempts()) } else { @() }
+        # Keep zero/single attempts as JSON arrays, not null or a lone object.
+        pinAttempts = @(if (-not $TestToken -and $script:PinHotkeyReady) { [CogentSpec.ChatGptPopupPinHotkey]::Attempts() })
         popupVisible = [bool]$script:VerifiedPopupVisible
         conversationState = [string]$script:CurrentConversationState
         currentConversationKey = [string]$script:CurrentConversationKey

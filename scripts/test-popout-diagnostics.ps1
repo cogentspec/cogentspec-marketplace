@@ -1,9 +1,30 @@
+param([switch]$EmitWireFixtures)
 $ErrorActionPreference='Stop'
 $root=Join-Path $PSScriptRoot '../plugins/cogentspec/skills/cogentspec/scripts'
 $source=Get-Content -Raw (Join-Path $root 'capture-popout-diagnostics.ps1')
 $tokens=$null;$errors=$null
 $ast=[Management.Automation.Language.Parser]::ParseInput($source,[ref]$tokens,[ref]$errors)
 if($errors.Count){throw ($errors|Out-String)}
+if($EmitWireFixtures) {
+ # Run the production marker reader AND HTTP serializer with synthetic data.
+ # No native UI, real marker, credential or network is accessed.
+ foreach($name in @('Read-Worker','Request')) {
+  $function=$ast.Find({param($n)$n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name},$true)
+  if(!$function){throw "Missing production function $name"}
+  Invoke-Expression $function.Extent.Text
+ }
+ $config=@{id='aaaaaaaa-1111-1111-1111-111111111111';service='https://cogentspec.com';token='fixture-only'}
+ function Get-Content {param($LiteralPath,[switch]$Raw) $script:fixtureMarker}
+ function Invoke-RestMethod {param($Method,$Uri,$Headers,$TimeoutSec,$MaximumRedirection,$ContentType,$Body) $Body}
+ try {
+  foreach($count in @(0,1,2,64)) {
+   $attempts=@(for($i=0;$i -lt $count;$i++){@{sequence=$i+1;status='target_hidden';nativeCalled=$false;handle=22;foregroundHandle=10;at='2026-10-08T06:15:37.0000000Z';text='private-fixture'}})
+   $script:fixtureMarker=@{pluginVersion='fixture';pinCaptureSession=$config.id;pinAttempts=$attempts}|ConvertTo-Json -Depth 6
+   Request Post @{sequence=$count;evidence=@{kind='capture_batch';samples=@((Read-Worker))}}
+  }
+ } finally {Remove-Item Function:\Get-Content;Remove-Item Function:\Invoke-RestMethod}
+ return
+}
 $fn=$ast.Find({param($n)$n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Import-DecisionFunctions'},$true)
 Invoke-Expression $fn.Extent.Text
 Import-DecisionFunctions (Join-Path $root 'open-chatgpt-popup.ps1')
@@ -66,9 +87,18 @@ function Get-Content {param($LiteralPath,[switch]$Raw) $script:fixtureMarker}
 try {
  $m=Read-Worker
  if(!$m.pinTraceAvailable -or $m.pinAttempts[0].status -ne 'no_verified_target'){throw 'Pin trace lost in collector'}
+ foreach($count in @(0,1,2,64)) {
+  $attempts=@(for($i=0;$i -lt $count;$i++){@{sequence=$i+1;status='target_hidden'}})
+  $script:fixtureMarker=@{pinCaptureSession=$config.id;pinAttempts=$attempts}|ConvertTo-Json -Depth 6
+  $wire=@{samples=@((Read-Worker))}|ConvertTo-Json -Depth 10 -Compress
+  $roundtrip=$wire|ConvertFrom-Json
+  if($roundtrip.samples[0].pinAttempts -isnot [array] -or $roundtrip.samples[0].pinAttempts.Count -ne $count){throw "Pin array lost on JSON roundtrip: $count"}
+ }
  $config.id='bbbbbbbb-1111-1111-1111-111111111111';$m=Read-Worker
  if($m.pinTraceAvailable -or $m.pinAttempts.Count){throw 'Foreign capture evidence leaked'}
+ if($m.pinAttempts -isnot [array]){throw 'Foreign capture must emit an empty array'}
  $script:fixtureMarker='{"pluginVersion":"legacy"}';$m=Read-Worker
  if($m.pinTraceAvailable -or $m.pinAttempts.Count){throw 'Legacy marker fabricated trace coverage'}
+ if($m.pinAttempts -isnot [array]){throw 'Legacy marker must emit an empty array'}
 } finally {Remove-Item Function:\Get-Content}
 Write-Output 'PASS: pin attempt ingestion, unavailable legacy coverage and capture-session isolation.'

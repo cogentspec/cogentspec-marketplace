@@ -23,7 +23,8 @@ function Read-Worker {
             state=$m.workspaceLifecycleState;action=$m.workspaceLifecycleAction;pinHotkeyReady=$m.pinHotkeyReady;
             fastControlConnected=$m.fastControlConnected;nativeDispatchMilliseconds=$m.nativeDispatchMilliseconds;
             pinTraceAvailable=($m.pinCaptureSession -eq $config.id -and [bool]$m.pinCaptureSession);
-            pinAttempts=if($m.pinCaptureSession -eq $config.id -and $m.pinCaptureSession){@($m.pinAttempts)}else{@()}}
+            # Wrap the conditional itself: PowerShell otherwise unwraps one attempt.
+            pinAttempts=@(if($m.pinCaptureSession -eq $config.id -and $m.pinCaptureSession){$m.pinAttempts})}
     } catch {return @{kind='worker';inspectionComplete=$false;status='marker_unavailable_or_incomplete'}}
 }
 
