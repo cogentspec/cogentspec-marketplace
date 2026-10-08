@@ -83,6 +83,17 @@ Treat **Build my project** and **Start Project Build** as authorization to imple
 7. Run `scripts/generate-project-preview.ps1 -Mode generate -ContextKey <context>` exactly once. Accept only `status: generated` or `status: already_running` with `remembered: true`, and require the reported project request identifier and target to match the inspected project.
 8. Report the completed project-specific build, checks, exact preview result, and any remaining limitation. Do not create a Git commit, push, or deploy without separate explicit approval.
 
+## Change the connected project (workflow1)
+
+When the user describes changes to the connected active project, treat that as the work request; do not require a copied template, repeated folder path, another connection command, or "Build my project". This authorizes the requested file changes and revised preview, not unrelated baseline changes, commits, pushes or deployment.
+
+1. Resolve the invoking context, then run `scripts/project-build-handoff.ps1 -ContextKey <context> -ChangeAction inspect`. Use the returned active project, registered folder, current project-bound baseline and protected contract identity. Do not use a previous chat's project or a newer unrelated runtime. Verify the local manifest project identity and read repository instructions and portable knowledge before editing.
+2. If the request fits the approved baseline, implement it directly while preserving unrelated work. If a setting conflicts, explain the exact conflict and proposed adjustment. Never override protected requirements, project type, identity or folder.
+3. For supported web baseline settings, create a JSON proposal payload containing `projectId`, `runtimeId` from the fresh handoff, and `patch` with only the changed editable baseline input fields. Run the same helper with `-ChangeAction propose -ChangePayloadPath <file>`. This saves a proposal, not a baseline change. Show the returned before/after settings and ask the user for explicit approval. Keep their original work request.
+4. Only after that approval, create a payload containing the returned `proposalId` and run `-ChangeAction apply -ChangePayloadPath <file> -Approved`. A denial means no apply. Expired, changed-project or stale-baseline rejection requires a fresh read/proposal and fresh approval, not an automatic retry. Conversational updates currently cover the editable web baseline fields returned by the handoff; unsupported settings require the supported website editor or a supported alternative, never a fabricated update.
+5. Require `status: applied`, reread the change handoff, and continue the original implementation without asking the user to repeat it. Verify manifest project identity rather than expecting its creation-time runtime ID to change. Do not alter creation provenance to make checks pass.
+6. Run relevant tests/build, update portable knowledge, and generate the revised preview with `generate-project-preview.ps1 -Mode generate -ContextKey <context>`. Require the same project identity and verified preview result; report what changed and any unresolved constraints.
+
 ## Restore portable knowledge
 
 New projects contain `AGENTS.md`, `PROJECT_KNOWLEDGE.md`, `CURRENT_STATE.md`, `HANDOFF.md`, `docs/decisions/`, and `.coge/knowledge-manifest.json`. Git carries durable project knowledge; CogentSpec restores protected server state through the safe project request identifier.

@@ -1,5 +1,8 @@
 param(
-    [string]$ContextKey = ''
+    [string]$ContextKey = '',
+    [ValidateSet('', 'inspect', 'propose', 'apply')][string]$ChangeAction = '',
+    [string]$ChangePayloadPath = '',
+    [switch]$Approved
 )
 
 Set-StrictMode -Version Latest
@@ -33,6 +36,22 @@ if (-not (Test-Path -LiteralPath $credentialPath -PathType Leaf)) {
 $credential = Get-Content -Raw -LiteralPath $credentialPath | ConvertFrom-Json
 $token = Unprotect-CogentSpecValue ([string]$credential.token)
 try {
+    if ($ChangeAction) {
+        $uri = "$serviceUrl/api/plugin/project-changes?$contextQuery"
+        $headers = @{ Accept = 'application/json'; Authorization = "Bearer $token" }
+        if ($ChangeAction -eq 'inspect') {
+            Write-CompactJson (Invoke-RestMethod -Method Get -Uri $uri -Headers $headers -TimeoutSec 30)
+        } else {
+            if (-not $ChangePayloadPath) { throw 'A reviewed change payload file is required.' }
+            $payload = Get-Content -LiteralPath $ChangePayloadPath -Raw | ConvertFrom-Json
+            if ($ChangeAction -eq 'apply' -and -not $Approved) { throw 'Explicit approval is required before applying a baseline proposal.' }
+            $body = if ($ChangeAction -eq 'propose') {
+                @{action='propose';projectId=$payload.projectId;runtimeId=$payload.runtimeId;patch=$payload.patch}
+            } else { @{action='apply';proposalId=$payload.proposalId;approved=[bool]$Approved} }
+            Write-CompactJson (Invoke-RestMethod -Method Post -Uri $uri -Headers $headers -ContentType 'application/json' -Body ($body | ConvertTo-Json -Depth 20 -Compress) -TimeoutSec 30)
+        }
+        return
+    }
     $handoff = Invoke-RestMethod `
         -Method Get `
         -Uri "$serviceUrl/api/plugin/project-build-handoff?$contextQuery" `
