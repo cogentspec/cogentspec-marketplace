@@ -184,8 +184,12 @@ foreach($pinned in @($false,$true)) {
  Check (!$script:CurrentConversationKey -and !$script:ActiveChatFingerprint -and $script:CurrentConversationState -eq 'unknown') 'New composer inherited green connection'
  Check ($type::AllowsWorkspacePin($h)) 'New composer revoked workspace pin permission'
  Check ($type::MatchesWindow($h)) 'New composer revoked composer-focused shortcut identity'
+ $readsBefore=$native::PinCalls
+ Check ($hook::ReadPinState($h) -eq [int]$pinned) 'Pin telemetry disagrees with actual native state'
+ Check ($native::PinCalls -eq $readsBefore) 'Pin telemetry mutated the native window'
  $calls=$native::PinCalls;Press-PinFixture
  Check ($native::Pinned -ne $pinned -and $native::PinCalls -eq $calls+1) 'Workspace shortcut did not toggle exactly once'
+ Check ($hook::ReadPinState($h) -eq [int](!$pinned)) 'Pin telemetry did not observe shortcut toggle'
  $attempt=$hook::Attempts()[-1]
  Check ($attempt.nativeCalled -and $attempt.applied -and $attempt.beforePinned -eq $pinned -and $attempt.afterPinned -ne $pinned -and $attempt.foregroundHandle -eq 10) 'Native pin attempt evidence incorrect'
  Press-PinFixture
@@ -209,6 +213,7 @@ foreach($pinned in @($false,$true)) {
  Press-PinFixture;Check ($native::PinCalls -eq $calls) 'Unrelated foreground toggled pin'
  $native::Properties.Remove($h)|Out-Null # destruction and immediate same-HWND/PID reuse
  Check (!$type::MatchesWindow($h)) 'Reused handle inherited shortcut authority'
+ Check ($hook::ReadPinState($h) -eq -1) 'Pin telemetry accepted a recycled handle'
  $native::Foreground=$h;Press-PinFixture
  Check ($native::PinCalls -eq $calls) 'Recycled foreground HWND inherited shortcut authority'
  $shows=$native::Shows;$native::Visible=$false;$native::Foreground=10

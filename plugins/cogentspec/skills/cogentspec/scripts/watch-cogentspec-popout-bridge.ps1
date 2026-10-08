@@ -692,6 +692,12 @@ namespace CogentSpec {
         public static bool IsRunning { get { return hook != IntPtr.Zero; } }
         public static string LastToggleStatus { get { return lastToggleStatus; } }
         public static bool LastTogglePinned { get { return lastTogglePinned != 0; } }
+        public static int ReadPinState(long handle) {
+            var window = new IntPtr(handle);
+            if (!IsVerifiedPopup(window)) return -1;
+            bool pinned = IsTopmost(window);
+            return IsVerifiedPopup(window) ? (pinned ? 1 : 0) : -1;
+        }
         public static long LastToggleUtcTicks { get { return Interlocked.Read(ref lastToggleUtcTicks); } }
 
         private static void HookThreadMain() {
@@ -981,6 +987,14 @@ try {
             $presenceQuery = $query + '&popupVisible=' + $script:VerifiedPopupVisible.ToString().ToLowerInvariant()
             $presenceQuery += '&conversationState=' + [Uri]::EscapeDataString($script:CurrentConversationState)
             $presenceQuery += '&lifecycleWorkerId=' + $script:LifecycleWorkerId
+            # Read-only native state, including changes made outside our hotkey.
+            # Do not infer pinning from connection, visibility or the last keypress.
+            if ($script:PinHotkeyReady -and $script:CurrentPopupWindowHandle -ne 0) {
+                try {
+                    $pinState = [CogentSpec.ChatGptPopupPinHotkey]::ReadPinState([long]$script:CurrentPopupWindowHandle)
+                    if ($pinState -ge 0) { $presenceQuery += '&windowPinned=' + ($pinState -eq 1).ToString().ToLowerInvariant() }
+                } catch { <# Missing telemetry must never stop the Bridge heartbeat. #> }
+            }
             $fastControl = -not $TestToken -and [CogentSpec.PopoutControlTransport]::IsFresh
             if (-not $fastControl) { $presenceQuery += '&lifecycleProtocol=window-v1' }
             if ($script:CurrentPopupWindowHandle -ne 0) {
