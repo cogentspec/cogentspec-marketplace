@@ -25,7 +25,7 @@ try {
     $headers = @{ Accept='application/json'; Authorization="Bearer $token" }
     if ($PayloadPath) {
         $raw = Get-Content -Raw -LiteralPath $PayloadPath
-        if ([Text.Encoding]::UTF8.GetByteCount($raw) -gt 131072) { throw 'Review payload too large.' }
+        if ([Text.Encoding]::UTF8.GetByteCount($raw) -gt 2097152) { throw 'Review payload too large.' }
         $payload = $raw | ConvertFrom-Json
         if ([string]$payload.caseId -ne [string]$CaseId) { throw 'Review case mismatch.' }
         if ([string]$payload.action -notin @('report','verify','refresh','use_correction')) { throw 'Unsupported review action.' }
