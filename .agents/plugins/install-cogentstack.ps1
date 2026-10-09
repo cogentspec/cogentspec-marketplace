@@ -307,6 +307,7 @@ try {
         'skills/cogentstack/scripts/project-context.ps1',
         'skills/cogentstack/scripts/project-knowledge.ps1',
         'skills/cogentstack/scripts/project-preview-readiness.ps1',
+        'skills/cogentstack/scripts/project-review.ps1',
         'skills/cogentstack/scripts/reset-cogentspec-update.ps1',
         'skills/cogentstack/scripts/start-cogentspec-desktop-ui-bridge.ps1',
         'skills/cogentstack/scripts/start-cogentspec-popout-bridge.ps1',
