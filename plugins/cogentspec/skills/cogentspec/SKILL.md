@@ -47,6 +47,12 @@ For ChatGPT Popout, treat `currentConversationConnected` as the authoritative ex
 
 The workspace opened through the native desktop action is the primary destination; the web link is recovery only. Both destinations use the same server-authoritative context, active project, approved decisions, Bridge queue, Git state, preview state, and deployment state. Saved changes refresh from the shared server without copying unsaved browser-local text between views. Switching AI projects changes the context in both destinations, creates two fresh one-use workspace handoffs, and starts or reuses that context's Bridge worker; it does not create permanent CogentSpec browser tabs.
 
+## Current activity required before project instructions
+
+Before resolving any connected project instruction, including discussion or refinement of a new idea, call `get_project_activity` with the freshly resolved invoking context, or `scripts/project-build-handoff.ps1 -ContextKey <context> -ChangeAction activity`. This read is allowed before selection; it is not permission to inspect project files. Require `status: ready` and one specific current project or active new-idea draft. If unavailable, absent, ambiguous or unverified, stop and say exactly: **Please select a project for activity to begin.** Do not choose a target from the conversation, current directory, recent request, tab label, project count or a green Bridge indicator.
+
+A blank New idea page is not a current draft. Ask the user to create/select it in CogentSpec first. A verified draft permits only instructions about that draft; it is not authority to edit or build an existing project. Existing-project work additionally requires a fresh change/build handoff with the same project identity and verified local manifest. Recheck activity before mutations and after any pause or user approval. If its ID or revision changed, stop and clarify the intended target; never transfer a pending instruction to a different selection. Connection, update, and user-directed project-selection/creation controls remain available; this gate must not prevent selecting a project. Never run a build, repair, preview, file inspection or filesystem edit to work around a failed gate.
+
 ## Account and service boundaries
 
 - The plugin package and unprotected Project Type browsing are public. Protected credentials and project-changing actions are not.

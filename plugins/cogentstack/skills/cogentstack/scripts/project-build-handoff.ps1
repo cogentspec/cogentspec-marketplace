@@ -1,6 +1,6 @@
 param(
     [string]$ContextKey = '',
-    [ValidateSet('', 'inspect', 'propose', 'apply', 'complete_repair')][string]$ChangeAction = '',
+    [ValidateSet('', 'activity', 'inspect', 'propose', 'apply', 'complete_repair')][string]$ChangeAction = '',
     [string]$ChangePayloadPath = '',
     [switch]$Approved
 )
@@ -39,7 +39,9 @@ try {
     if ($ChangeAction) {
         $uri = "$serviceUrl/api/plugin/project-changes?$contextQuery"
         $headers = @{ Accept = 'application/json'; Authorization = "Bearer $token" }
-        if ($ChangeAction -eq 'inspect') {
+        if ($ChangeAction -eq 'activity') {
+            Write-CompactJson (Invoke-RestMethod -Method Get -Uri "$serviceUrl/api/plugin/project-activity?$contextQuery" -Headers $headers -TimeoutSec 30)
+        } elseif ($ChangeAction -eq 'inspect') {
             Write-CompactJson (Invoke-RestMethod -Method Get -Uri $uri -Headers $headers -TimeoutSec 30)
         } else {
             if (-not $ChangePayloadPath) { throw 'A reviewed change payload file is required.' }

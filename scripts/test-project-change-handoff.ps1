@@ -43,4 +43,7 @@ Check (!$body.PSObject.Properties['approved']) 'Completion is not baseline appro
 $script:calls=@();$script:payload='x'*24577;$rejected=$false
 try { & $run } catch { $rejected=$true }
 Check ($rejected -and $script:calls.Count -eq 0) 'Oversized payload sent'
-Write-Output 'PASS: production helper inspect/propose/apply/complete_repair branches; denied approval and oversized payloads send no request. Network and credential access mocked.'
+$script:calls=@();$ChangeAction='activity';$ChangePayloadPath=''
+& $run
+Check ($script:calls.Count -eq 1 -and $script:calls[0].method -eq 'Get' -and $script:calls[0].uri -eq 'https://fixture.invalid/api/plugin/project-activity?context=ctx-fixture') 'Activity must read exact-context selection without any file mutation'
+Write-Output 'PASS: production helper activity/inspect/propose/apply/complete_repair branches; denied approval and oversized payloads send no request. Network and credential access mocked.'
