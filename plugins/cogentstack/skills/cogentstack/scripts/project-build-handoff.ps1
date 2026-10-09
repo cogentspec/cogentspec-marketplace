@@ -1,6 +1,6 @@
 param(
     [string]$ContextKey = '',
-    [ValidateSet('', 'inspect', 'propose', 'apply')][string]$ChangeAction = '',
+    [ValidateSet('', 'inspect', 'propose', 'apply', 'complete_repair')][string]$ChangeAction = '',
     [string]$ChangePayloadPath = '',
     [switch]$Approved
 )
@@ -43,11 +43,14 @@ try {
             Write-CompactJson (Invoke-RestMethod -Method Get -Uri $uri -Headers $headers -TimeoutSec 30)
         } else {
             if (-not $ChangePayloadPath) { throw 'A reviewed change payload file is required.' }
-            $payload = Get-Content -LiteralPath $ChangePayloadPath -Raw | ConvertFrom-Json
+            $raw = Get-Content -LiteralPath $ChangePayloadPath -Raw
+            if ([Text.Encoding]::UTF8.GetByteCount($raw) -gt 24576) { throw 'Change payload too large.' }
+            $payload = $raw | ConvertFrom-Json
             if ($ChangeAction -eq 'apply' -and -not $Approved) { throw 'Explicit approval is required before applying a baseline proposal.' }
             $body = if ($ChangeAction -eq 'propose') {
                 @{action='propose';projectId=$payload.projectId;runtimeId=$payload.runtimeId;patch=$payload.patch}
-            } else { @{action='apply';proposalId=$payload.proposalId;approved=[bool]$Approved} }
+            } elseif ($ChangeAction -eq 'complete_repair') { @{action='complete_repair';repair=$payload} }
+            else { @{action='apply';proposalId=$payload.proposalId;approved=[bool]$Approved} }
             Write-CompactJson (Invoke-RestMethod -Method Post -Uri $uri -Headers $headers -ContentType 'application/json' -Body ($body | ConvertTo-Json -Depth 20 -Compress) -TimeoutSec 30)
         }
         return

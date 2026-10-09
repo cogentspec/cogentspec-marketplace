@@ -34,4 +34,13 @@ $Approved=$true
 & $run
 $body=$script:calls[0].body|ConvertFrom-Json
 Check ($body.action -eq 'apply' -and $body.approved -eq $true -and $body.proposalId -eq 'reviewed') 'Approved proposal changed'
-Write-Output 'PASS: production helper inspect/propose/apply branches; denied approval sends no request. Network and credential access mocked.'
+$script:calls=@();$ChangeAction='complete_repair';$Approved=$false
+$script:payload='{"completionId":"11111111-1111-4111-8111-111111111111","projectId":"project","runtimeId":"runtime","issue":"invisible_control","cause":"implementation","change":"styling","outcome":"verified","checks":["behavioural","visual"]}'
+& $run
+$body=$script:calls[0].body|ConvertFrom-Json
+Check ($body.action -eq 'complete_repair' -and $body.repair.issue -eq 'invisible_control') 'Completion payload lost'
+Check (!$body.PSObject.Properties['approved']) 'Completion is not baseline approval'
+$script:calls=@();$script:payload='x'*24577;$rejected=$false
+try { & $run } catch { $rejected=$true }
+Check ($rejected -and $script:calls.Count -eq 0) 'Oversized payload sent'
+Write-Output 'PASS: production helper inspect/propose/apply/complete_repair branches; denied approval and oversized payloads send no request. Network and credential access mocked.'
