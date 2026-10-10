@@ -1,6 +1,6 @@
 function Invoke-InitialCredentialSetup([string]$Token) {
     # This result must never be sent to Write-Output, transcripts or AI-facing helper output.
-    $claimed = Invoke-BridgeApi -Method Post -Path "/api/plugin/project-credentials?$contextQuery" -Token $Token -Body @{ action = 'claim' }
+    $claimed = Invoke-BridgeApi -Method Post -Path "/api/plugin/project-credentials?$contextQuery" -Token $Token -Body @{ action = 'claim'; protocol = 2 }
     if (-not $claimed.job) { return }
     $job = $claimed.job
     $state = 'failed'
@@ -30,9 +30,9 @@ function Invoke-InitialCredentialSetup([string]$Token) {
         finally { [Array]::Clear($payloadBytes, 0, $payloadBytes.Length); $process.StandardInput.BaseStream.Close() }
         if (-not $process.WaitForExit(75000)) { $process.Kill(); throw 'Setup timed out.' }
         $result = $outTask.Result | ConvertFrom-Json
-        if ($process.ExitCode -eq 0 -and $result.state -in @('applied','setup_required','existing_account','failed')) { $state = [string]$result.state }
+        if ($process.ExitCode -eq 0 -and $result.state -in @('applied','setup_required','existing_account','failed','verified','integration_applied')) { $state = [string]$result.state }
     } catch { $state = 'failed' }
-    finally { if ($null -ne (Get-Variable process -ErrorAction SilentlyContinue)) { if ($process) { $process.Dispose() } }; $job.password = $null }
+    finally { if ($null -ne (Get-Variable process -ErrorAction SilentlyContinue)) { if ($process) { $process.Dispose() } }; $job.password = $null; if ($job.PSObject.Properties['configuration']) { $job.configuration = $null } }
     Invoke-BridgeApi -Method Post -Path "/api/plugin/project-credentials?$contextQuery" -Token $Token -Body @{
         action = 'complete'; id = [string]$job.id; claim = [string]$job.claim; projectId = [string]$job.projectId
         runtimeId = [string]$job.runtimeId; selectionRevision = [string]$job.selectionRevision; state = $state
