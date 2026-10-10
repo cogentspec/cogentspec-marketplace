@@ -308,6 +308,8 @@ try {
         'skills/cogentspec/scripts/project-context.ps1',
         'skills/cogentspec/scripts/project-knowledge.ps1',
         'skills/cogentspec/scripts/project-preview-readiness.ps1',
+        'skills/cogentspec/scripts/project-credential-worker.ps1',
+        'skills/cogentspec/scripts/provision-project-credentials.mjs',
         'skills/cogentspec/scripts/project-review.ps1',
         'skills/cogentspec/scripts/reset-cogentspec-update.ps1',
         'skills/cogentspec/scripts/start-cogentspec-desktop-ui-bridge.ps1',
