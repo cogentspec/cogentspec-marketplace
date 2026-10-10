@@ -2,6 +2,7 @@ import { readFileSync, realpathSync, lstatSync, existsSync } from 'node:fs';
 import { isAbsolute, resolve, join, parse } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
+import { createPrivateKey, createPublicKey, createHash } from 'node:crypto';
 
 // No passwords in argv, environment, files, logs or output. Only the registered local adapter receives stdin.
 export function provisionInitialCredentials(job) {
@@ -26,6 +27,16 @@ export function provisionInitialCredentials(job) {
       const matches = bindings.integrations.filter(item => item.id === job.integrationId);
       if (matches.length !== 1) return 'setup_required';
       const binding = matches[0];
+      if (binding.keyPair?.required && !job.keyPair) return 'setup_required';
+      if (job.keyPair) {
+        const spec = binding.keyPair;
+        if (!spec || spec.privateFormat !== 'pkcs8-pem' || spec.publicFormat !== 'spki-pem' || !Array.isArray(spec.algorithms) || !spec.algorithms.includes(job.keyPair.algorithm)) return 'setup_required';
+        if (typeof job.keyPair.privateKey !== 'string' || Buffer.byteLength(job.keyPair.privateKey) > 16384) return 'failed';
+        const key = createPrivateKey(job.keyPair.privateKey), details = key.asymmetricKeyDetails;
+        const algorithm = key.asymmetricKeyType === 'rsa' && details?.modulusLength === 3072 ? 'rsa-3072' : key.asymmetricKeyType === 'ec' && details?.namedCurve === 'prime256v1' ? 'p256' : key.asymmetricKeyType === 'ed25519' ? 'ed25519' : null;
+        const publicKey = createPublicKey(key);
+        if (!algorithm || algorithm !== job.keyPair.algorithm || publicKey.export({format:'pem',type:'spki'}).toString() !== job.keyPair.publicKey || 'SHA256:' + createHash('sha256').update(publicKey.export({format:'der',type:'spki'})).digest('base64') !== job.keyPair.fingerprint) return 'failed';
+      }
       const permitted = job.kind === 'auth' ? ['user_accounts','backend_administration'] : job.kind === 'api' ? ['content_api_integration'] : ['forms_notifications','payments_checkout','content_api_integration'];
       if (binding.kind !== job.kind || !permitted.includes(binding.capabilityId) || !job.approvedCapabilities.includes(binding.capabilityId)) return 'failed';
       if (!Array.isArray(binding.fields) || !Array.isArray(job.configuration) || job.configuration.length > 10) return 'failed';
@@ -39,8 +50,8 @@ export function provisionInitialCredentials(job) {
     const result = spawnSync(process.execPath, [adapter], {
       cwd: root, windowsHide: true, timeout: 60_000, maxBuffer: 64_000, encoding: 'utf8',
       env: Object.fromEntries(Object.entries(process.env).filter(([key]) => ['PATH','Path','SystemRoot','SYSTEMROOT','TEMP','TMP','HOME','USERPROFILE'].includes(key))),
-      input: JSON.stringify(integration ? { protocol: 2, operation: 'configure_integration', jobId: job.id, projectId: job.projectId,
-        runtimeId: job.runtimeId, entryId: job.entryId, kind: job.kind, integrationId: job.integrationId, environment: 'local', configuration: job.configuration }
+      input: JSON.stringify(integration ? { protocol: job.keyPair ? 3 : 2, operation: 'configure_integration', jobId: job.id, projectId: job.projectId,
+        runtimeId: job.runtimeId, entryId: job.entryId, kind: job.kind, integrationId: job.integrationId, environment: 'local', configuration: job.configuration, ...(job.keyPair ? {keyPair:job.keyPair} : {}) }
         : { protocol: 1, operation: 'provision_initial', jobId: job.id, projectId: job.projectId,
         runtimeId: job.runtimeId, entryId: job.entryId, kind: job.kind, loginName: job.loginName, password: job.password }),
     });
@@ -49,6 +60,7 @@ export function provisionInitialCredentials(job) {
     if (output.jobId !== job.id || output.projectId !== job.projectId) return 'failed';
     if (integration) {
       if (output.integrationId !== job.integrationId || output.environment !== 'local' || output.persisted !== true) return 'failed';
+      if (job.keyPair && output.keyFingerprint !== job.keyPair.fingerprint) return 'failed';
       if (output.status === 'verified' && output.connectionVerified === true && output.configurationApplied === true) return 'verified';
       return output.status === 'applied' && output.configurationApplied === true ? 'integration_applied' : 'failed';
     }
