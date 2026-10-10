@@ -146,6 +146,42 @@ try {
         }
     } | Where-Object { $null -ne $_ })
 
+    # Inspect committed declarations only. Never execute application code or send
+    # manifest contents, environment values, or credentials in hosting evidence.
+    $hosting = $null
+    if ($commits.Count -gt 0) {
+        $hosting = [ordered]@{ schema = 1; revision = $commits[0].hash; sourceHash = ''; inspected = $false; runtime = 'unknown'; capabilities = @() }
+        try {
+            $sourceTree = @((Invoke-Git $root @('ls-tree', '-r', $hosting.revision)).Output -split "`r?`n" | Where-Object { $_ -notmatch "`t(DEPLOYMENT\.md|deployment\.manifest\.json)$" }) -join "`n"
+            $sha = [Security.Cryptography.SHA256]::Create()
+            try { $hosting.sourceHash = ([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($sourceTree)))).Replace('-', '').ToLowerInvariant() } finally { $sha.Dispose() }
+            $tracked = @((Invoke-Git $root @('ls-tree', '-r', '--name-only', $hosting.revision)).Output -split "`r?`n")
+            $manifests = @($tracked | Where-Object { $_ -match '(^|/)package\.json$' -and $_ -notmatch '(^|/)(node_modules|vendor)/' })
+            $detected = @()
+            if ($manifests.Count -gt 0 -and $manifests.Count -le 20) {
+                foreach ($manifestPath in $manifests) {
+                    $objectName = "$($hosting.revision):$manifestPath"
+                    $size = (Invoke-Git $root @('cat-file', '-s', $objectName)).Output.Trim()
+                    if ([int64]$size -gt 262144) { throw 'Declaration exceeds inspection limit.' }
+                    $manifest = (Invoke-Git $root @('show', $objectName)).Output | ConvertFrom-Json
+                    $deps = @()
+                    foreach ($section in @('dependencies', 'devDependencies')) {
+                        if ($manifest.PSObject.Properties[$section]) { $deps += @($manifest.$section.PSObject.Properties | ForEach-Object { $_.Name }) }
+                    }
+                    if ($deps | Where-Object { $_ -match '^(next|vinext|express|fastify|koa|@nestjs/core)$' }) { $hosting.runtime = 'node'; $detected += 'backend_api' }
+                    elseif ($hosting.runtime -eq 'unknown' -and ($deps -contains 'vite')) { $hosting.runtime = 'static' }
+                    if ($deps | Where-Object { $_ -match '^(pg|mysql2|better-sqlite3|sqlite3|mongodb|mongoose|@prisma/client|drizzle-orm|@supabase/supabase-js)$' }) { $detected += 'persistent_database' }
+                    if ($deps | Where-Object { $_ -match '^(better-auth|next-auth|@auth/core|@clerk/nextjs)$' }) { $detected += 'user_accounts' }
+                    if ($deps -contains 'stripe') { $detected += 'payments_checkout' }
+                    if ($deps -contains '@aws-sdk/client-s3') { $detected += 'file_management' }
+                    if ($deps | Where-Object { $_ -match '^(nodemailer|resend)$' }) { $detected += 'forms_notifications' }
+                }
+                $hosting.inspected = $true
+                $hosting.capabilities = @($detected | Sort-Object -Unique)
+            }
+        } catch { $hosting.inspected = $false; $hosting.runtime = 'unknown' }
+    }
+
     $workingDiff = (Invoke-Git $root @('diff', '--no-ext-diff', '--unified=3', '--') -AllowFailure).Output
     $stagedDiff = (Invoke-Git $root @('diff', '--cached', '--no-ext-diff', '--unified=3', '--') -AllowFailure).Output
     $diff = @($stagedDiff, $workingDiff) -join "`n"
@@ -166,6 +202,7 @@ try {
         diffPreview = $diff
         diffTruncated = $diffTruncated
         capturedAt = $capturedAt
+        hosting = $hosting
     }
     Invoke-CogentSpecApi -Method Put -Path "/api/plugin/git-requests?$contextQuery" -Token $token -Body @{
         requestId = $RequestId
