@@ -15,7 +15,7 @@ function Invoke-PrivateGitProcess([string]$Root, [string[]]$Arguments, [string]$
     foreach ($key in @($info.EnvironmentVariables.Keys)) {
         if ([string]$key -match '^(GIT_TRACE|GCM_TRACE|GIT_CONFIG_|GIT_CURL_VERBOSE|GIT_ASKPASS|SSH_ASKPASS)') { $info.EnvironmentVariables.Remove([string]$key) }
     }
-    $info.EnvironmentVariables['GCM_CREDENTIAL_STORE'] = 'wincred'
+    $info.EnvironmentVariables['GCM_CREDENTIAL_STORE'] = 'wincredman'
     $info.EnvironmentVariables['GCM_PROVIDER'] = 'auto'
     $info.EnvironmentVariables['GCM_ALLOW_UNSAFE_REMOTES'] = 'false'
     $info.EnvironmentVariables['GCM_INTERACTIVE'] = $(if ($Interactive) { 'true' } else { 'false' })
@@ -69,6 +69,9 @@ function Invoke-ProjectGitConnection([string]$Root, $Payload) {
     $provider = [string]$Payload.provider
     if ($operation -notin @('check', 'connect', 'disconnect', 'save_remote', 'push') -or $provider -notin @('github', 'gitlab')) { throw 'Invalid approved Git connection action.' }
     $providerHost = if ($provider -eq 'github') { 'github.com' } else { 'gitlab.com' }
+    if (-not (Get-Command git.exe -ErrorAction SilentlyContinue)) { throw 'Git for Windows is not available to the Bridge. Install it, then restart the Bridge with $cogentspec.' }
+    $manager = Invoke-PrivateGitProcess $Root @('credential-manager', '--version')
+    if ($manager.ExitCode -ne 0) { throw 'Git Credential Manager is not available to the Bridge. Enable it in Git for Windows, then restart the Bridge with $cogentspec.' }
     $result = [ordered]@{ provider = $provider; account = ''; machine = [Environment]::MachineName; state = 'unavailable'; remoteUrl = ''; branch = ''; head = ''; visibility = 'unknown'; canPush = $false; checkedAt = [DateTimeOffset]::UtcNow.ToString('O') }
     if ($operation -eq 'save_remote') {
         $approvedRemote = Get-ApprovedGitRemote ([string]$Payload.remoteUrl)
@@ -88,7 +91,7 @@ function Invoke-ProjectGitConnection([string]$Root, $Payload) {
     try {
         $credential = Invoke-PrivateGitProcess $Root @('credential-manager', 'get') $inputText ($operation -eq 'connect')
         if ($credential.ExitCode -ne 0) {
-            if ($operation -eq 'connect') { throw 'Sign-in was cancelled or unavailable. Install current Git for Windows with Git Credential Manager, then try Connect again.' }
+            if ($operation -eq 'connect') { throw 'Git Credential Manager is installed, but sign-in did not complete. Retry Connect / sign in and complete the provider window. No repository push was attempted.' }
             if ($operation -in @('push', 'disconnect')) { throw 'Git authentication is no longer available. Check the account before retrying.' }
             return $result
         }
