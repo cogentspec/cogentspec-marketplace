@@ -211,6 +211,7 @@ Start-Sleep -Milliseconds 5500
     }
     Assert-BridgeLauncherTest ([bool]$runtimeRoot -and (Test-Path -LiteralPath (Join-Path $runtimeRoot 'create-specification-project.ps1') -PathType Leaf)) 'The protected Bridge runtime omitted the specification project helper.'
     Assert-BridgeLauncherTest (Test-Path -LiteralPath (Join-Path $runtimeRoot 'inspect-project-git.ps1') -PathType Leaf) 'The protected Bridge runtime omitted the automatic project check helper.'
+    Assert-BridgeLauncherTest (Test-Path -LiteralPath (Join-Path $runtimeRoot 'project-git-connection.ps1') -PathType Leaf) 'The protected Bridge runtime omitted the shared Git connection helper.'
     Assert-BridgeLauncherTest (Test-Path -LiteralPath (Join-Path $runtimeRoot 'restore-project-version.ps1') -PathType Leaf) 'The protected Bridge runtime omitted the automatic version restore helper.'
     Assert-BridgeLauncherTest (Test-Path -LiteralPath (Join-Path $runtimeRoot 'save-project-version.ps1') -PathType Leaf) 'The protected Bridge runtime omitted the automatic version save helper.'
     Assert-BridgeLauncherTest (Test-Path -LiteralPath (Join-Path $runtimeRoot 'prepare-development-handoff.ps1') -PathType Leaf) 'The protected Bridge runtime omitted the development handoff helper.'
@@ -333,11 +334,11 @@ Start-Sleep -Milliseconds 5500
     Assert-BridgeLauncherTest ($popupHelperText.Contains('$requiredStableMilliseconds = 2000')) 'The ChatGPT popout helper does not require a stable task owner before opening the follower window.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains("Status 'task_owner_not_ready'")) 'The ChatGPT popout helper does not fail closed when the task owner is unavailable.'
     $ownerReadyIndex = $popupHelperText.IndexOf('$taskOwner = Wait-ForChatGptTaskOwner')
-    $shortcutLoopIndex = $popupHelperText.IndexOf('for ($attempt = 1; $attempt -le 2; $attempt++)')
+    $shortcutLoopIndex = $popupHelperText.IndexOf('$startupDecision = Get-ChatGptPopupStartupDecision')
     Assert-BridgeLauncherTest ($ownerReadyIndex -ge 0 -and $shortcutLoopIndex -gt $ownerReadyIndex) 'The ChatGPT popout helper can open a follower before the main task owner is ready.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains('popupFollowerSettleMilliseconds = 1200')) 'The ChatGPT popout helper does not report its follower snapshot settling interval.'
-    $followerSettleIndex = $popupHelperText.IndexOf('Start-Sleep -Milliseconds 1200', $shortcutLoopIndex)
-    $popupComposerIndex = $popupHelperText.IndexOf('$composer = Focus-ChatGptComposer', $shortcutLoopIndex)
+    $followerSettleIndex = $popupHelperText.IndexOf('Start-Sleep -Milliseconds $popupFollowerSettleMilliseconds', $shortcutLoopIndex)
+    $popupComposerIndex = $popupHelperText.IndexOf("$" + "finalFocus = Measure-PopupStage 'composer_focus'", $shortcutLoopIndex)
     Assert-BridgeLauncherTest ($followerSettleIndex -gt $shortcutLoopIndex -and $popupComposerIndex -gt $followerSettleIndex) 'The ChatGPT popout helper can focus the follower composer before its owner snapshot settles.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains('popup_owner_refresh_failed')) 'The ChatGPT popout helper can still reuse an unreleased popout owner.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains('$restoredHidden = ($null -ne $popupWasVisible -and -not $popupWasVisible)')) 'The ChatGPT popout helper does not report a hidden popout reopened through the host shortcut.'
@@ -374,29 +375,29 @@ Start-Sleep -Milliseconds 5500
     Assert-BridgeLauncherTest ($popupHelperText.Contains('FindMainWindows($chatGptProcessIds)')) 'Persistent pinning can make the Popout become Process.MainWindowHandle, so the helper must enumerate the actual native task window.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains("'popup_specific_composer'")) 'The ChatGPT popout helper does not report its unpinned-composer verification route.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains("Write-Failure -Status 'popup_detected_not_verified'")) 'A visible but ambiguous Popout is still misreported as not opened.'
-    Assert-BridgeLauncherTest ($popupHelperText.Contains('if (-not $activatedExisting -and -not $popupCandidateDetected)')) 'The shortcut can be toggled again after a visible Popout candidate appears.'
+    Assert-BridgeLauncherTest ($popupHelperText.Contains("if (`$startupDecision -eq 'open_once')") -and $popupHelperText.Contains('$shortcutAttempts = 1')) 'The opening shortcut must be gated by a single-attempt decision.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains('A newly exposed Popout may omit its dismiss control while unpinned.')) 'A newly opened unpinned Popout is not pinned before verified composer input.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains('popupVerification = $popupVerification')) 'The ChatGPT popout helper does not report how it verified the accepted Popout.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains('RequestClosePopup(IntPtr window)')) 'The ChatGPT popout helper cannot close a frozen verified popout after failed recovery.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains("if (`$Mode -eq 'dismiss')")) 'The ChatGPT popout helper does not expose bounded verified dismissal recovery.'
-    Assert-BridgeLauncherTest ($popupHelperText.Contains('composerDraftPreserved = [bool]$composer.draftPreserved')) 'The ChatGPT popout helper does not expose its non-destructive draft result.'
+    Assert-BridgeLauncherTest ($popupHelperText.Contains('composerDraftPreserved = [bool]$finalFocus.draftPreserved')) 'The ChatGPT popout helper does not expose its non-destructive draft result.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains("`$normalizedExistingText -eq '`$cogentspec'")) 'The ChatGPT popout helper does not safely replace its own previous connection command.'
-    Assert-BridgeLauncherTest ($popupHelperText.Contains('if ($popupWasVisible -and $UseRetainedChat)')) 'The explicit connection flow still dismisses a visible retained popout before reconnecting it.'
+    Assert-BridgeLauncherTest ($popupHelperText.Contains('if ([CogentSpec.ChatGptPopupNative]::IsVisible($popupWindow) -and $UseRetainedChat)')) 'The explicit connection flow still dismisses a visible retained popout before reconnecting it.'
     Assert-BridgeLauncherTest (-not $popupHelperText.Contains('AllowNativeRetainedFallback')) 'The retained-popout lookup can still mistake the full ChatGPT Desktop UI for an unverified Popout.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains('if ($UseRetainedChat -and -not $activatedExisting -and -not $OpenWithShortcut)')) 'The retained-popout update path can still fall through to the global shortcut without an explicit connection opt-in.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains("Write-Failure -Status 'retained_popup_not_visible'")) 'The retained-popout path does not fail safely into the manual Popout flow.'
-    Assert-BridgeLauncherTest ($popupHelperText.Contains('for ($attempt = 1; $attempt -le 2; $attempt++)')) 'The ChatGPT popout helper does not make one bounded retry when the host only foregrounds itself on the first shortcut.'
+    Assert-BridgeLauncherTest (-not $popupHelperText.Contains('for ($attempt = 1; $attempt -le 2; $attempt++)')) 'The opening toggle must never be retried.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains('shortcutAttempts = $shortcutAttempts')) 'The ChatGPT popout helper does not report how many shortcut attempts were required.'
     Assert-BridgeLauncherTest ($popupHelperText.IndexOf('$shortcutAttempts = 0') -lt $popupHelperText.IndexOf("if (`$Mode -eq 'inspect')")) 'The ChatGPT popout helper does not initialize its shortcut-attempt result for an already-open popout.'
-    $composerFocusIndex = $popupHelperText.IndexOf('$composer = Focus-ChatGptComposer')
-    Assert-BridgeLauncherTest ($composerFocusIndex -ge 0 -and $popupHelperText.IndexOf('Invoke-PopupActivation -PopupWindow $popupWindow', $composerFocusIndex) -gt $composerFocusIndex) 'The ChatGPT popout helper does not restore verified foreground activation after focusing the composer.'
+    $composerFocusIndex = $popupComposerIndex
+    Assert-BridgeLauncherTest ($composerFocusIndex -gt $popupHelperText.LastIndexOf('Invoke-PopupActivation -PopupWindow $popupWindow') -and $popupHelperText.IndexOf("Write-Failure -Status 'popup_interaction_not_ready'", $composerFocusIndex) -gt $composerFocusIndex) 'Final keyboard readiness must be verified after activation and before success.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains('Set-ChatGptComposerFocus -Composer $composer')) 'The ChatGPT popout helper does not give keyboard focus to the empty or existing composer.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains('[System.Windows.Automation.AutomationElement]::NameProperty') -and $popupHelperText.Contains("'Dismiss Popout Window'")) 'The ChatGPT popout helper does not identify the exact host dismiss control before clearing its stale hover.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains('CancelPopupInteraction(IntPtr window)')) 'The ChatGPT popout helper does not release the host interaction state after an X-button hide.'
-    Assert-BridgeLauncherTest ($popupHelperText.Contains("SetPopupTopmost(`$popupWindow, `$false)")) 'The ChatGPT popout helper does not temporarily release a frozen pinned window.'
+    Assert-BridgeLauncherTest (-not $popupHelperText.Contains('$topmostCycleReset = $true')) 'The ChatGPT popout helper must not use an unpin/refocus/repin recovery cycle.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains("SetPopupTopmost(`$popupWindow, `$true)")) 'The ChatGPT popout helper does not restore the requested pinned state after interaction recovery.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains('topmostCycleReset = $topmostCycleReset')) 'The ChatGPT popout helper does not report pinned-window recovery.'
-    Assert-BridgeLauncherTest ($popupHelperText.Contains('composerFocused = [bool]$composer.focused')) 'The ChatGPT popout helper does not report verified composer focus.'
+    Assert-BridgeLauncherTest ($popupHelperText.Contains('composerFocused = [bool]$interactionReady.focused')) 'The ChatGPT popout helper does not report verified final composer focus.'
     Assert-BridgeLauncherTest (-not $popupHelperText.Contains('VK_RETURN')) 'The ChatGPT popout helper must not submit composer text.'
     $popupParityPaths = @(
         'plugins\cogentstack\skills\cogentstack\scripts\open-chatgpt-popup.ps1',
@@ -413,7 +414,7 @@ Start-Sleep -Milliseconds 5500
     Assert-BridgeLauncherTest (-not $standaloneWatcherText.Contains('RegisterHotKey')) 'The pin shortcut is globally registered and can steal Ctrl+Shift+Y from other applications.'
     Assert-BridgeLauncherTest ($standaloneWatcherText.Contains('IsVerifiedForegroundPopup(foreground)')) 'The pin hotkey is not scoped to the verified foreground ChatGPT Popout.'
     Assert-BridgeLauncherTest ($standaloneWatcherText.Contains('window.ToInt64() != expectedWindow')) 'The pin hotkey does not bind its action to the verified native Popout handle.'
-    Assert-BridgeLauncherTest ($standaloneWatcherText.Contains('processId == (uint)expectedProcess')) 'The pin hotkey does not bind its action to the verified signed ChatGPT process.'
+    Assert-BridgeLauncherTest ($standaloneWatcherText.Contains('if (processId != (uint)expectedProcess) return "process_mismatch";')) 'The pin hotkey does not reject a mismatched ChatGPT process.'
     Assert-BridgeLauncherTest ($standaloneWatcherText.Contains('[int]$inspection.popupProcessId')) 'The pin hotkey cache can bind to an unrelated ChatGPT helper process.'
     Assert-BridgeLauncherTest ($standaloneWatcherText.Contains('private const int VK_Y = 0x59')) 'The pin hotkey does not use the approved Y key.'
     Assert-BridgeLauncherTest ($standaloneWatcherText.Contains('Interlocked.Exchange(ref capturedY, 1)')) 'The pin hotkey does not debounce repeated Y key-down events.'

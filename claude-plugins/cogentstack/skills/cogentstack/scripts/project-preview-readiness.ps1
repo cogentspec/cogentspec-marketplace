@@ -63,9 +63,15 @@ function Get-CogentSpecProjectPreviewReadiness(
         }
     }
 
+    # The manifest context records where the portable project was created. A
+    # completed project may later be loaded into another isolated AI context.
+    # The protected project-runtime endpoint authorizes that current context
+    # and supplies the exact request and target; keep the stable local identity
+    # checks without treating the creation context as permanent ownership.
     $identityMatches = $manifest.project `
+        -and -not [string]::IsNullOrWhiteSpace($ExpectedContextKey) `
+        -and -not [string]::IsNullOrWhiteSpace([string]$manifest.project.contextKey) `
         -and [string]$manifest.project.requestId -eq $ExpectedRequestId `
-        -and [string]$manifest.project.contextKey -eq $ExpectedContextKey `
         -and ([string]::IsNullOrWhiteSpace($ExpectedProjectName) -or [string]$manifest.project.name -eq $ExpectedProjectName) `
         -and ([string]::IsNullOrWhiteSpace($ExpectedProjectType) -or [string]$manifest.project.type -eq $ExpectedProjectType)
     if (-not $identityMatches) {

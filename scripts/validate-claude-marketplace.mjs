@@ -81,6 +81,8 @@ const requiredScripts = [
   "fulfil-project.ps1",
   "generate-project-preview.ps1",
   "inspect-project-git.ps1",
+  "project-git-connection.ps1",
+  "project-credential-worker.ps1",
   "restore-project-version.ps1",
   "save-project-version.ps1",
   "native-command.ps1",
@@ -104,6 +106,11 @@ for (const name of requiredScripts) {
   if (normalized(claudeSource) !== normalized(codexSource)) {
     fail(`${name} must remain identical to the shared Desktop Bridge implementation`);
   }
+}
+
+const credentialRunner = "provision-project-credentials.mjs";
+if (normalized(await readFile(join(scriptsRoot, credentialRunner), "utf8")) !== normalized(await readFile(join(codexScriptsRoot, credentialRunner), "utf8"))) {
+  fail(`${credentialRunner} must remain identical to the shared Desktop Bridge implementation`);
 }
 
 const syntaxPaths = requiredScripts.map((name) => `'${join(scriptsRoot, name).replaceAll("'", "''")}'`).join(", ");

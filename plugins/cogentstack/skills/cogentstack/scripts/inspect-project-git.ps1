@@ -113,6 +113,11 @@ try {
 
     $repositoryCheck = Invoke-Git $root @('rev-parse', '--is-inside-work-tree')
     if ($repositoryCheck.Output.Trim() -ne 'true') { throw 'The active project is not a Git worktree.' }
+    $connectionResult = $null
+    if ($listing.request.payload.PSObject.Properties['connectionOperation']) {
+        . (Join-Path $PSScriptRoot 'project-git-connection.ps1')
+        $connectionResult = Invoke-ProjectGitConnection -Root $root -Payload $listing.request.payload
+    }
     $branch = (Invoke-Git $root @('branch', '--show-current')).Output.Trim()
     # The branch header keeps PowerShell's outer output trim from removing the
     # first status column when the first file has only a working-tree change.
@@ -132,6 +137,7 @@ try {
     $email = (Invoke-Git $root @('config', '--get', 'user.email') -AllowFailure).Output.Trim()
     $remoteResult = Invoke-Git $root @('remote', 'get-url', 'origin') -AllowFailure
     $remoteUrl = if ($remoteResult.ExitCode -eq 0) { $remoteResult.Output.Trim() } else { '' }
+    if ($connectionResult -and -not (Get-ApprovedGitRemote $remoteUrl)) { $remoteUrl = '' }
     $commitLines = @((Invoke-Git $root @('log', '-n', '12', '--date=iso-strict', '--pretty=format:%H%x1f%h%x1f%s%x1f%an%x1f%aI') -AllowFailure).Output -split "`r?`n" | Where-Object { $_ })
     $commits = @($commitLines | ForEach-Object {
         $parts = @(([string]$_) -split [char]31)
@@ -164,11 +170,12 @@ try {
     Invoke-CogentSpecApi -Method Put -Path "/api/plugin/git-requests?$contextQuery" -Token $token -Body @{
         requestId = $RequestId
         snapshot = $snapshot
+        connection = $connectionResult
     } | Out-Null
     Invoke-CogentSpecApi -Method Patch -Path "/api/plugin/git-requests?$contextQuery" -Token $token -Body @{
         requestId = $RequestId
         action = 'complete'
-        statusMessage = 'Project check completed.'
+        statusMessage = $(if (-not $connectionResult) { 'Project check completed.' } elseif ([string]$listing.request.payload.connectionOperation -eq 'push') { 'The confirmed saved commit was pushed successfully.' } elseif ($connectionResult.state -eq 'disconnected') { 'Account disconnected on this computer.' } elseif ($connectionResult.state -eq 'verified') { 'Account checked. Review the repository and push access below.' } else { 'Not connected. Choose Connect / sign in; current Git for Windows with Git Credential Manager is required.' })
     } | Out-Null
     Write-CompactJson ([ordered]@{
         status = 'refreshed'

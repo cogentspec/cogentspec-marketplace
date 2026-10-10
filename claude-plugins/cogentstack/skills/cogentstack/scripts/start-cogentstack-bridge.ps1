@@ -287,6 +287,7 @@ $sourceScriptNames = @(
     'fulfil-project.ps1',
     'generate-project-preview.ps1',
     'inspect-project-git.ps1',
+    'project-git-connection.ps1',
     'restore-project-version.ps1',
     'save-project-version.ps1',
     'native-command.ps1',
@@ -295,6 +296,8 @@ $sourceScriptNames = @(
     'project-context.ps1',
     'project-build-handoff.ps1',
     'project-preview-readiness.ps1',
+    'project-credential-worker.ps1',
+    'provision-project-credentials.mjs',
     'watch-cogentstack-bridge.ps1'
 )
 if (-not (Test-Path -LiteralPath $connectionScript -PathType Leaf) -or @($sourceScriptNames | Where-Object { -not (Test-Path -LiteralPath (Join-Path $PSScriptRoot $_) -PathType Leaf) }).Count -gt 0) {

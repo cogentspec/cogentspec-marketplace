@@ -140,7 +140,9 @@ if (-not $TestMode -or (Test-Path -LiteralPath $runtimeRoot -PathType Container)
             $payload.IndexOf([IO.Path]::GetFullPath($popoutRuntimeRoot), [StringComparison]::OrdinalIgnoreCase) -ge 0
         $desktopUiWorker = $payload.IndexOf('watch-cogentspec-desktop-ui-bridge.ps1', [StringComparison]::OrdinalIgnoreCase) -ge 0 -and
             $payload.IndexOf([IO.Path]::GetFullPath($desktopUiRuntimeRoot), [StringComparison]::OrdinalIgnoreCase) -ge 0
-        if (-not $taskWorker -and -not $standaloneWorker -and -not $desktopUiWorker) { continue }
+        $diagnosticWorker = $payload.IndexOf('capture-popout-diagnostics.ps1', [StringComparison]::OrdinalIgnoreCase) -ge 0 -and
+            $payload.IndexOf($resolvedPopoutRuntime, [StringComparison]::OrdinalIgnoreCase) -ge 0
+        if (-not $taskWorker -and -not $standaloneWorker -and -not $desktopUiWorker -and -not $diagnosticWorker) { continue }
         try {
             Stop-Process -Id $processId -Force -ErrorAction Stop
             [void]$stoppedProcessIds.Add($processId)

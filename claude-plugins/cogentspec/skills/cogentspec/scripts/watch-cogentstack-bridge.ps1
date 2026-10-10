@@ -28,6 +28,8 @@ try {
 $contextHash = ([BitConverter]::ToString($contextHashBytes)).Replace('-', '').ToLowerInvariant().Substring(0, 24)
 $mutex = New-Object Threading.Mutex($false, "Local\CogentSpecBridge-$contextHash")
 $ownsMutex = $false
+. (Join-Path $PSScriptRoot 'project-credential-worker.ps1')
+$nextCredentialCheck = [DateTime]::MinValue
 
 function Unprotect-CogentSpecValue([string]$Value) {
     $protected = [Convert]::FromBase64String($Value)
@@ -172,6 +174,10 @@ try {
     while ($true) {
         $token = Get-DesktopToken
         if (-not $token) { break }
+        if ([DateTime]::UtcNow -ge $nextCredentialCheck) {
+            try { Invoke-InitialCredentialSetup -Token $token } catch { }
+            $nextCredentialCheck = [DateTime]::UtcNow.AddSeconds(10)
+        }
         try {
             $listing = Invoke-BridgeApi -Method Get -Path "/api/plugin/desktop-actions?$contextQuery" -Token $token
             Write-BridgePresenceReady
