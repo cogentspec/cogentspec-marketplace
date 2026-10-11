@@ -189,6 +189,17 @@ Start-Sleep -Milliseconds 5500
     $state = Get-Content -Raw -LiteralPath $statePath | ConvertFrom-Json
     $runtimeRoot = Split-Path -Parent ([string]$state.watcherScript)
 
+    $webExperienceOutput = @(& (Join-Path $fixtureScripts 'start-cogentstack-bridge.ps1') -ContextKey $contextKey -Surface chatgpt -Experience web 2>&1)
+    $webExperienceJsonLine = @($webExperienceOutput | ForEach-Object { $_.ToString() } | Where-Object { $_.Trim().StartsWith('{') } | Select-Object -Last 1)
+    Assert-BridgeLauncherTest ([bool]$webExperienceJsonLine) 'The GPTWeb Bridge launcher returned no JSON result.'
+    $webExperienceResult = $webExperienceJsonLine | ConvertFrom-Json
+    $webExperienceWorkspaceUrl = [string]$webExperienceResult.workspaceUrl
+    Assert-BridgeLauncherTest ([string]$webExperienceResult.status -eq 'ready') 'The GPTWeb Bridge launcher did not become ready.'
+    Assert-BridgeLauncherTest ($webExperienceWorkspaceUrl -ceq [string]$webExperienceResult.webWorkspaceUrl) 'GPTWeb did not select webWorkspaceUrl as its primary workspaceUrl.'
+    Assert-BridgeLauncherTest ($webExperienceWorkspaceUrl -cne [string]$webExperienceResult.chatgptWorkspaceUrl) 'GPTWeb incorrectly selected the ChatGPT Desktop workspace handoff.'
+    Assert-BridgeLauncherTest ($webExperienceWorkspaceUrl -match '^https://cogentspec\.app/stack\?surface=chatgpt&context=ctx-[a-f0-9]+&experience=web&open=web&nav=[a-f0-9]{32}#desktop-web=') 'The GPTWeb handoff is missing its context-bound web experience route.'
+    Assert-BridgeLauncherTest ($webExperienceWorkspaceUrl -notmatch '/popout-launch\?') 'The GPTWeb handoff incorrectly uses the legacy Popout launch route.'
+
     $reuseOutput = @(& (Join-Path $fixtureScripts 'start-cogentstack-bridge.ps1') -ContextKey $contextKey -Surface chatgpt 2>&1)
     $reuseJsonLine = @($reuseOutput | ForEach-Object { $_.ToString() } | Where-Object { $_.Trim().StartsWith('{') } | Select-Object -Last 1)
     Assert-BridgeLauncherTest ([bool]$reuseJsonLine) 'The reused Bridge launcher returned no JSON result.'
@@ -569,6 +580,7 @@ Start-Sleep -Milliseconds 5500
         crossHostWorkerVerified = $crossHostWorkerVerified
         taskRebindVerified = [string]$replacementMarker.threadId -ceq $replacementThreadId
         workspaceLinksReturned = 2
+        webDestinationVerified = $true
     } | ConvertTo-Json -Compress
 } finally {
     if ($launcherProcess) { $launcherProcess.Dispose() }

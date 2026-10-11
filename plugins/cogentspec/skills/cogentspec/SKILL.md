@@ -1,6 +1,6 @@
 ---
 name: cogentspec
-description: Connect the current ChatGPT, Codex, or Claude project to its isolated CogentSpec Web context through Desktop Bridge; restore portable repository knowledge; fulfil or build an approved project; generate its verified local preview; prepare an approved deployment handoff; or execute a deletion approved in CogentSpec Web. Use when the user invokes CogentSpec, $cogentspec, or @cogentspec, asks to connect or open CogentSpec Web, load or edit an existing CogentSpec project, create an approved project, says Build my project or Start Project Build, views the active project, prepares an approved Deployment Pack, or deletes a project and its folder.
+description: Connect the current ChatGPT, Codex, or Claude project to its isolated CogentSpec Web context through Desktop Bridge; open the explicit $gptpop, $gptdesk, or $gptweb destination; restore portable repository knowledge; fulfil or build an approved project; generate its verified local preview; prepare an approved deployment handoff; or execute a deletion approved in CogentSpec Web. Use when the user invokes CogentSpec, $cogentspec, @cogentspec, $gptpop, $gptdesk, or $gptweb, asks to connect or open CogentSpec Web, load or edit an existing CogentSpec project, create an approved project, says Build my project or Start Project Build, views the active project, prepares an approved Deployment Pack, or deletes a project and its folder.
 ---
 
 # Use CogentSpec Web through Desktop Bridge
@@ -18,6 +18,16 @@ Before the one-shot connection helpers, select the host-approved execution scope
 In Codex, invoke the exact verified helper through `exec_command` with `sandbox_permissions: require_escalated` and a narrowly scoped justification for that helper's service and Windows-user access. Use the host's approval mechanism, not script self-elevation. Preserve the invoking workspace, thread identity, context key, and helper arguments. `project-context.ps1` can run in the normal sandbox. Marketplace refresh and the protected updater also require approved execution when network or Windows-user access is restricted. This execution approval is separate from approval to update the package; never bypass a required host approval.
 
 Choose this scope before running a helper, rather than attempting it in the sandbox and automatically retrying. If approval is denied or unavailable, stop and explain the permission requirement. If a helper returns `execution_permission_required`, show its plain `userMessage`; do not reinterpret it as `signed_out`, continue the connection, recommend reinstalling, or claim that the LED should be green. Never disable the sandbox globally, change account permissions, copy or expose credentials, or launch a broker or scheduled task to bypass approval.
+
+### Explicit one-word destination dispatch
+
+Determine the requested destination before running any Bridge helper. An explicit `$gptpop`, `$gptdesk`, or `$gptweb` command overrides the generic `$cogentspec` launcher and reporting steps below. Follow the shared update, project-context, privacy, account, and ready-contract requirements, but run exactly one destination-specific launcher and response flow. Never first run the generic launcher and never silently substitute a different destination.
+
+- For `$gptpop`, invoke `scripts/start-cogentstack-bridge.ps1 -ContextKey <resolved context> -Surface chatgpt -Experience popout` exactly once. Require `workspaceUrl` to equal the private `webWorkspaceUrl` with `experience=popout`. Open `workspaceUrl` once with the native browser action and accept `opened` or `queued` without retry. If the native action is unavailable, return it once as `[Open CogentSpec GPT Popout work area](<URL>)`.
+- For `$gptdesk`, invoke `scripts/start-cogentstack-bridge.ps1 -ContextKey <resolved context> -Surface chatgpt -Experience desktop-ui` exactly once. Require `workspaceUrl` to equal the private `chatgptWorkspaceUrl` with `experience=desktop-ui`. Follow the installed state-aware sidebar helper, then open `workspaceUrl` once with the native browser action using `placement: "right"`; accept `opened` or `queued` without retry. Use the independent `webWorkspaceUrl` only when native opening is unavailable.
+- For `$gptweb`, invoke `scripts/start-cogentstack-bridge.ps1 -ContextKey <resolved context> -Surface chatgpt -Experience web` exactly once. Require `workspaceUrl` to equal the private `webWorkspaceUrl`, and require that URL to carry the resolved `context`, `experience=web`, `open=web`, `nav`, and the private web handoff fragment. Do not apply the Popout-only `currentConversationConnected` gate, do not call a native Desktop browser action, and do not return the generic recovery label. Return `workspaceUrl` exactly once as `[Open CogentSpec GPT web workspace](<URL>)`, then say: **CogentSpec GPT web workspace is ready. Open the link to continue.**
+
+Keep `$cogentspec` as the backward-compatible default. These commands change only presentation and opening behavior; they share the same context, project state, Bridge worker, and protected action flow. The compact Desktop layout is identified only by `experience=desktop-ui`; it must not alter Popout geometry or the ordinary web workspace.
 
 ## Connect the current AI project
 
@@ -46,16 +56,6 @@ The routine current-package connection has a one-minute interaction budget. Run 
 For ChatGPT Popout, treat `currentConversationConnected` as the authoritative exact-chat gate; `popoutConnectionConfirmed` is its compatibility alias. `status: ready`, a running Bridge, or Popout visibility does not prove that the current conversation is connected. Only `currentConversationConnected: true` confirms that the currently selected conversation identity, its verified `$cogentspec` fingerprint, the isolated context, and fresh Bridge presence all match. Hiding the same connected Popout must not disconnect it, while selecting a blank or different conversation must make the gate false. When it is false, do not say that the Popout is connected or imply that the website LED should be green; report that the project-data Bridge is ready but the current Popout conversation is not yet verified, and direct the user to send `$cogentspec` from that intended conversation. Never reinterpret `popupVisible: true` as a connected conversation.
 
 The workspace opened through the native desktop action is the primary destination; the web link is recovery only. Both destinations use the same server-authoritative context, active project, approved decisions, Bridge queue, Git state, preview state, and deployment state. Saved changes refresh from the shared server without copying unsaved browser-local text between views. Switching AI projects changes the context in both destinations, creates two fresh one-use workspace handoffs, and starts or reuses that context's Bridge worker; it does not create permanent CogentSpec browser tabs.
-
-### Explicit one-word destinations
-
-Keep `$cogentspec` as the backward-compatible default. The explicit commands select only presentation and opening behavior; they share the same context, project state, Bridge worker, and protected action flow:
-
-- `$gptpop` opens the ChatGPT Popout work-area route.
-- `$gptdesk` opens the compact workspace beside the current ChatGPT or Codex Desktop conversation.
-- `$gptweb` returns the ordinary web-workspace link for ChatGPT on the web.
-
-Never silently substitute one destination for another. The compact Desktop layout is identified only by `experience=desktop-ui`; it must not alter Popout geometry or the ordinary web workspace.
 
 ## Current activity required before project instructions
 
