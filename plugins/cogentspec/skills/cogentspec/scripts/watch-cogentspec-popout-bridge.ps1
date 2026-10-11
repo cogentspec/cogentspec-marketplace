@@ -188,6 +188,15 @@ namespace CogentSpec {
     WorkspaceForeground();}
   }
   static bool Matches() {uint p;return popup!=IntPtr.Zero&&IsWindow(popup)&&GetWindowThreadProcessId(popup,out p)!=0&&p==popupPid&&GetProp(popup,lifetimeProperty)==new IntPtr(1);}
+  static bool ResetVisibilityInteraction() {
+   // Clear stale capture/menu and client/non-client hover on the exact retained
+   // window. Never focus the composer, move the pointer, change topmost or send
+   // Escape/text. Both hide and restore bypass the interactive opening helper.
+   if(!Matches())return false;
+   return PostMessage(popup,0x001F,IntPtr.Zero,IntPtr.Zero) && // WM_CANCELMODE
+    PostMessage(popup,0x02A3,IntPtr.Zero,IntPtr.Zero) && // WM_MOUSELEAVE
+    PostMessage(popup,0x02A2,IntPtr.Zero,IntPtr.Zero); // WM_NCMOUSELEAVE
+  }
   public static bool MatchesWindow(long h) {lock(gate){return popup.ToInt64()==h&&Matches();}}
   public static long[] RetainedWindow() {
    lock(gate){return Matches()?new long[]{popup.ToInt64(),popupPid,IsWindowVisible(popup)?1:0}:new long[0];}
@@ -278,7 +287,7 @@ namespace CogentSpec {
     var action=model.Decide(State,true,visible,GetForegroundWindow()==popup,WorkspaceForeground());
     if(action=="hide"||action=="restore") {
      LastDispatchMilliseconds=(Stopwatch.GetTimestamp()-commandReceived)*1000.0/Stopwatch.Frequency;
-     var ok=ShowWindowAsync(popup,action=="hide"?0:4);
+     var ok=ResetVisibilityInteraction() && ShowWindowAsync(popup,action=="hide"?0:4);
      LastAction=action+(ok?"_requested":"_failed");actionAt=DateTime.UtcNow;
      if(!ok&&action=="hide")model.ControllerHidden=false;
     } else if(action=="close") {

@@ -19,7 +19,7 @@ $bodies=@{
  RemoveProp='IntPtr v;NativeFixture.Properties.TryGetValue(h.ToInt64(),out v);NativeFixture.Properties.Remove(h.ToInt64());return v;'
  GetWindowText='b.Append(h.ToInt64()==10?"CogentSpec | work":"ChatGPT");return b.Length;'
  ShowWindowAsync='NativeFixture.Shows++;NativeFixture.Visible=command!=0;return true;'
- PostMessage='NativeFixture.Closes++;return true;'
+ PostMessage='if(m==0x0010)NativeFixture.Closes++;else if(m==0x001F)NativeFixture.Cancels++;else if(m==0x02A3||m==0x02A2)NativeFixture.Leaves++;else throw new InvalidOperationException("Unexpected posted message");return true;'
 }
 $code=[regex]::Replace($code,'\[DllImport\([^\n]+?\)\] static extern ([^;]+);',{
  param($m)
@@ -35,7 +35,7 @@ namespace CogentSpecHandoffFixture {
   public void Dispose(){}
  }
  public static class NativeFixture {
-  public static long Foreground=10;public static bool Visible=false;public static int Shows,Closes;
+  public static long Foreground=10;public static bool Visible=false;public static int Shows,Closes,Cancels,Leaves;
   public static bool RejectProperty,Pinned,RejectPin;public static int PinCalls;
   public static System.Collections.Generic.Dictionary<long,IntPtr> Properties=new System.Collections.Generic.Dictionary<long,IntPtr>();
   public static FakeProcess Process(int p){return new FakeProcess{ProcessName=p==10?"chrome":"ChatGPT"};}
@@ -63,6 +63,7 @@ Check ($native::Shows -eq 0) 'Completion caused competing visibility operation'
 $native::Foreground=10
 $type::Receive($owner,'key',2,'hidden',0);$type::Tick('')
 Check (-not $native::Visible) 'Hide failed before retained-window startup'
+Check ($native::Cancels -eq 1 -and $native::Leaves -eq 2) 'Hide did not clear stale interaction exactly once'
 $type::Receive($owner,'key',3,'active',0)
 Check ($type::BeginHandoff($owner)) 'Retained startup denied'
 $shows=$native::Shows;$type::Tick('')
