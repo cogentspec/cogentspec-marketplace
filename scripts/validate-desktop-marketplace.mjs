@@ -186,6 +186,15 @@ for (const pluginPath of [sourcePluginPath, compatibilityPluginPath]) {
     }
   }
 }
+for (const pluginPath of [sourcePluginPath, compatibilityPluginPath]) {
+  const desktopCommandSkill = await readFile(join(pluginPath, "skills", "gptdesk", "SKILL.md"), "utf8");
+  for (const marker of ['placement: "right"', "native two-column conversation/workspace split", "Omit `threadId` and `tabId`", "Sidebar visibility remains a host-owned user control", "`Ctrl+Shift+S` toggles the host sidebar", "Never send that shortcut automatically"]) {
+    if (!desktopCommandSkill.includes(marker)) fail(`gptdesk is missing native split marker: ${marker}`);
+  }
+  if (desktopCommandSkill.includes("Omit `threadId`, `tabId`, and `placement`")) {
+    fail("gptdesk still opens an unplaced full-view browser tab");
+  }
+}
 for (const marker of ["cogentspec-update-check-v1", "/api/plugin-version", "update_available", "check_unavailable", "UPDATE.v1.md"]) {
   if (!canonicalUpdateCheck.includes(marker)) fail(`the automatic update check is missing marker: ${marker}`);
 }
