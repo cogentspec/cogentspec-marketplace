@@ -168,6 +168,24 @@ const compatibilityPopoutWatcher = await readFile(join(compatibilityPluginPath, 
 const compatibilityDesktopUiStarter = await readFile(join(compatibilityPluginPath, "skills", "cogentstack", "scripts", "start-cogentspec-desktop-ui-bridge.ps1"), "utf8");
 const compatibilityDesktopUiWatcher = await readFile(join(compatibilityPluginPath, "skills", "cogentstack", "scripts", "watch-cogentspec-desktop-ui-bridge.ps1"), "utf8");
 const compatibilityDesktopUiHelper = await readFile(join(compatibilityPluginPath, "skills", "cogentstack", "scripts", "open-chatgpt-desktop-ui.ps1"), "utf8");
+const commandContracts = [
+  ["gptpop", "popout", "webWorkspaceUrl", "CogentSpec GPT Popout work area"],
+  ["gptdesk", "desktop-ui", "chatgptWorkspaceUrl", "CogentSpec is connected beside this GPT conversation"],
+  ["gptweb", "web", "webWorkspaceUrl", "CogentSpec GPT web workspace is ready"],
+];
+for (const pluginPath of [sourcePluginPath, compatibilityPluginPath]) {
+  for (const [command, experience, destination, confirmation] of commandContracts) {
+    const commandRoot = join(pluginPath, "skills", command);
+    const commandSkill = await readFile(join(commandRoot, "SKILL.md"), "utf8");
+    const commandMetadata = await readFile(join(commandRoot, "agents", "openai.yaml"), "utf8");
+    for (const marker of [`name: ${command}`, `-Experience ${experience}`, destination, confirmation]) {
+      if (!commandSkill.includes(marker)) fail(`${command} is missing destination marker: ${marker}`);
+    }
+    for (const marker of [`$${command}`, "allow_implicit_invocation: false"]) {
+      if (!commandMetadata.includes(marker)) fail(`${command} metadata is missing explicit-command marker: ${marker}`);
+    }
+  }
+}
 for (const marker of ["cogentspec-update-check-v1", "/api/plugin-version", "update_available", "check_unavailable", "UPDATE.v1.md"]) {
   if (!canonicalUpdateCheck.includes(marker)) fail(`the automatic update check is missing marker: ${marker}`);
 }
@@ -191,6 +209,9 @@ for (const [name, source] of [["starter", canonicalStarter], ["connector", canon
     : ["[int]$RequestTimeoutSeconds = 20", "-TimeoutSec $RequestTimeoutSeconds", "contextKey = $GrantContextKey", "surface = $GrantSurface", "/api/device-authorization/browser-grant"]) {
     if (!source.includes(marker)) fail(`the Desktop Bridge ${name} is missing bound workspace marker: ${marker}`);
   }
+}
+for (const marker of ["[ValidateSet('legacy', 'popout', 'desktop-ui', 'web')]", "$Experience = 'legacy'", "experience=$([Uri]::EscapeDataString($Experience))", "$Experience -in @('popout', 'web')"]) {
+  if (!canonicalStarter.includes(marker)) fail(`the Desktop Bridge starter is missing experience routing marker: ${marker}`);
 }
 if (canonicalStarter.includes("-File $connectionScript")) fail("the Desktop Bridge starter still launches a nested account-check process");
 if (canonicalConnector.includes("exit 0")) fail("the Desktop Bridge connector can still terminate its calling launcher process");

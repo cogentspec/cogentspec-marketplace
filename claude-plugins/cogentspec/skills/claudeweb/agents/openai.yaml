@@ -1,0 +1,6 @@
+interface:
+  display_name: "ClaudeWeb"
+  short_description: "Open the Claude web workspace"
+  default_prompt: "Use $claudeweb to connect this Claude project through the CogentSpec web workspace."
+policy:
+  allow_implicit_invocation: false

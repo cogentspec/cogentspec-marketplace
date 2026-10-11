@@ -146,7 +146,7 @@ function Start-NewChat([IntPtr]$Window) {
 
 function Set-ChatGptComposerFromClipboard([IntPtr]$Window, $Composer) {
     $clipboardText = [string](Get-Clipboard -Raw -ErrorAction Stop)
-    $validRequest = $clipboardText.Trim() -ceq '$cogentspec' -or
+    $validRequest = $clipboardText.Trim() -in @('$cogentspec', '$gptdesk') -or
         $clipboardText.StartsWith('Update CogentSpec on this computer by following only Update Protocol v1:', [StringComparison]::Ordinal)
     if (-not $validRequest) { throw 'The clipboard no longer contains the verified CogentSpec connection or update request.' }
     if (-not [string]::IsNullOrWhiteSpace((Get-NormalizedComposerText -Composer $Composer))) {

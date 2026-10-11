@@ -23,4 +23,4 @@ The installed package allowlist is the manifest, authenticated MCP connection, t
 
 When the installer returns verified success, display exactly:
 
-**CogentSpec Desktop Bridge is installed. In the ChatGPT, Codex, or Claude project you want to connect, enter $cogentspec. The command returns that project’s CogentSpec Web link and does not open or rearrange browser windows. Existing CogentStack installations may continue to use $cogentstack as a compatibility alias.**
+**CogentSpec Desktop Bridge is installed. In the ChatGPT, Codex, or Claude project you want to connect, enter $cogentspec. For an explicit ChatGPT destination, use $gptpop, $gptdesk, or $gptweb. In Claude, use $claudedesk or $claudeweb. These commands share the same isolated project and Bridge state. Claude Popout is not advertised because no verified Claude Popout flow exists. Existing CogentStack installations may continue to use $cogentstack as a compatibility alias.**

@@ -47,6 +47,16 @@ For ChatGPT Popout, treat `currentConversationConnected` as the authoritative ex
 
 The workspace opened through the native desktop action is the primary destination; the web link is recovery only. Both destinations use the same server-authoritative context, active project, approved decisions, Bridge queue, Git state, preview state, and deployment state. Saved changes refresh from the shared server without copying unsaved browser-local text between views. Switching AI projects changes the context in both destinations, creates two fresh one-use workspace handoffs, and starts or reuses that context's Bridge worker; it does not create permanent CogentSpec browser tabs.
 
+### Explicit one-word destinations
+
+Keep `$cogentspec` as the backward-compatible default. The explicit commands select only presentation and opening behavior; they share the same context, project state, Bridge worker, and protected action flow:
+
+- `$gptpop` opens the ChatGPT Popout work-area route.
+- `$gptdesk` opens the compact workspace beside the current ChatGPT or Codex Desktop conversation.
+- `$gptweb` returns the ordinary web-workspace link for ChatGPT on the web.
+
+Never silently substitute one destination for another. The compact Desktop layout is identified only by `experience=desktop-ui`; it must not alter Popout geometry or the ordinary web workspace.
+
 ## Current activity required before project instructions
 
 Before resolving any connected project instruction, including discussion or refinement of a new idea, call `get_project_activity` with the freshly resolved invoking context, or `scripts/project-build-handoff.ps1 -ContextKey <context> -ChangeAction activity`. This read is allowed before selection; it is not permission to inspect project files. Require `status: ready` and one specific current project or active new-idea draft. If unavailable, absent, ambiguous or unverified, stop and say exactly: **Please select a project for activity to begin.** Do not choose a target from the conversation, current directory, recent request, tab label, project count or a green Bridge indicator.

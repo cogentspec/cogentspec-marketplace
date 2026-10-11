@@ -133,7 +133,7 @@ try {
                             if ($target -eq 'chatgpt-desktop-ui:update') {
                                 'A new ChatGPT Desktop chat opened with the verified update request ready to send.'
                             } else {
-                                'A new ChatGPT Desktop chat opened with $cogentspec ready to send.'
+                                'A new ChatGPT Desktop chat opened with $gptdesk ready to send.'
                             }
                         } elseif ($result.reason) { [string]$result.reason }
                         else { 'ChatGPT Desktop UI could not be opened safely.' }

@@ -106,7 +106,7 @@ assert.match(productionHelperSource, /\$messageParts = \[Collections\.Generic\.L
 assert.match(productionHelperSource, /\$messageParts\.Add\(\$part\)/);
 assert.match(productionHelperSource, /\$message = \(\(\$messageParts -join ''\) -replace '\\s\+', ''\)\.Trim\(\)/);
 assert.doesNotMatch(productionHelperSource, /\$message = \(\(\[string\]\$textElements\.Item\(\$index \+ 1\)\.Current\.Name\)/);
-assert.match(productionHelperSource, /\$message -ceq '\$cogentspec'/);
+assert.match(productionHelperSource, /\$message -in @\('\$cogentspec', '\$gptpop'\)/);
 assert.match(productionHelperSource, /conversationState = \[string\]\$conversation\.state/);
 assert.match(productionHelperSource, /currentConversationKey = \[string\]\$conversation\.currentConversationKey/);
 assert.match(productionHelperSource, /chatFingerprint = \$chatFingerprint/);

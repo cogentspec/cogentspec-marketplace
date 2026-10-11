@@ -998,7 +998,7 @@ function Get-ChatGptConversationObservation([IntPtr]$Window) {
             $runtimeIdText = Get-ChatGptUserTurnRuntimeId -Element $messageElement
             if (-not $runtimeIdText) { continue }
             $latestUserMessageRuntimeId = $runtimeIdText
-            if ($message -ceq '$cogentspec') { $markerRuntimeId = $runtimeIdText }
+            if ($message -in @('$cogentspec', '$gptpop')) { $markerRuntimeId = $runtimeIdText }
         }
         $composer = Find-VerifiedChatGptComposer -Window $Window
         if ($null -eq $composer) {
@@ -1072,7 +1072,7 @@ function Set-ChatGptComposerFromClipboard([IntPtr]$Window) {
     if ($normalizedExistingText -ceq ([string]$composerElement.Current.Name).Trim()) {
         $normalizedExistingText = ''
     }
-    $knownGeneratedText = $normalizedExistingText -eq '$cogentspec' -or $normalizedExistingText.Contains('Update CogentSpec on this computer by following only Update Protocol v1:')
+    $knownGeneratedText = $normalizedExistingText -in @('$cogentspec', '$gptpop') -or $normalizedExistingText.Contains('Update CogentSpec on this computer by following only Update Protocol v1:')
     if (-not [string]::IsNullOrWhiteSpace($normalizedExistingText) -and -not $knownGeneratedText) {
         throw 'The ChatGPT composer already contains unsent text.'
     }

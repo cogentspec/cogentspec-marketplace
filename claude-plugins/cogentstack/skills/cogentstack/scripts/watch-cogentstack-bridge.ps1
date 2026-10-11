@@ -208,9 +208,9 @@ try {
                     'open_chatgpt_popup' {
                         if ([string]$claimed.request.targetRequestId -eq 'chatgpt-desktop-ui:connect') {
                             if ($result.PSObject.Properties['ownerThreadReopened'] -and [bool]$result.ownerThreadReopened) {
-                                'Connected ChatGPT task opened in Desktop UI with $cogentspec ready to send.'
+                                'Connected ChatGPT task opened in Desktop UI with $gptdesk ready to send.'
                             } else {
-                                'ChatGPT Desktop opened in full view with $cogentspec ready to establish this task connection.'
+                                'ChatGPT Desktop opened in full view with $gptdesk ready to establish this task connection.'
                             }
                         } elseif ([string]$claimed.request.targetRequestId -eq 'chatgpt-desktop-ui:update') {
                             if ($result.PSObject.Properties['ownerThreadReopened'] -and [bool]$result.ownerThreadReopened) {
@@ -220,7 +220,7 @@ try {
                             }
                         } elseif ($result.PSObject.Properties['composerPopulated'] -and [bool]$result.composerPopulated) {
                             if ([string]$claimed.request.targetRequestId -eq 'chatgpt-desktop-popup:connect') {
-                                'ChatGPT popout pinned with $cogentspec ready to send in the retained chat.'
+                                'ChatGPT popout pinned with $gptpop ready to send in the retained chat.'
                             } else {
                                 'ChatGPT popout pinned and its verified composer populated with the copied update request.'
                             }

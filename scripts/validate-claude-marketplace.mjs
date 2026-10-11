@@ -36,12 +36,37 @@ if (compatibilityEntry.source !== "./claude-plugins/cogentstack") fail("compatib
 if (!/^[0-9]+\.[0-9]+\.[0-9]+$/.test(pluginEntry.version ?? "")) fail("plugin version must use semantic versioning");
 
 const pluginRoot = resolve(repositoryRoot, pluginEntry.source);
+const compatibilityRoot = resolve(repositoryRoot, compatibilityEntry.source);
 if (relative(repositoryRoot, pluginRoot).startsWith("..")) fail("plugin source escapes the repository");
 
 const manifest = JSON.parse(await readFile(join(pluginRoot, ".claude-plugin", "plugin.json"), "utf8"));
 const skill = await readFile(join(pluginRoot, "skills", "cogentspec", "SKILL.md"), "utf8");
 const scriptsRoot = join(pluginRoot, "skills", "cogentspec", "scripts");
 const codexScriptsRoot = join(repositoryRoot, "plugins", "cogentspec", "skills", "cogentspec", "scripts");
+
+const commandContracts = [
+  ["claudedesk", "desktop", "chatgptWorkspaceUrl", "Claude Desktop workspace is ready"],
+  ["claudeweb", "web", "webWorkspaceUrl", "Claude web workspace is ready"],
+];
+for (const [root, mainSkill] of [[pluginRoot, "cogentspec"], [compatibilityRoot, "cogentstack"]]) {
+  for (const [command, experience, destination, confirmation] of commandContracts) {
+    const commandRoot = join(root, "skills", command);
+    const commandSkill = await readFile(join(commandRoot, "SKILL.md"), "utf8");
+    const commandMetadata = await readFile(join(commandRoot, "agents", "openai.yaml"), "utf8");
+    for (const marker of [`name: ${command}`, `../${mainSkill}/SKILL.md`, `-Surface claude-desktop -Experience ${experience}`, destination, confirmation]) {
+      if (!commandSkill.includes(marker)) fail(`${command} is missing Claude destination marker: ${marker}`);
+    }
+    for (const marker of [`$${command}`, "allow_implicit_invocation: false"]) {
+      if (!commandMetadata.includes(marker)) fail(`${command} metadata is missing explicit-command marker: ${marker}`);
+    }
+  }
+  try {
+    await readFile(join(root, "skills", "claudepop", "SKILL.md"), "utf8");
+    fail("claudepop must remain unregistered until a verified Claude Popout exists");
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+  }
+}
 
 if (manifest.name !== "cogentspec") fail("canonical plugin manifest name must be cogentspec");
 if (manifest.version !== pluginEntry.version) fail("marketplace and plugin versions differ");

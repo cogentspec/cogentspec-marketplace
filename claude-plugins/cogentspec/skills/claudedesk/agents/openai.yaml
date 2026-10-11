@@ -1,0 +1,6 @@
+interface:
+  display_name: "ClaudeDesk"
+  short_description: "Open the Claude Desktop workspace"
+  default_prompt: "Use $claudedesk to connect this Claude Desktop project to CogentSpec."
+policy:
+  allow_implicit_invocation: false

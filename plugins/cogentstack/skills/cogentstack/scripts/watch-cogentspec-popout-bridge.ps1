@@ -1127,7 +1127,7 @@ try {
                         if ($script:ClientUnavailable -and ($target -ne 'chatgpt-desktop-popup:connect' -or
                             -not $requestConversationKey -or $requestConversationKey -ne $script:CurrentConversationKey -or
                             $recoverThreadId -notmatch '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')) {
-                            throw 'This retained Popout has no desktop client. Open the original saved chat from the desktop chat list and send $cogentspec there. No verified thread is available for automatic recovery; no new chat was substituted.'
+                            throw 'This retained Popout has no desktop client. Open the original saved chat from the desktop chat list and send $gptpop there. No verified thread is available for automatic recovery; no new chat was substituted.'
                         }
                         $startupProgress = {
                             param($stage)

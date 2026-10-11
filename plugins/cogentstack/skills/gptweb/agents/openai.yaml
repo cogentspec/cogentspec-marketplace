@@ -1,0 +1,6 @@
+interface:
+  display_name: "GPTWeb"
+  short_description: "Open the ordinary GPT web workspace"
+  default_prompt: "Use $gptweb to connect this project through the CogentSpec GPT web workspace."
+policy:
+  allow_implicit_invocation: false

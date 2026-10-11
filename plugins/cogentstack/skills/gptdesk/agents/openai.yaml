@@ -1,0 +1,6 @@
+interface:
+  display_name: "GPTDesk"
+  short_description: "Open the compact GPT Desktop split view"
+  default_prompt: "Use $gptdesk to connect this project beside my GPT Desktop conversation."
+policy:
+  allow_implicit_invocation: false

@@ -3,7 +3,10 @@ param(
     [string]$ContextKey = '',
 
     [ValidateSet('chatgpt', 'claude-desktop')]
-    [string]$Surface = 'chatgpt'
+    [string]$Surface = 'chatgpt',
+
+    [ValidateSet('legacy', 'popout', 'desktop-ui', 'web')]
+    [string]$Experience = 'legacy'
 )
 
 Set-StrictMode -Version Latest
@@ -409,11 +412,14 @@ if ([string]$connection.webWorkspaceCode -notmatch '^cgw_[A-Za-z0-9_-]{32,}$' -o
     throw 'Desktop Bridge could not create the two private CogentSpec.app workspace handoffs.'
 }
 $workspaceBaseUrl = "https://cogentspec.app/stack?surface=$([Uri]::EscapeDataString($Surface))&context=$([Uri]::EscapeDataString($resolvedContext))"
+if ($Experience -ne 'legacy') {
+    $workspaceBaseUrl += "&experience=$([Uri]::EscapeDataString($Experience))"
+}
 $navigationKey = [Guid]::NewGuid().ToString('N')
-$webLaunchBaseUrl = if ($Surface -eq 'chatgpt') { $workspaceBaseUrl.Replace('/stack?', '/popout-launch?') } else { $workspaceBaseUrl }
+$webLaunchBaseUrl = if ($Surface -eq 'chatgpt' -and $Experience -in @('legacy', 'popout')) { $workspaceBaseUrl.Replace('/stack?', '/popout-launch?') } else { $workspaceBaseUrl }
 $webWorkspaceUrl = "$webLaunchBaseUrl&open=web&nav=$navigationKey#desktop-web=$([Uri]::EscapeDataString([string]$connection.webWorkspaceCode))"
 $chatgptWorkspaceUrl = "$workspaceBaseUrl&open=chatgpt&nav=$navigationKey#desktop-chatgpt=$([Uri]::EscapeDataString([string]$connection.chatgptWorkspaceCode))"
-$workspaceUrl = $chatgptWorkspaceUrl
+$workspaceUrl = if ($Experience -in @('popout', 'web')) { $webWorkspaceUrl } else { $chatgptWorkspaceUrl }
 
 $localStateRoot = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'CogentSpec'
 $stateRoot = Join-Path $localStateRoot 'bridge'
