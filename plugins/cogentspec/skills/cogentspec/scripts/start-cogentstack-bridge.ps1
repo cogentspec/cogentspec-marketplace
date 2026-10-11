@@ -65,8 +65,7 @@ function Get-HostPowerShellExecutable {
     throw 'Windows PowerShell is required by Desktop Bridge.'
 }
 
-function Start-DetachedBridgeWatcher(
-    [string]$PowerShellExecutable,
+function Get-BridgeWatcherCommand(
     [string]$WatcherScript,
     [string]$WatcherContextKey,
     [string]$WatcherPluginId,
@@ -78,7 +77,61 @@ function Start-DetachedBridgeWatcher(
         param([string]$Value)
         return $Value.Replace("'", "''")
     }
-    $command = "& '$(& $escape $WatcherScript)' -ContextKey '$(& $escape $WatcherContextKey)' -PluginId '$(& $escape $WatcherPluginId)' -PluginVersion '$(& $escape $WatcherPluginVersion)' -ThreadId '$(& $escape $WatcherThreadId)' -ReadyPath '$(& $escape $WatcherReadyPath)'"
+    return "& '$(& $escape $WatcherScript)' -ContextKey '$(& $escape $WatcherContextKey)' -PluginId '$(& $escape $WatcherPluginId)' -PluginVersion '$(& $escape $WatcherPluginVersion)' -ThreadId '$(& $escape $WatcherThreadId)' -ReadyPath '$(& $escape $WatcherReadyPath)'"
+}
+
+function Test-BridgeWatcherProcess(
+    $ProcessInfo,
+    [string]$WatcherScript,
+    [string]$WatcherContextKey,
+    [string]$WatcherPluginId,
+    [string]$WatcherPluginVersion,
+    [string]$WatcherThreadId,
+    [string]$WatcherReadyPath
+) {
+    if (-not $ProcessInfo) { return $false }
+    $executableLeaf = [IO.Path]::GetFileName([string]$ProcessInfo.ExecutablePath)
+    if ($executableLeaf -notmatch '^(pwsh|powershell)(\.exe)?$') { return $false }
+
+    $encodedMatch = [regex]::Match(
+        [string]$ProcessInfo.CommandLine,
+        '(?i)(?:^|\s)-EncodedCommand(?:\s+|=)(?:"([A-Za-z0-9+/=]+)"|''([A-Za-z0-9+/=]+)''|([A-Za-z0-9+/=]+))'
+    )
+    if (-not $encodedMatch.Success) { return $false }
+    $actualEncodedCommand = if ($encodedMatch.Groups[1].Success) {
+        $encodedMatch.Groups[1].Value
+    } elseif ($encodedMatch.Groups[2].Success) {
+        $encodedMatch.Groups[2].Value
+    } else {
+        $encodedMatch.Groups[3].Value
+    }
+    $expectedCommand = Get-BridgeWatcherCommand `
+        -WatcherScript $WatcherScript `
+        -WatcherContextKey $WatcherContextKey `
+        -WatcherPluginId $WatcherPluginId `
+        -WatcherPluginVersion $WatcherPluginVersion `
+        -WatcherThreadId $WatcherThreadId `
+        -WatcherReadyPath $WatcherReadyPath
+    $expectedEncodedCommand = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($expectedCommand))
+    return $actualEncodedCommand -ceq $expectedEncodedCommand
+}
+
+function Start-DetachedBridgeWatcher(
+    [string]$PowerShellExecutable,
+    [string]$WatcherScript,
+    [string]$WatcherContextKey,
+    [string]$WatcherPluginId,
+    [string]$WatcherPluginVersion,
+    [string]$WatcherThreadId,
+    [string]$WatcherReadyPath
+) {
+    $command = Get-BridgeWatcherCommand `
+        -WatcherScript $WatcherScript `
+        -WatcherContextKey $WatcherContextKey `
+        -WatcherPluginId $WatcherPluginId `
+        -WatcherPluginVersion $WatcherPluginVersion `
+        -WatcherThreadId $WatcherThreadId `
+        -WatcherReadyPath $WatcherReadyPath
     $encodedCommand = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
     $commandLine = '"' + $PowerShellExecutable + '" -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -EncodedCommand ' + $encodedCommand
     $creation = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $commandLine }
@@ -386,14 +439,29 @@ if (Test-Path -LiteralPath $statePath -PathType Leaf) {
         $state = Get-Content -Raw -LiteralPath $statePath | ConvertFrom-Json
         $existingProcessId = [int]$state.processId
         $existingProcess = if ($existingProcessId -gt 0) { Get-CimInstance Win32_Process -Filter "ProcessId=$existingProcessId" -ErrorAction SilentlyContinue } else { $null }
-        $expectedWatcher = [string]$state.watcherScript
-        $sameRuntime = [string]$state.runtimeVersion -eq $runtimeVersion
-        $sameThread = -not $threadId -or ($state.PSObject.Properties['threadId'] -and [string]$state.threadId -ceq $threadId)
+        $recordedWatcher = [string]$state.watcherScript
+        $recordedPluginId = [string]$state.pluginId
+        $recordedPluginVersion = [string]$state.pluginVersion
+        $recordedRuntimeVersion = [string]$state.runtimeVersion
+        $recordedThreadId = if ($state.PSObject.Properties['threadId']) { [string]$state.threadId } else { '' }
+        $recordedRuntimeWatcher = Join-Path $localStateRoot "bridge-runtime\$recordedRuntimeVersion\watch-cogentstack-bridge.ps1"
+        $sameRuntime = $recordedRuntimeVersion -eq $runtimeVersion
+        $sameThread = (-not $threadId) -or ($recordedThreadId -ceq $threadId)
         $verifiedBridgeProcess = $existingProcess -and
-            $expectedWatcher -and
+            $recordedWatcher -and
+            $recordedRuntimeVersion -match '^[a-f0-9]{24}$' -and
+            [string]$recordedWatcher -ieq $recordedRuntimeWatcher -and
             [string]$state.contextKey -ceq $resolvedContext -and
-            [string]$existingProcess.ExecutablePath -ieq $powershellExecutable -and
-            ([string]$existingProcess.CommandLine).IndexOf('-EncodedCommand', [StringComparison]::OrdinalIgnoreCase) -ge 0
+            $recordedPluginId -in @('cogentspec', 'cogentstack') -and
+            $recordedPluginVersion -match '^\d+\.\d+\.\d+$' -and
+            (Test-BridgeWatcherProcess `
+                -ProcessInfo $existingProcess `
+                -WatcherScript $recordedWatcher `
+                -WatcherContextKey $resolvedContext `
+                -WatcherPluginId $recordedPluginId `
+                -WatcherPluginVersion $recordedPluginVersion `
+                -WatcherThreadId $recordedThreadId `
+                -WatcherReadyPath $readyPath)
         if ($verifiedBridgeProcess -and $sameRuntime -and $sameThread) {
             $presenceReady = Wait-BridgePresenceReady `
                 -ReadyPath $readyPath `
@@ -437,6 +505,7 @@ if (Test-Path -LiteralPath $statePath -PathType Leaf) {
         }
         if ($verifiedBridgeProcess -and (-not $sameRuntime -or -not $sameThread)) {
             Stop-Process -Id $existingProcessId -Force
+            Wait-Process -Id $existingProcessId -Timeout 2 -ErrorAction SilentlyContinue
         }
     } catch { }
 }

@@ -36,6 +36,7 @@ $launcherProcess = $null
 $originalConnectorProcessPath = $env:COGENTSPEC_LAUNCHER_TEST_CONNECTOR_PROCESS_PATH
 $originalThreadId = $env:CODEX_THREAD_ID
 $fixtureThreadId = [Guid]::NewGuid().ToString()
+$crossHostWorkerVerified = $false
 
 try {
     Copy-Item -LiteralPath (Join-Path $repositoryRoot 'plugins\cogentspec') -Destination $fixturePlugin -Recurse -Force
@@ -185,6 +186,8 @@ Start-Sleep -Milliseconds 5500
     $readyMarker = Get-Content -Raw -LiteralPath $readyPath | ConvertFrom-Json
     Assert-BridgeLauncherTest ([int]$readyMarker.processId -eq $workerProcessId -and [bool]$readyMarker.serverAcknowledged) 'The server acknowledgement marker does not identify the verified worker.'
     Assert-BridgeLauncherTest ([string]$readyMarker.threadId -ceq $fixtureThreadId) 'The verified worker is not bound to the invoking ChatGPT task.'
+    $state = Get-Content -Raw -LiteralPath $statePath | ConvertFrom-Json
+    $runtimeRoot = Split-Path -Parent ([string]$state.watcherScript)
 
     $reuseOutput = @(& (Join-Path $fixtureScripts 'start-cogentstack-bridge.ps1') -ContextKey $contextKey -Surface chatgpt 2>&1)
     $reuseJsonLine = @($reuseOutput | ForEach-Object { $_.ToString() } | Where-Object { $_.Trim().StartsWith('{') } | Select-Object -Last 1)
@@ -192,6 +195,56 @@ Start-Sleep -Milliseconds 5500
     $reuseResult = $reuseJsonLine | ConvertFrom-Json
     Assert-BridgeLauncherTest ([string]$reuseResult.status -eq 'ready' -and [string]$reuseResult.bridge -eq 'already_running') 'The Bridge launcher did not reuse the verified worker.'
     Assert-BridgeLauncherTest ([bool]$reuseResult.presenceVerified -and [int]$reuseResult.processId -eq $workerProcessId) 'The reused Bridge worker was reported ready without verified context presence.'
+
+    $alternatePowerShellExecutable = @(
+        Get-Command powershell.exe, pwsh.exe -CommandType Application -All -ErrorAction SilentlyContinue |
+            ForEach-Object { [string]$_.Source } |
+            Where-Object { $_ -and $_ -ine $powerShellExecutable } |
+            Select-Object -Unique
+    ) | Select-Object -First 1
+    if ($alternatePowerShellExecutable) {
+        Stop-Process -Id $workerProcessId -Force -ErrorAction Stop
+        Wait-Process -Id $workerProcessId -Timeout 2 -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $readyPath -Force -ErrorAction SilentlyContinue
+
+        $watcherScriptLiteral = ([string]$state.watcherScript).Replace("'", "''")
+        $contextLiteral = $contextKey.Replace("'", "''")
+        $pluginIdLiteral = ([string]$state.pluginId).Replace("'", "''")
+        $pluginVersionLiteral = ([string]$state.pluginVersion).Replace("'", "''")
+        $threadLiteral = $fixtureThreadId.Replace("'", "''")
+        $readyPathLiteral = $readyPath.Replace("'", "''")
+        $alternateWatcherCommand = "& '$watcherScriptLiteral' -ContextKey '$contextLiteral' -PluginId '$pluginIdLiteral' -PluginVersion '$pluginVersionLiteral' -ThreadId '$threadLiteral' -ReadyPath '$readyPathLiteral'"
+        $alternateEncodedCommand = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($alternateWatcherCommand))
+        $alternateWorker = Start-Process `
+            -FilePath $alternatePowerShellExecutable `
+            -ArgumentList @('-NoProfile', '-WindowStyle', 'Hidden', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', $alternateEncodedCommand) `
+            -WindowStyle Hidden `
+            -PassThru
+        $workerProcessId = [int]$alternateWorker.Id
+        $state.processId = $workerProcessId
+        $state.startedAt = [DateTime]::UtcNow.ToString('o')
+        $state | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $statePath -Encoding UTF8
+
+        $alternateReadyDeadline = [DateTime]::UtcNow.AddSeconds(8)
+        $alternateMarker = $null
+        do {
+            if (Test-Path -LiteralPath $readyPath -PathType Leaf) {
+                try { $alternateMarker = Get-Content -Raw -LiteralPath $readyPath | ConvertFrom-Json }
+                catch { $alternateMarker = $null }
+            }
+            if ($alternateMarker -and [int]$alternateMarker.processId -eq $workerProcessId) { break }
+            Start-Sleep -Milliseconds 100
+        } while ([DateTime]::UtcNow -lt $alternateReadyDeadline)
+        Assert-BridgeLauncherTest ($alternateMarker -and [int]$alternateMarker.processId -eq $workerProcessId) 'The alternate PowerShell host did not publish its Bridge presence marker.'
+
+        $crossHostOutput = @(& (Join-Path $fixtureScripts 'start-cogentstack-bridge.ps1') -ContextKey $contextKey -Surface chatgpt 2>&1)
+        $crossHostJsonLine = @($crossHostOutput | ForEach-Object { $_.ToString() } | Where-Object { $_.Trim().StartsWith('{') } | Select-Object -Last 1)
+        Assert-BridgeLauncherTest ([bool]$crossHostJsonLine) 'The cross-host Bridge launcher returned no JSON result.'
+        $crossHostResult = $crossHostJsonLine | ConvertFrom-Json
+        Assert-BridgeLauncherTest ([string]$crossHostResult.status -eq 'ready' -and [string]$crossHostResult.bridge -eq 'already_running') 'The Bridge launcher rejected a verified worker started by another approved PowerShell host.'
+        Assert-BridgeLauncherTest ([int]$crossHostResult.processId -eq $workerProcessId) 'The Bridge launcher replaced a valid cross-host worker instead of reusing it.'
+        $crossHostWorkerVerified = $true
+    }
 
     $previousWorkerProcessId = $workerProcessId
     $replacementThreadId = [Guid]::NewGuid().ToString()
@@ -488,6 +541,9 @@ Start-Sleep -Milliseconds 5500
     Assert-BridgeLauncherTest ($launcherText.Contains('presenceVerified = $true')) 'The Bridge launcher does not expose verified context presence.'
     Assert-BridgeLauncherTest ($launcherText.Contains('$env:CODEX_THREAD_ID')) 'The Bridge launcher does not capture the invoking ChatGPT task identity.'
     Assert-BridgeLauncherTest ($launcherText.Contains('$sameThread')) 'The Bridge launcher can reuse a worker owned by a different ChatGPT task.'
+    Assert-BridgeLauncherTest ($launcherText.Contains('function Test-BridgeWatcherProcess')) 'The Bridge launcher does not verify the exact encoded watcher command.'
+    Assert-BridgeLauncherTest ($launcherText.Contains("'^(pwsh|powershell)(\.exe)?$'")) 'The Bridge launcher does not accept both approved PowerShell hosts.'
+    Assert-BridgeLauncherTest (-not $launcherText.Contains('ExecutablePath -ieq $powershellExecutable')) 'The Bridge launcher still binds worker ownership to one PowerShell host path.'
     $bridgeParityRoots = @(
         'plugins\cogentstack\skills\cogentstack\scripts',
         'claude-plugins\cogentspec\skills\cogentspec\scripts',
@@ -510,6 +566,7 @@ Start-Sleep -Milliseconds 5500
         projectDataConnection = 'ready'
         presenceVerified = [bool]$result.presenceVerified
         reuseVerified = [bool]$reuseResult.presenceVerified
+        crossHostWorkerVerified = $crossHostWorkerVerified
         taskRebindVerified = [string]$replacementMarker.threadId -ceq $replacementThreadId
         workspaceLinksReturned = 2
     } | ConvertTo-Json -Compress
