@@ -299,6 +299,7 @@ try {
         'skills/cogentstack/scripts/delete-specification-project.ps1',
         'skills/cogentstack/scripts/delete-project.ps1',
         'skills/cogentstack/scripts/ensure-cogentspec-mcp.ps1',
+        'skills/cogentstack/scripts/ensure-codex-sidebar-hidden.py',
         'skills/cogentstack/scripts/fulfil-project.ps1',
         'skills/cogentstack/scripts/generate-project-preview.ps1',
         'skills/cogentstack/scripts/inspect-project-git.ps1',

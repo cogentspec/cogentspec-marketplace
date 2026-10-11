@@ -188,12 +188,20 @@ for (const pluginPath of [sourcePluginPath, compatibilityPluginPath]) {
 }
 for (const pluginPath of [sourcePluginPath, compatibilityPluginPath]) {
   const desktopCommandSkill = await readFile(join(pluginPath, "skills", "gptdesk", "SKILL.md"), "utf8");
-  for (const marker of ['placement: "right"', "native two-column conversation/workspace split", "Omit `threadId` and `tabId`", "Sidebar visibility remains a host-owned user control", "`Ctrl+Shift+S` toggles the host sidebar", "Never send that shortcut automatically"]) {
+  for (const marker of ['placement: "right"', "native two-column conversation/workspace split", "Omit `threadId` and `tabId`", "ensure-codex-sidebar-hidden.py", "Treat `hidden` or `already_hidden` as success", "Never send `Ctrl+Shift+S` without first proving the sidebar is open"]) {
     if (!desktopCommandSkill.includes(marker)) fail(`gptdesk is missing native split marker: ${marker}`);
   }
   if (desktopCommandSkill.includes("Omit `threadId`, `tabId`, and `placement`")) {
     fail("gptdesk still opens an unplaced full-view browser tab");
   }
+}
+const canonicalSidebarHelper = await readFile(join(sourcePluginPath, "skills", "cogentspec", "scripts", "ensure-codex-sidebar-hidden.py"), "utf8");
+const compatibilitySidebarHelper = await readFile(join(compatibilityPluginPath, "skills", "cogentstack", "scripts", "ensure-codex-sidebar-hidden.py"), "utf8");
+for (const [name, helper] of [["canonical", canonicalSidebarHelper], ["compatibility", compatibilitySidebarHelper]]) {
+  for (const marker of ["Hide sidebar", "Show sidebar", "UIA_BUTTON_CONTROL_TYPE_ID", "SendInput", "GetForegroundWindow", '"already_hidden"', '"ambiguous"']) {
+    if (!helper.includes(marker)) fail(`${name} Python sidebar helper is missing marker: ${marker}`);
+  }
+  if (!helper.includes("VK_CONTROL") || !helper.includes("VK_SHIFT") || !helper.includes("VK_S")) fail(`${name} Python sidebar helper is missing the state-aware sidebar shortcut`);
 }
 for (const marker of ["cogentspec-update-check-v1", "/api/plugin-version", "update_available", "check_unavailable", "UPDATE.v1.md"]) {
   if (!canonicalUpdateCheck.includes(marker)) fail(`the automatic update check is missing marker: ${marker}`);
