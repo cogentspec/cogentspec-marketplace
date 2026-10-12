@@ -189,16 +189,49 @@ Start-Sleep -Milliseconds 5500
     $state = Get-Content -Raw -LiteralPath $statePath | ConvertFrom-Json
     $runtimeRoot = Split-Path -Parent ([string]$state.watcherScript)
 
-    $webExperienceOutput = @(& (Join-Path $fixtureScripts 'start-cogentstack-bridge.ps1') -ContextKey $contextKey -Surface chatgpt -Experience web 2>&1)
+    $gptwebCommand = Join-Path $fixturePlugin 'skills\gptweb\scripts\start-gptweb.ps1'
+    $webExperienceOutput = @(& $gptwebCommand -ContextKey $contextKey 2>&1)
     $webExperienceJsonLine = @($webExperienceOutput | ForEach-Object { $_.ToString() } | Where-Object { $_.Trim().StartsWith('{') } | Select-Object -Last 1)
     Assert-BridgeLauncherTest ([bool]$webExperienceJsonLine) 'The GPTWeb Bridge launcher returned no JSON result.'
     $webExperienceResult = $webExperienceJsonLine | ConvertFrom-Json
     $webExperienceWorkspaceUrl = [string]$webExperienceResult.workspaceUrl
     Assert-BridgeLauncherTest ([string]$webExperienceResult.status -eq 'ready') 'The GPTWeb Bridge launcher did not become ready.'
-    Assert-BridgeLauncherTest ($webExperienceWorkspaceUrl -ceq [string]$webExperienceResult.webWorkspaceUrl) 'GPTWeb did not select webWorkspaceUrl as its primary workspaceUrl.'
-    Assert-BridgeLauncherTest ($webExperienceWorkspaceUrl -cne [string]$webExperienceResult.chatgptWorkspaceUrl) 'GPTWeb incorrectly selected the ChatGPT Desktop workspace handoff.'
     Assert-BridgeLauncherTest ($webExperienceWorkspaceUrl -match '^https://cogentspec\.app/stack\?surface=chatgpt&context=ctx-[a-f0-9]+&experience=web&open=web&nav=[a-f0-9]{32}#desktop-web=') 'The GPTWeb handoff is missing its context-bound web experience route.'
     Assert-BridgeLauncherTest ($webExperienceWorkspaceUrl -notmatch '/popout-launch\?') 'The GPTWeb handoff incorrectly uses the legacy Popout launch route.'
+    Assert-BridgeLauncherTest ($webExperienceWorkspaceUrl -notmatch '#desktop=') 'The GPTWeb command exposed the legacy authorization route.'
+    Assert-BridgeLauncherTest (-not $webExperienceResult.PSObject.Properties['webWorkspaceUrl']) 'The GPTWeb command exposed a second web destination.'
+    Assert-BridgeLauncherTest (-not $webExperienceResult.PSObject.Properties['chatgptWorkspaceUrl']) 'The GPTWeb command exposed the Desktop destination.'
+
+    $fixtureLauncherPath = Join-Path $fixtureScripts 'start-cogentstack-bridge.ps1'
+    $validFixtureLauncher = Get-Content -Raw -LiteralPath $fixtureLauncherPath
+    $legacyLauncherFixture = @'
+param([string]$ContextKey, [string]$Surface, [string]$Experience)
+$legacyUrl = "https://cogentspec.app/stack?surface=chatgpt&experience=web#desktop=cgw_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+[ordered]@{
+    status = 'ready'
+    bridge = 'already_running'
+    presenceVerified = $true
+    contextKey = $ContextKey
+    contextIsolated = $true
+    workspaceUrl = $legacyUrl
+    webWorkspaceUrl = $legacyUrl
+    chatgptWorkspaceUrl = 'https://cogentspec.app/stack?surface=chatgpt#desktop-chatgpt=cgw_BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB'
+    browserOpened = $false
+    accountState = 'signed_in'
+    mcpState = 'ready'
+} | ConvertTo-Json -Compress
+'@
+    Set-Content -LiteralPath $fixtureLauncherPath -Value $legacyLauncherFixture -Encoding UTF8
+    try {
+        $legacyOutput = @(& $gptwebCommand -ContextKey $contextKey 2>&1)
+        $legacyJsonLine = @($legacyOutput | ForEach-Object { $_.ToString() } | Where-Object { $_.Trim().StartsWith('{') } | Select-Object -Last 1)
+        Assert-BridgeLauncherTest ([bool]$legacyJsonLine) 'The GPTWeb legacy rejection returned no JSON result.'
+        $legacyResult = $legacyJsonLine | ConvertFrom-Json
+        Assert-BridgeLauncherTest ([string]$legacyResult.status -eq 'invalid_workspace_handoff') 'The GPTWeb command did not reject the legacy authorization route.'
+        Assert-BridgeLauncherTest (-not $legacyResult.PSObject.Properties['workspaceUrl']) 'The GPTWeb command returned the rejected legacy URL.'
+    } finally {
+        Set-Content -LiteralPath $fixtureLauncherPath -Value $validFixtureLauncher -Encoding UTF8
+    }
 
     $reuseOutput = @(& (Join-Path $fixtureScripts 'start-cogentstack-bridge.ps1') -ContextKey $contextKey -Surface chatgpt 2>&1)
     $reuseJsonLine = @($reuseOutput | ForEach-Object { $_.ToString() } | Where-Object { $_.Trim().StartsWith('{') } | Select-Object -Last 1)
@@ -581,6 +614,7 @@ Start-Sleep -Milliseconds 5500
         taskRebindVerified = [string]$replacementMarker.threadId -ceq $replacementThreadId
         workspaceLinksReturned = 2
         webDestinationVerified = $true
+        webCommandFailClosedVerified = $true
     } | ConvertTo-Json -Compress
 } finally {
     if ($launcherProcess) { $launcherProcess.Dispose() }

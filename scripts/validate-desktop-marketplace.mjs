@@ -9,6 +9,7 @@ const installInstructions = await readFile(join(repositoryRoot, ".agents", "plug
 const versionedInstallInstructions = await readFile(join(repositoryRoot, ".agents", "plugins", "INSTALL.v3.md"), "utf8");
 const updateInstructions = await readFile(join(repositoryRoot, ".agents", "plugins", "UPDATE.v1.md"), "utf8");
 const boundedInstaller = await readFile(join(repositoryRoot, ".agents", "plugins", "install-cogentspec.ps1"), "utf8");
+const compatibilityInstaller = await readFile(join(repositoryRoot, ".agents", "plugins", "install-cogentstack.ps1"), "utf8");
 const sourcePluginPath = join(repositoryRoot, "plugins", "cogentspec");
 const compatibilityPluginPath = join(repositoryRoot, "plugins", "cogentstack");
 const semver = /^[0-9]+\.[0-9]+\.[0-9]+$/;
@@ -115,16 +116,23 @@ if (boundedInstaller.includes("marketplace.marketplaceSource.source")) {
   fail("the bounded installer must verify the registered checkout instead of relying on removed marketplace source metadata");
 }
 
-const allowlistBlock = boundedInstaller.match(/\$allowedFiles\s*=\s*@\(([\s\S]*?)\n\s*\)/);
-if (!allowlistBlock) fail("the bounded installer public-file allowlist could not be parsed");
-const allowedPluginFiles = [...allowlistBlock[1].matchAll(/'([^']+)'/g)].map((match) => match[1]).sort();
-const pluginEntries = await readdir(sourcePluginPath, { recursive: true, withFileTypes: true });
-const actualPluginFiles = pluginEntries
-  .filter((entry) => entry.isFile())
-  .map((entry) => relative(sourcePluginPath, join(entry.parentPath, entry.name)).replaceAll("\\", "/"))
-  .sort();
-if (JSON.stringify(actualPluginFiles) !== JSON.stringify(allowedPluginFiles)) {
-  fail("the bounded installer allowlist does not exactly match the public plugin package");
+let canonicalPluginFileCount = 0;
+for (const [name, installer, pluginPath] of [
+  ["canonical", boundedInstaller, sourcePluginPath],
+  ["compatibility", compatibilityInstaller, compatibilityPluginPath],
+]) {
+  const allowlistBlock = installer.match(/\$allowedFiles\s*=\s*@\(([\s\S]*?)\n\s*\)/);
+  if (!allowlistBlock) fail(`the ${name} bounded installer public-file allowlist could not be parsed`);
+  const allowedPluginFiles = [...allowlistBlock[1].matchAll(/'([^']+)'/g)].map((match) => match[1]).sort();
+  const pluginEntries = await readdir(pluginPath, { recursive: true, withFileTypes: true });
+  const actualPluginFiles = pluginEntries
+    .filter((entry) => entry.isFile())
+    .map((entry) => relative(pluginPath, join(entry.parentPath, entry.name)).replaceAll("\\", "/"))
+    .sort();
+  if (name === "canonical") canonicalPluginFileCount = actualPluginFiles.length;
+  if (JSON.stringify(actualPluginFiles) !== JSON.stringify(allowedPluginFiles)) {
+    fail(`the ${name} bounded installer allowlist does not exactly match the public plugin package`);
+  }
 }
 for (const requiredUpdateInstruction of [
   "CogentSpec update protocol v1",
@@ -158,6 +166,7 @@ const canonicalPopoutWatcher = await readFile(join(sourcePluginPath, "skills", "
 const canonicalDesktopUiStarter = await readFile(join(sourcePluginPath, "skills", "cogentspec", "scripts", "start-cogentspec-desktop-ui-bridge.ps1"), "utf8");
 const canonicalDesktopUiWatcher = await readFile(join(sourcePluginPath, "skills", "cogentspec", "scripts", "watch-cogentspec-desktop-ui-bridge.ps1"), "utf8");
 const canonicalDesktopUiHelper = await readFile(join(sourcePluginPath, "skills", "cogentspec", "scripts", "open-chatgpt-desktop-ui.ps1"), "utf8");
+const canonicalGptWebStarter = await readFile(join(sourcePluginPath, "skills", "gptweb", "scripts", "start-gptweb.ps1"), "utf8");
 const compatibilityStarter = await readFile(join(compatibilityPluginPath, "skills", "cogentstack", "scripts", "start-cogentstack-bridge.ps1"), "utf8");
 const compatibilitySkill = await readFile(join(compatibilityPluginPath, "skills", "cogentstack", "SKILL.md"), "utf8");
 const compatibilityUpdateCheck = await readFile(join(compatibilityPluginPath, "skills", "cogentstack", "scripts", "check-cogentspec-update.ps1"), "utf8");
@@ -168,10 +177,11 @@ const compatibilityPopoutWatcher = await readFile(join(compatibilityPluginPath, 
 const compatibilityDesktopUiStarter = await readFile(join(compatibilityPluginPath, "skills", "cogentstack", "scripts", "start-cogentspec-desktop-ui-bridge.ps1"), "utf8");
 const compatibilityDesktopUiWatcher = await readFile(join(compatibilityPluginPath, "skills", "cogentstack", "scripts", "watch-cogentspec-desktop-ui-bridge.ps1"), "utf8");
 const compatibilityDesktopUiHelper = await readFile(join(compatibilityPluginPath, "skills", "cogentstack", "scripts", "open-chatgpt-desktop-ui.ps1"), "utf8");
+const compatibilityGptWebStarter = await readFile(join(compatibilityPluginPath, "skills", "gptweb", "scripts", "start-gptweb.ps1"), "utf8");
 const commandContracts = [
   ["gptpop", "popout", "webWorkspaceUrl", "CogentSpec GPT Popout work area"],
   ["gptdesk", "desktop-ui", "chatgptWorkspaceUrl", "CogentSpec is connected beside this GPT conversation"],
-  ["gptweb", "web", "webWorkspaceUrl", "CogentSpec GPT web workspace is ready"],
+  ["gptweb", "web", "scripts/start-gptweb.ps1", "CogentSpec GPT web workspace is ready"],
 ];
 for (const pluginPath of [sourcePluginPath, compatibilityPluginPath]) {
   for (const [command, experience, destination, confirmation] of commandContracts) {
@@ -193,11 +203,31 @@ for (const [name, skill] of [["canonical skill", canonicalSkill], ["compatibilit
     "-Experience popout",
     "-Experience desktop-ui",
     "-Experience web",
-    "workspaceUrl` to equal the private `webWorkspaceUrl",
+    "../gptweb/scripts/start-gptweb.ps1",
+    "Treat `invalid_workspace_handoff` as a hard failure",
     "Do not apply the Popout-only `currentConversationConnected` gate",
     "[Open CogentSpec GPT web workspace](<URL>)",
   ]) {
     if (!skill.includes(marker)) fail(`${name} is missing explicit destination dispatch marker: ${marker}`);
+  }
+}
+for (const [name, source] of [["canonical", canonicalGptWebStarter], ["compatibility", compatibilityGptWebStarter]]) {
+  for (const marker of [
+    "-Experience web",
+    "invalid_workspace_handoff",
+    "workspace_not_web_destination",
+    "workspace_selected_desktop_destination",
+    "workspace_url_contract_mismatch",
+    "bridge_ready_contract_mismatch",
+    "#desktop-web=",
+    "^#desktop=",
+    "^#desktop-chatgpt=",
+    "workspaceUrl = $workspaceUrl",
+  ]) {
+    if (!source.includes(marker)) fail(`${name} GPTWeb starter is missing fail-closed marker: ${marker}`);
+  }
+  if (source.includes("chatgptWorkspaceUrl = $chatgptWorkspaceUrl") || source.includes("webWorkspaceUrl = $webWorkspaceUrl")) {
+    fail(`${name} GPTWeb starter exposes an alternate private destination`);
   }
 }
 for (const pluginPath of [sourcePluginPath, compatibilityPluginPath]) {
@@ -246,6 +276,10 @@ for (const marker of ["[ValidateSet('legacy', 'popout', 'desktop-ui', 'web')]", 
 }
 if (canonicalStarter.includes("-File $connectionScript")) fail("the Desktop Bridge starter still launches a nested account-check process");
 if (canonicalConnector.includes("exit 0")) fail("the Desktop Bridge connector can still terminate its calling launcher process");
+for (const [name, connector] of [["canonical", canonicalConnector], ["compatibility", compatibilityConnector]]) {
+  if (connector.includes("#desktop=")) fail(`${name} connector still emits the legacy context-free browser route`);
+  if (!connector.includes("browserAuthorizationCompleted = $true")) fail(`${name} connector does not separate authorization from workspace launch`);
+}
 const canonicalWatcher = await readFile(join(sourcePluginPath, "skills", "cogentspec", "scripts", "watch-cogentstack-bridge.ps1"), "utf8");
 for (const marker of ["[string]$PluginId", "[string]$PluginVersion", "pluginVersion=$([Uri]::EscapeDataString($PluginVersion))"]) {
   if (!canonicalWatcher.includes(marker)) fail(`the Desktop Bridge watcher is missing version marker: ${marker}`);
@@ -304,5 +338,5 @@ console.log(JSON.stringify({
   installerBootstrap: "trusted-marketplace-v3",
   canonicalPlugin: "cogentspec",
   compatibilityPlugin: "cogentstack",
-  pluginFiles: actualPluginFiles.length,
+  pluginFiles: canonicalPluginFileCount,
 }));

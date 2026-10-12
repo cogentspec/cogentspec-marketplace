@@ -34,7 +34,6 @@ if ($null -eq ('System.Security.Cryptography.ProtectedData' -as [type])) {
 }
 
 $serviceUrl = 'https://cogentspec.com'
-$workspaceOrigin = 'https://cogentspec.app'
 $stateRoot = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'CogentSpec'
 $pendingPath = Join-Path $stateRoot 'desktop-authorization.json'
 $credentialPath = Join-Path $stateRoot 'desktop-credential.json'
@@ -303,11 +302,11 @@ if ([string]$result.status -ne 'authorized' -or -not $result.token -or -not $res
 Save-CogentSpecCredential $result
 Remove-Item -LiteralPath $pendingPath -Force
 
-$workspaceUrl = "$workspaceOrigin/stack?surface=$([Uri]::EscapeDataString($Surface))#desktop=$([Uri]::EscapeDataString([string]$result.browserCode))"
 Write-CompactJson ([ordered]@{
     status = 'authorized'
     email = [string]$result.subscriber.email
     plan = [string]$result.subscriber.plan
     replacedExistingDevice = [bool]$result.replacedExistingDevice
-    workspaceUrl = $workspaceUrl
+    browserAuthorizationCompleted = $true
+    userMessage = 'CogentSpec Desktop authorization is complete. Run the requested workspace command again.'
 })

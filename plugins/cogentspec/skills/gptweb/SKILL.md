@@ -5,10 +5,10 @@ description: Open the current isolated CogentSpec project through the ordinary w
 
 # Open the CogentSpec GPT web workspace
 
-Read `../cogentspec/SKILL.md` and follow its update, project-context, privacy, account, and connection requirements for **Connect the current AI project**, with these destination-specific changes only:
+Read `../cogentspec/SKILL.md` and follow its update, execution-permission, privacy, and account-error requirements. Do not run the generic connection flow. After any package refresh, use only the refreshed package's command-specific launcher:
 
-1. Invoke `../cogentspec/scripts/start-cogentstack-bridge.ps1 -ContextKey <resolved context> -Surface chatgpt -Experience web` exactly once.
-2. Require the normal ready contract and require `workspaceUrl` to be the private `webWorkspaceUrl` with the resolved `context`, `experience=web`, `open=web`, `nav`, and the private web handoff fragment. Do not expose either private URL in commentary or logs.
+1. Invoke `scripts/start-gptweb.ps1` exactly once from the invoking workspace. This is the sole GPTWeb entry point: it resolves the isolated context, starts or reuses Desktop Bridge with `-Experience web`, requests the web grant, and validates the complete handoff. Do not invoke `project-context.ps1`, `connect-cogentstack.ps1`, or `start-cogentstack-bridge.ps1` directly.
+2. Require its normal ready contract and its single private `workspaceUrl`, which must contain the resolved `context`, `experience=web`, `open=web`, `nav`, and `#desktop-web=` handoff. Treat `invalid_workspace_handoff` as a hard failure. Never construct, repair, or return a URL yourself, and never return a legacy `#desktop=` authorization route. Do not expose the private URL in commentary or logs.
 3. Do not apply the Popout-only `currentConversationConnected` gate, do not call the native Desktop browser-tab action, and do not return the generic recovery label. Return `workspaceUrl` exactly once as `[Open CogentSpec GPT web workspace](<URL>)`.
 4. Say: **CogentSpec GPT web workspace is ready. Open the link to continue.**
 

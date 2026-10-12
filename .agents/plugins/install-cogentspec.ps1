@@ -292,6 +292,7 @@ try {
         'skills/gptpop/SKILL.md',
         'skills/gptweb/agents/openai.yaml',
         'skills/gptweb/SKILL.md',
+        'skills/gptweb/scripts/start-gptweb.ps1',
         'skills/cogentspec/agents/openai.yaml',
         'skills/cogentspec/scripts/check-cogentspec-update.ps1',
         'skills/cogentspec/scripts/connect-cogentstack.ps1',
