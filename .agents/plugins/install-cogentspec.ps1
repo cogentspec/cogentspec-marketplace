@@ -332,6 +332,7 @@ try {
         'assets/logo.png',
         'skills/gptdesk/agents/openai.yaml',
         'skills/gptdesk/SKILL.md',
+        'skills/gptdesk/scripts/start-gptdesk.ps1',
         'skills/gptpop/agents/openai.yaml',
         'skills/gptpop/SKILL.md',
         'skills/gptweb/agents/openai.yaml',

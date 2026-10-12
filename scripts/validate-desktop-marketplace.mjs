@@ -232,12 +232,22 @@ for (const [name, source] of [["canonical", canonicalGptWebStarter], ["compatibi
 }
 for (const pluginPath of [sourcePluginPath, compatibilityPluginPath]) {
   const desktopCommandSkill = await readFile(join(pluginPath, "skills", "gptdesk", "SKILL.md"), "utf8");
+  if (!desktopCommandSkill.includes('scripts/start-gptdesk.ps1') || !desktopCommandSkill.includes('self-contained')) {
+    fail('GPTDesk must use its dedicated one-shot startup entrypoint');
+  }
   for (const marker of ['placement: "right"', "native two-column conversation/workspace split", "Omit `threadId` and `tabId`", "ensure-codex-sidebar-hidden.py", "--experience desktop-ui --ensure-split", "layoutVerified: true", "partial Desk result", "AFTER the native open"]) {
     if (!desktopCommandSkill.includes(marker)) fail(`gptdesk is missing native split marker: ${marker}`);
   }
   if (desktopCommandSkill.includes("Omit `threadId`, `tabId`, and `placement`")) {
     fail("gptdesk still opens an unplaced full-view browser tab");
   }
+}
+const deskStartPath = (pluginPath) => join(pluginPath, 'skills', 'gptdesk', 'scripts', 'start-gptdesk.ps1');
+const canonicalDeskStart = await readFile(deskStartPath(sourcePluginPath), 'utf8');
+const compatibilityDeskStart = await readFile(deskStartPath(compatibilityPluginPath), 'utf8');
+if (canonicalDeskStart !== compatibilityDeskStart) fail('GPTDesk startup supervisors must match across GPT packages');
+if (/SendInput|open_in_codex|ensure-codex-sidebar-hidden\.py/.test(canonicalDeskStart)) {
+  fail('GPTDesk startup must leave native opening and permitted UI checks to the host');
 }
 const canonicalSidebarHelper = await readFile(join(sourcePluginPath, "skills", "cogentspec", "scripts", "ensure-codex-sidebar-hidden.py"), "utf8");
 const compatibilitySidebarHelper = await readFile(join(compatibilityPluginPath, "skills", "cogentstack", "scripts", "ensure-codex-sidebar-hidden.py"), "utf8");
