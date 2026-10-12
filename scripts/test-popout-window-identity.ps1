@@ -95,10 +95,16 @@ $mockRoot|Add-Member ScriptMethod FindAll {param($scope,$condition) $this.Calls+
 function Field($name,$enabled=$true,$focusable=$true){[pscustomobject]@{Current=[pscustomobject]@{Name=$name;IsEnabled=$enabled;IsKeyboardFocusable=$focusable}}}
 foreach($case in @(
  @{fields=@((Field (' '+[char]0x200B+'Do anything ')));expected=1},
+ @{fields=@((Field 'Work with Codex'));expected=1},
+ @{fields=@((Field (' '+[char]0x200B+'Work with Codex ')));expected=1},
  @{fields=@((Field 'Private draft text'));expected=0},
+ @{fields=@((Field 'Work with Codex unrelated field'));expected=0},
+ @{fields=@((Field 'Work with Codex' $false));expected=0},
+ @{fields=@((Field 'Work with Codex' $true $false));expected=0},
  @{fields=@((Field 'Do anything' $false));expected=0},
  @{fields=@((Field 'Do anything' $true $false));expected=0},
- @{fields=@((Field 'Do anything'),(Field 'Work with ChatGPT'));expected=2}
+ @{fields=@((Field 'Do anything'),(Field 'Work with ChatGPT'));expected=2},
+ @{fields=@((Field 'Work with Codex'),(Field 'Work with Codex'));expected=2}
 )) {
  $mockRoot.Calls=0;$mockRoot.Exact=@();$mockRoot.Fallback=$case.fields
  $matches=@(Get-ChatGptComposerMatches $mockRoot 1234)
@@ -106,6 +112,10 @@ foreach($case in @(
 }
 $mockRoot.Calls=0;$mockRoot.Exact=@((Field 'Do anything'));$mockRoot.Fallback=@()
 if(@(Get-ChatGptComposerMatches $mockRoot 1234).Count -ne 1 -or $mockRoot.Calls -ne 1){throw 'Exact ready composer unnecessarily rescanned'}
+$conditionNames = @((Get-ChatGptComposerCondition).GetConditions() | ForEach-Object { $_.Value })
+if($conditionNames -notcontains 'Work with Codex'){throw 'Provider-side exact-name query omitted the Codex composer'}
+$mockRoot.Calls=0;$mockRoot.Exact=@((Field 'Work with Codex'));$mockRoot.Fallback=@()
+if(@(Get-ChatGptComposerMatches $mockRoot 1234).Count -ne 1 -or $mockRoot.Calls -ne 1){throw 'Exact Codex composer missed the fast path'}
 
 # Execute production window evidence ordering. A verified dismiss control must
 # bypass even a broken/slow composer provider, without weakening the fallback.

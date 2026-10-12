@@ -395,6 +395,7 @@ $legacyUrl = "https://cogentspec.app/stack?surface=chatgpt&experience=web#deskto
     $popupHelperText = Get-Content -Raw -LiteralPath (Join-Path $repositoryRoot 'plugins\cogentspec\skills\cogentspec\scripts\open-chatgpt-popup.ps1')
     Assert-BridgeLauncherTest ($popupHelperText.Contains('Add-Type -AssemblyName UIAutomationClient')) 'The ChatGPT popout helper does not use the accessible composer surface.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains('function Test-IsChatGptComposer')) 'The ChatGPT popout helper does not centralize the verified composer identities.'
+    Assert-BridgeLauncherTest ([regex]::Matches($popupHelperText, "'Work with Codex'").Count -eq 3) 'The Codex composer is missing from a Popout detection boundary.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains("'Work with ChatGPT', 'Ask ChatGPT anything locally', 'Ask ChatGPT anything'")) 'The ChatGPT popout helper does not recognize project and standalone composers.'
     Assert-BridgeLauncherTest ($popupHelperText.Contains('[System.Windows.Automation.ValuePattern]::Pattern')) 'The ChatGPT popout helper does not inspect whether an existing draft must be preserved.'
     Assert-BridgeLauncherTest (-not $popupHelperText.Contains('$valuePattern.SetValue(')) 'The ChatGPT popout helper can still insert text into the composer.'

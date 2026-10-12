@@ -77,7 +77,7 @@ function Write-Failure(
 function Test-IsChatGptComposer($Element) {
     if ($null -eq $Element) { return $false }
     $name = (([string]$Element.Current.Name) -replace '[\u200B-\u200D\uFEFF]', '').Trim()
-    return $name -in @('Work with ChatGPT', 'Ask ChatGPT anything locally', 'Ask ChatGPT anything', 'Do anything') -and
+    return $name -in @('Work with ChatGPT', 'Ask ChatGPT anything locally', 'Ask ChatGPT anything', 'Do anything', 'Work with Codex') -and
         $Element.Current.IsEnabled -and $Element.Current.IsKeyboardFocusable
 }
 
@@ -89,7 +89,7 @@ function Get-ChatGptComposerCondition {
     # Filter in the UIA provider. Fetching every descendant and reading each
     # node's Name/IsEnabled/focusability across processes can exceed the
     # connection deadline while a long conversation is rendering.
-    $names = @('Work with ChatGPT', 'Ask ChatGPT anything locally', 'Ask ChatGPT anything', 'Do anything')
+    $names = @('Work with ChatGPT', 'Ask ChatGPT anything locally', 'Ask ChatGPT anything', 'Do anything', 'Work with Codex')
     $conditions = [System.Windows.Automation.Condition[]]@($names | ForEach-Object {
         [System.Windows.Automation.PropertyCondition]::new(
             [System.Windows.Automation.AutomationElement]::NameProperty, $_
@@ -822,7 +822,7 @@ function Test-ChatGptPopupSpecificComposer([bool]$IsMainWindow, [string]$Compose
     # The verified native tool-window boundary, not an obsolete placeholder,
     # distinguishes them. Main app windows still require the dismiss control.
     return -not $IsMainWindow -and $ComposerName -in @(
-        'Work with ChatGPT', 'Ask ChatGPT anything locally', 'Ask ChatGPT anything', 'Do anything'
+        'Work with ChatGPT', 'Ask ChatGPT anything locally', 'Ask ChatGPT anything', 'Do anything', 'Work with Codex'
     )
 }
 

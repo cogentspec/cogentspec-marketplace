@@ -21,12 +21,12 @@ foreach($case in @(
  $d=Resolve-ChatGptPopupDiscovery $case.rows
  if($d.state -ne $case.state -or (Get-ChatGptPopupStartupDecision $d.state $false) -ne $case.decision){throw 'Evidence classification failed'}
 }
-foreach($name in @('Work with ChatGPT','Ask ChatGPT anything locally','Ask ChatGPT anything','Do anything')) {
+foreach($name in @('Work with ChatGPT','Ask ChatGPT anything locally','Ask ChatGPT anything','Do anything','Work with Codex')) {
  if(!(Test-ChatGptPopupSpecificComposer $false $name)){throw "Unpinned standalone composer rejected: $name"}
  if(Test-ChatGptPopupSpecificComposer $true $name){throw "Main Desktop composer mistaken for Popout: $name"}
 }
 if(Test-ChatGptPopupSpecificComposer $false 'Unrelated editor'){throw 'Unknown composer accepted'}
-Write-Output 'PASS: all four composer variants, with main-window and unrelated-window rejection.'
+Write-Output 'PASS: all five composer variants, with main-window and unrelated-window rejection.'
 # Sanitized replay of the uploaded 2026-10-07 capture. No native UI is read.
 $captured=@(
  @{window=1246424;strict=$false;popupSpecific=$false;visible=$true;isMainWindow=$true;inspectionSucceeded=$true},
