@@ -37,7 +37,7 @@ class FakeBackend:
         return self.invoke_result
 
     def read_state(self, _candidate: object) -> str:
-        return self.verified_state
+        return self.verified_state if self.invocations and self.invoke_result else self.states[0]
 
 
 class SidebarStateTests(unittest.TestCase):
@@ -82,6 +82,11 @@ class FakeLayoutBackend(FakeBackend):
         self.sidebar_after_layout = sidebar_after_layout
         self.layout_actions: list[str] = []
 
+    def read_state(self, candidate: object) -> str:
+        if self.layout_actions and self.layout_invoke:
+            return self.sidebar_after_layout
+        return super().read_state(candidate)
+
     def read_layout(self, _candidate: object) -> tuple[str, str | None]:
         return self.layout, {"full": "Enter split view", "hidden_tabs": "Show tabs"}.get(self.layout)
 
@@ -119,16 +124,90 @@ class DeskLayoutTests(unittest.TestCase):
         backend = FakeLayoutBackend("unknown")
         with patch.object(MODULE.time, "sleep"), patch.object(MODULE.time, "monotonic", side_effect=[0, 0, 1]):
             status, details = MODULE.ensure_desk_layout(backend, 0)
-        self.assertEqual(status, "unavailable")
+        self.assertEqual(status, "failed")
+        self.assertEqual(details["splitStatus"], "unavailable")
         self.assertFalse(details["layoutVerified"])
         self.assertEqual(backend.layout_actions, [])
 
-    def test_failed_sidebar_does_not_change_layout(self) -> None:
-        backend = FakeLayoutBackend(states=["open"], invoke_result=False)
+    def test_failed_sidebar_still_repairs_split_and_reports_partial(self) -> None:
+        backend = FakeLayoutBackend(states=["open"], invoke_result=False, sidebar_after_layout="open")
         status, details = MODULE.ensure_desk_layout(backend, 0)
         self.assertEqual(status, "failed")
         self.assertFalse(details["layoutVerified"])
-        self.assertEqual(backend.layout_actions, [])
+        self.assertEqual(backend.layout_actions, ["Enter split view"])
+        self.assertTrue(details["splitVerified"])
+        self.assertFalse(details["sidebarVerified"])
+        self.assertEqual(details["sidebarStatus"], "failed")
+
+    def test_both_failures_are_kept_separate(self) -> None:
+        backend = FakeLayoutBackend(states=["open"], invoke_result=False, layout_invoke=False)
+        status, details = MODULE.ensure_desk_layout(backend, 0)
+        self.assertEqual(status, "failed")
+        self.assertEqual(details["sidebarResult"]["reason"], "sidebar_control_failed")
+        self.assertEqual(details["splitResult"]["reason"], "layout_control_failed")
+        self.assertFalse(details["sidebarVerified"])
+        self.assertFalse(details["splitVerified"])
+
+    def test_sidebar_state_timeout_does_not_skip_split(self) -> None:
+        backend = FakeLayoutBackend(states=["open"], verified_state="open", sidebar_after_layout="open")
+        status, details = MODULE.ensure_desk_layout(backend, 0)
+        self.assertEqual(status, "failed")
+        self.assertEqual(details["sidebarResult"]["reason"], "sidebar_state_unchanged")
+        self.assertEqual(backend.layout_actions, ["Enter split view"])
+
+    def test_sidebar_exception_does_not_skip_split(self) -> None:
+        backend = FakeLayoutBackend(sidebar_after_layout="open")
+        original = backend.read_state
+        with patch.object(backend, "read_state", side_effect=[RuntimeError("fixture"), "open"]):
+            status, details = MODULE.ensure_desk_layout(backend, 0)
+        self.assertEqual(status, "failed")
+        self.assertEqual(details["sidebarResult"]["reason"], "sidebar_inspection_failed")
+        self.assertEqual(backend.layout_actions, ["Enter split view"])
+        self.assertEqual(original(MODULE.SidebarCandidate(100, "open", 0)), "open")
+
+    def test_layout_exception_does_not_discard_sidebar_result(self) -> None:
+        backend = FakeLayoutBackend()
+        with patch.object(backend, "read_layout", side_effect=RuntimeError("fixture")):
+            status, details = MODULE.ensure_desk_layout(backend, 0)
+        self.assertEqual(status, "failed")
+        self.assertEqual(details["sidebarStatus"], "already_hidden")
+        self.assertEqual(details["splitResult"]["reason"], "layout_inspection_failed")
+
+    def test_operations_keep_one_selected_window(self) -> None:
+        backend = FakeLayoutBackend()
+        with patch.object(backend, "find_candidates", wraps=backend.find_candidates) as find:
+            MODULE.ensure_desk_layout(backend, 0)
+        find.assert_called_once()
+
+    def test_read_only_probe_never_attempts_actions(self) -> None:
+        backend = FakeLayoutBackend(states=["open"])
+        with patch.object(backend, "invoke_hide", side_effect=AssertionError("input attempted")), \
+                patch.object(backend, "invoke_layout", side_effect=AssertionError("input attempted")), \
+                patch.object(backend, "probe_named", create=True,
+                             return_value={"reason": "pattern_not_supported", "hresult": "0x80040204"}) as probe:
+            status, details = MODULE.inspect_desk_layout(backend, 0)
+        self.assertEqual(status, "inspected")
+        self.assertTrue(details["readOnly"])
+        self.assertFalse(details["inputSent"])
+        self.assertFalse(details["layoutVerified"])
+        self.assertEqual([call.args[1] for call in probe.call_args_list], ["Hide sidebar", "Enter split view"])
+
+    def test_hresult_reasons_distinguish_control_failures(self) -> None:
+        for code, reason in [(0x80040204, "pattern_not_supported"), (0x80004002, "pattern_not_supported"),
+                             (0x80040201, "element_unavailable"), (0x80040200, "element_disabled"),
+                             (0x80070005, "access_denied"), (0x80131505, "uia_timeout"),
+                             (0x80004005, "invoke_failed")]:
+            with self.subTest(code=code):
+                details = MODULE.hresult_details("invoke", ctypes.c_int32(code).value)
+                self.assertEqual(details["reason"], reason)
+                self.assertEqual(details["hresult"], f"0x{code:08X}")
+
+    def test_read_only_mode_requires_desk_destination_before_ui(self) -> None:
+        for args in [[], ["--experience", "web"], ["--experience", "popout"]]:
+            process = subprocess.run([sys.executable, str(HELPER), "--inspect-only", *args],
+                                     capture_output=True, text=True, check=False)
+            self.assertEqual(process.returncode, 4)
+            self.assertFalse(json.loads(process.stdout)["layoutVerified"])
 
     def test_multiple_windows_do_not_change_layout(self) -> None:
         backend = FakeLayoutBackend(states=["open", "hidden"])
@@ -209,6 +288,24 @@ class WindowsControlTests(unittest.TestCase):
     def test_variant_has_correct_windows_abi_size(self) -> None:
         self.assertEqual(ctypes.sizeof(MODULE.VARIANT), 24 if ctypes.sizeof(ctypes.c_void_p) == 8 else 16)
 
+    def test_property_failure_preserves_hresult(self) -> None:
+        backend = self.backend()
+        with patch.object(MODULE, "com_method", return_value=lambda *_: ctypes.c_int32(0x80070005).value):
+            self.assertIsNone(backend._bool_property(ctypes.c_void_p(13), 30010))
+        self.assertEqual(backend.last_property_result["reason"], "access_denied")
+        self.assertEqual(backend.last_property_result["hresult"], "0x80070005")
+
+    def test_property_boolean_is_decoded_without_ui_input(self) -> None:
+        backend = self.backend()
+        def get_property(_element: object, _property: int, pointer: object) -> int:
+            value = ctypes.cast(pointer, ctypes.POINTER(MODULE.VARIANT)).contents
+            value.vt = 11
+            value.boolVal = -1
+            return 0
+        with patch.object(MODULE, "com_method", return_value=get_property):
+            self.assertTrue(backend._bool_property(ctypes.c_void_p(13), 30010))
+        self.assertEqual(backend.last_property_result["variantType"], 11)
+
     def find_control(self, offscreen: list[bool | None]) -> object:
         backend = self.backend()
         backend.automation = ctypes.c_void_p(20)
@@ -281,6 +378,60 @@ class WindowsControlTests(unittest.TestCase):
                 patch.object(MODULE, "com_method", return_value=lambda *_: -1) as method, patch.object(MODULE, "release"):
             self.assertFalse(backend.invoke_named(MODULE.SidebarCandidate(1, "open", 10), "Hide sidebar"))
             method.assert_called_once()
+
+    def test_control_not_found_has_specific_reason(self) -> None:
+        backend = self.backend()
+        with patch.object(backend, "_named_element", return_value=None), patch.object(MODULE, "com_method") as method:
+            self.assertFalse(backend.invoke_named(MODULE.SidebarCandidate(1, "open", 10), "Hide sidebar"))
+        self.assertEqual(backend.last_control_result["reason"], "control_not_found")
+        method.assert_not_called()
+
+    def test_unreadable_enabled_state_is_distinct_from_disabled(self) -> None:
+        backend = self.backend()
+        with patch.object(backend, "_named_element", return_value=ctypes.c_void_p(13)), \
+                patch.object(backend, "_bool_property", return_value=None), patch.object(MODULE, "release"):
+            self.assertFalse(backend.invoke_named(MODULE.SidebarCandidate(1, "open", 10), "Hide sidebar"))
+        self.assertEqual(backend.last_control_result["reason"], "enabled_state_unreadable")
+
+    def test_provider_rejection_records_hresult(self) -> None:
+        backend = self.backend()
+        with patch.object(backend, "_named_element", return_value=ctypes.c_void_p(13)), \
+                patch.object(backend, "_bool_property", return_value=True), \
+                patch.object(MODULE, "com_method", return_value=lambda *_: ctypes.c_int32(0x80040204).value), \
+                patch.object(MODULE, "release"):
+            self.assertFalse(backend.invoke_named(MODULE.SidebarCandidate(1, "open", 10), "Hide sidebar"))
+        self.assertEqual(backend.last_control_result["reason"], "pattern_not_supported")
+        self.assertEqual(backend.last_control_result["stage"], "pattern_lookup")
+        self.assertEqual(backend.last_control_result["hresult"], "0x80040204")
+
+    def test_null_pattern_is_not_misreported_as_accepted(self) -> None:
+        backend = self.backend()
+        with patch.object(backend, "_named_element", return_value=ctypes.c_void_p(13)), \
+                patch.object(backend, "_bool_property", return_value=True), \
+                patch.object(MODULE, "com_method", return_value=lambda *_: 0), patch.object(MODULE, "release"):
+            self.assertFalse(backend.invoke_named(MODULE.SidebarCandidate(1, "open", 10), "Hide sidebar"))
+        self.assertEqual(backend.last_control_result["reason"], "pattern_unavailable")
+        self.assertFalse(backend.last_control_result["actionAccepted"])
+
+    def test_probe_queries_pattern_without_invoking_it(self) -> None:
+        backend = self.backend()
+        calls = []
+
+        def method(_pointer: object, slot: int, *_types: object) -> object:
+            self.assertEqual(slot, 14)
+            calls.append(slot)
+            def get_pattern(_control: object, _pattern_id: int, _iid: object, pointer: object) -> int:
+                ctypes.cast(pointer, ctypes.POINTER(ctypes.c_void_p))[0] = ctypes.c_void_p(12)
+                return 0
+            return get_pattern
+
+        with patch.object(backend, "_named_element", return_value=ctypes.c_void_p(13)), \
+                patch.object(backend, "_bool_property", return_value=True), \
+                patch.object(MODULE, "com_method", side_effect=method), patch.object(MODULE, "release"):
+            details = backend.probe_named(MODULE.SidebarCandidate(1, "open", 10), "Hide sidebar")
+        self.assertTrue(details["invokePatternAvailable"])
+        self.assertFalse(details["actionAccepted"])
+        self.assertEqual(calls, [14])
 
     def test_sidebar_state_rechecked_before_action(self) -> None:
         backend = self.backend()

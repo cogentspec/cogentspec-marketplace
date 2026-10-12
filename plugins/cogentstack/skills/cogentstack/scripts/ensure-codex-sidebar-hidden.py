@@ -19,6 +19,7 @@ EXIT_CODES = {
     "ambiguous": 3,
     "failed": 4,
     "layout_verified": 0,
+    "inspected": 0,
 }
 
 
@@ -51,42 +52,73 @@ def layout_state_from_controls(names: set[str]) -> tuple[str, str | None]:
     return "unknown", None
 
 
-def ensure_desk_layout(backend: object, timeout_ms: int) -> tuple[str, dict[str, object]]:
-    """After the one native open, repair one uniquely identified Desk window."""
-    status, details = ensure_sidebar_hidden(backend, timeout_ms)
-    if status not in {"hidden", "already_hidden"}:
-        return status, {**details, "layoutVerified": False, "sidebarStatus": status}
-    candidate = backend.selected_candidate
+def action_details(backend: object) -> dict[str, object]:
+    return dict(getattr(backend, "last_control_result", {}))
+
+
+def ensure_split_view(backend: object, candidate: SidebarCandidate, timeout_ms: int) -> dict[str, object]:
+    """A sidebar failure must not prevent an independent, fresh layout check."""
     deadline = time.monotonic() + max(0.5, timeout_ms / 1000)
     state, action = backend.read_layout(candidate)
     while state == "unknown" and time.monotonic() < deadline:
         time.sleep(0.1)
         state, action = backend.read_layout(candidate)
     if state == "unknown":
-        return "unavailable", {**details, "layoutVerified": False, "sidebarStatus": status,
-                               "message": "The host workspace layout could not be identified; no layout action was sent."}
+        return {"status": "unavailable", "reason": "layout_state_unknown", "actionAttempted": False,
+                "message": "The host workspace layout could not be identified; no layout action was sent."}
+    if state == "split":
+        return {"status": "already_split", "actionAttempted": False}
     if state != "split":
         if not backend.invoke_layout(candidate, action):
-            return "failed", {**details, "layoutVerified": False, "sidebarStatus": status,
-                              "message": "The explicit split-view control could not be invoked."}
+            return {"status": "failed", "reason": "layout_control_failed", "actionAttempted": True,
+                    "controlResult": action_details(backend),
+                    "message": "The explicit split-view control could not be invoked."}
+        control_result = action_details(backend)
         deadline = time.monotonic() + max(0.5, timeout_ms / 1000)
         while time.monotonic() < deadline:
             time.sleep(0.1)
             state, _action = backend.read_layout(candidate)
             if state == "split":
                 break
+        if state == "split":
+            return {"status": "split", "actionAttempted": True, "controlResult": control_result}
+        return {"status": "failed", "reason": "layout_state_unchanged", "actionAttempted": True,
+                "controlResult": control_result, "workspaceLayout": state}
+
+
+def ensure_desk_layout(backend: object, timeout_ms: int) -> tuple[str, dict[str, object]]:
+    """Select once, attempt independently, and verify both states together."""
+    status, candidate, details = select_candidate(backend, timeout_ms)
+    if candidate is None:
+        return status, {**details, "layoutVerified": False, "sidebarStatus": "not_attempted", "splitStatus": "not_attempted"}
+    try:
+        sidebar_status, sidebar_details = hide_sidebar(backend, candidate, timeout_ms)
+    except Exception as error:
+        sidebar_status, sidebar_details = "failed", {"reason": "sidebar_inspection_failed", "errorType": type(error).__name__}
+    try:
+        split_details = ensure_split_view(backend, candidate, timeout_ms)
+    except Exception as error:
+        split_details = {"status": "failed", "reason": "layout_inspection_failed", "errorType": type(error).__name__}
     # Recheck BOTH states after the final action; acceptance alone is not proof.
-    state, _action = backend.read_layout(candidate)
-    sidebar = backend.read_state(candidate)
+    try:
+        state, _action = backend.read_layout(candidate)
+    except Exception:
+        state = "unknown"
+    try:
+        sidebar = backend.read_state(candidate)
+    except Exception:
+        sidebar = "unknown"
+    details.update({"sidebarStatus": sidebar_status, "splitStatus": split_details["status"],
+                    "sidebarResult": sidebar_details, "splitResult": split_details,
+                    "sidebarState": sidebar, "workspaceLayout": state,
+                    "sidebarVerified": sidebar == "hidden", "splitVerified": state == "split"})
     if state == "split" and sidebar == "hidden":
-        return "layout_verified", {**details, "layoutVerified": True,
-                                   "sidebarStatus": status, "sidebarState": sidebar, "workspaceLayout": state}
-    return "failed", {**details, "layoutVerified": False, "sidebarStatus": status,
-                      "sidebarState": sidebar, "workspaceLayout": state,
-                      "message": "The host did not verify split view with the sidebar hidden after the action."}
+        return "layout_verified", {**details, "layoutVerified": True}
+    return "failed", {**details, "layoutVerified": False,
+                      "message": "Desk layout is partial; see the independent sidebarResult and splitResult."}
 
 
-def ensure_sidebar_hidden(backend: object, timeout_ms: int) -> tuple[str, dict[str, object]]:
+def select_candidate(backend: object, timeout_ms: int) -> tuple[str, SidebarCandidate | None, dict[str, object]]:
     deadline = time.monotonic() + (timeout_ms / 1000)
     candidates: list[SidebarCandidate] = []
     while True:
@@ -98,32 +130,73 @@ def ensure_sidebar_hidden(backend: object, timeout_ms: int) -> tuple[str, dict[s
         time.sleep(0.1)
 
     if not candidates:
-        return "unavailable", {"message": "No accessible Codex window with an explicit sidebar state was found."}
+        return "unavailable", None, {"reason": "window_unavailable", "message": "No accessible Codex window with an explicit sidebar state was found."}
     if len(candidates) > 1:
-        return "ambiguous", {
+        return "ambiguous", None, {
+            "reason": "window_ambiguous",
             "message": "More than one accessible Codex window exposes a sidebar state.",
             "candidateCount": len(candidates),
         }
 
     candidate = candidates[0]
     backend.selected_candidate = candidate
-    if candidate.state == "hidden":
-        return "already_hidden", {"processId": candidate.process_id}
-    if candidate.state != "open" or not backend.invoke_hide(candidate):
+    return "selected", candidate, {"processId": candidate.process_id}
+
+
+def hide_sidebar(backend: object, candidate: SidebarCandidate, timeout_ms: int) -> tuple[str, dict[str, object]]:
+    state = backend.read_state(candidate)
+    if state == "hidden":
+        return "already_hidden", {"processId": candidate.process_id, "actionAttempted": False}
+    if state != "open":
+        return "failed", {"reason": "sidebar_state_unknown", "actionAttempted": False}
+    if not backend.invoke_hide(candidate):
         return "failed", {
+            "reason": "sidebar_control_failed", "actionAttempted": True,
+            "controlResult": action_details(backend),
             "message": "The open Codex sidebar could not be closed through its accessibility control.",
             "processId": candidate.process_id,
         }
-
+    control_result = action_details(backend)
     verify_deadline = time.monotonic() + max(0.5, timeout_ms / 1000)
     while time.monotonic() < verify_deadline:
         time.sleep(0.1)
         if backend.read_state(candidate) == "hidden":
-            return "hidden", {"processId": candidate.process_id}
+            return "hidden", {"processId": candidate.process_id, "actionAttempted": True, "controlResult": control_result}
     return "failed", {
+        "reason": "sidebar_state_unchanged", "actionAttempted": True, "controlResult": control_result,
         "message": "The Codex sidebar did not report a closed state after the close action.",
         "processId": candidate.process_id,
     }
+
+
+def ensure_sidebar_hidden(backend: object, timeout_ms: int) -> tuple[str, dict[str, object]]:
+    status, candidate, details = select_candidate(backend, timeout_ms)
+    if candidate is None:
+        return status, details
+    return hide_sidebar(backend, candidate, timeout_ms)
+
+
+def inspect_desk_layout(backend: object, timeout_ms: int) -> tuple[str, dict[str, object]]:
+    """Read-only diagnostics: no Invoke, key input, focus, or window changes."""
+    status, candidate, details = select_candidate(backend, timeout_ms)
+    result = {**details, "readOnly": True, "inputSent": False, "layoutVerified": False}
+    if candidate is None:
+        return status, result
+    sidebar = backend.read_state(candidate)
+    state, action = backend.read_layout(candidate)
+    result.update({"sidebarState": sidebar, "workspaceLayout": state,
+                   "controls": {"sidebar": backend.probe_named(candidate, "Hide sidebar") if sidebar == "open" else {"reason": "not_needed"},
+                                "split": backend.probe_named(candidate, action) if action else {"reason": "not_needed"}}})
+    return "inspected", result
+
+
+def hresult_details(stage: str, value: int) -> dict[str, object]:
+    code = value & 0xFFFFFFFF
+    reasons = {0x80040204: "pattern_not_supported", 0x80004002: "pattern_not_supported",
+               0x80040201: "element_unavailable", 0x80040200: "element_disabled",
+               0x80131509: "invalid_operation", 0x80131505: "uia_timeout", 0x80070005: "access_denied"}
+    return {"stage": stage, "hresult": f"0x{code:08X}",
+            "reason": reasons.get(code, f"{stage}_failed") if code & 0x80000000 else "accepted"}
 
 
 if os.name == "nt":
@@ -251,14 +324,16 @@ if os.name == "nt":
             if self._uninitialize:
                 ole32.CoUninitialize()
 
-        @staticmethod
-        def _bool_property(element: ctypes.c_void_p, property_id: int) -> bool | None:
+        def _bool_property(self, element: ctypes.c_void_p, property_id: int) -> bool | None:
             value = VARIANT()
             get_value = com_method(element, 10, ctypes.c_int, ctypes.POINTER(VARIANT))
             result = get_value(element, property_id, ctypes.byref(value))
+            self.last_property_result = {"propertyId": property_id, "variantType": value.vt,
+                                         **hresult_details("property_read", result)}
             return bool(value.boolVal) if succeeded(result) and value.vt == VT_BOOL else None
 
         def _named_element(self, root: ctypes.c_void_p, name: str, *, require_unique: bool = True) -> ctypes.c_void_p | None:
+            self.last_search_result = {"stage": "control_lookup", "control": name, "reason": "control_not_found"}
             allocated = oleaut32.SysAllocString(name)
             condition = ctypes.c_void_p()
             found = ctypes.c_void_p()
@@ -273,6 +348,9 @@ if os.name == "nt":
                 )
                 result = create(self.automation, UIA_NAME_PROPERTY_ID, value, ctypes.byref(condition))
                 if not succeeded(result) or not condition.value:
+                    self.last_search_result.update(hresult_details("search_condition", result))
+                    if succeeded(result):
+                        self.last_search_result["reason"] = "search_condition_unavailable"
                     return None
                 find_all = com_method(
                     root,
@@ -283,10 +361,15 @@ if os.name == "nt":
                 )
                 result = find_all(root, TREE_SCOPE_DESCENDANTS, condition, ctypes.byref(found))
                 if not succeeded(result) or not found.value:
+                    self.last_search_result.update(hresult_details("control_search", result))
+                    if succeeded(result):
+                        self.last_search_result["reason"] = "search_results_unavailable"
                     return None
                 length = ctypes.c_int()
                 get_length = com_method(found, 3, ctypes.POINTER(ctypes.c_int))
-                if not succeeded(get_length(found, ctypes.byref(length))):
+                result = get_length(found, ctypes.byref(length))
+                if not succeeded(result):
+                    self.last_search_result.update(hresult_details("search_results", result))
                     return None
                 get_element = com_method(found, 4, ctypes.c_int, ctypes.POINTER(ctypes.c_void_p))
                 match = None
@@ -296,18 +379,25 @@ if os.name == "nt":
                         continue
                     control_type = ctypes.c_int()
                     get_control_type = com_method(element, 21, ctypes.POINTER(ctypes.c_int))
-                    if (succeeded(get_control_type(element, ctypes.byref(control_type)))
-                            and control_type.value == UIA_BUTTON_CONTROL_TYPE_ID
-                            and self._bool_property(element, UIA_IS_OFFSCREEN_PROPERTY_ID) is False):
+                    button = succeeded(get_control_type(element, ctypes.byref(control_type))) and control_type.value == UIA_BUTTON_CONTROL_TYPE_ID
+                    visible = self._bool_property(element, UIA_IS_OFFSCREEN_PROPERTY_ID) if button else None
+                    if button and visible is False:
                         if not require_unique:
+                            self.last_search_result["reason"] = "found"
                             return element
                         if match is not None:
                             release(match)
                             release(element)
+                            self.last_search_result["reason"] = "control_ambiguous"
                             return None  # Never pick the first of conflicting controls.
                         match = element
                         continue
+                    if button:
+                        self.last_search_result.update({"reason": "control_offscreen" if visible is True else "visibility_state_unreadable",
+                                                        "propertyResult": dict(getattr(self, "last_property_result", {}))})
                     release(element)
+                if match is not None:
+                    self.last_search_result["reason"] = "found"
                 return match
             finally:
                 release(found)
@@ -395,30 +485,68 @@ if os.name == "nt":
                 release(hide)
                 release(show)
 
-        def invoke_named(self, candidate: SidebarCandidate, name: str) -> bool:
+        def _prepare_control(self, candidate: SidebarCandidate, name: str) -> tuple[ctypes.c_void_p | None, ctypes.c_void_p | None]:
+            """Resolve one enabled control and its pattern; never invoke here."""
+            self.last_control_result = {"control": name, "stage": "window_lookup", "reason": "window_unavailable", "actionAccepted": False}
             root = self._roots.get(int(candidate.token))
             if root is None:
-                return False
+                return None, None
             control = self._named_element(root, name)
             if control is None:
-                return False
+                self.last_control_result.update(getattr(self, "last_search_result", {"stage": "control_lookup", "reason": "control_not_found"}))
+                return None, None
             pattern = ctypes.c_void_p()
             try:
-                if self._bool_property(control, UIA_IS_ENABLED_PROPERTY_ID) is not True:
-                    return False
-                # Invoke the identified control, not a global key chord. No focus stealing.
+                enabled = self._bool_property(control, UIA_IS_ENABLED_PROPERTY_ID)
+                if enabled is not True:
+                    self.last_control_result.update({"stage": "enabled_check", "reason": "element_disabled" if enabled is False else "enabled_state_unreadable"})
+                    self.last_control_result["propertyResult"] = dict(getattr(self, "last_property_result", {}))
+                    release(control)
+                    return None, None
                 get_pattern = com_method(control, 14, ctypes.c_int, ctypes.POINTER(GUID), ctypes.POINTER(ctypes.c_void_p))
                 result = get_pattern(control, UIA_INVOKE_PATTERN_ID,
                                      ctypes.byref(IID_IUIAUTOMATION_INVOKE_PATTERN), ctypes.byref(pattern))
+                self.last_control_result.update(hresult_details("pattern_lookup", result))
                 if not succeeded(result) or not pattern.value:
-                    return False
-                return succeeded(com_method(pattern, 3)(pattern))
+                    if succeeded(result):
+                        self.last_control_result["reason"] = "pattern_unavailable"
+                    release(pattern)
+                    release(control)
+                    return None, None
+                return control, pattern
+            except Exception as error:
+                self.last_control_result.update({"reason": "control_inspection_exception", "errorType": type(error).__name__})
+                release(pattern)
+                release(control)
+                return None, None
+
+        def probe_named(self, candidate: SidebarCandidate, name: str) -> dict[str, object]:
+            control, pattern = self._prepare_control(candidate, name)
+            try:
+                return {**self.last_control_result, "invokePatternAvailable": pattern is not None, "actionAccepted": False}
+            finally:
+                release(pattern)
+                release(control)
+
+        def invoke_named(self, candidate: SidebarCandidate, name: str) -> bool:
+            control, pattern = self._prepare_control(candidate, name)
+            if pattern is None:
+                return False
+            try:
+                result = com_method(pattern, 3)(pattern)
+                self.last_control_result.update(hresult_details("invoke", result))
+                self.last_control_result["actionAccepted"] = succeeded(result)
+                return succeeded(result)
+            except Exception as error:
+                self.last_control_result.update({"stage": "invoke", "reason": "invoke_exception", "errorType": type(error).__name__})
+                return False
             finally:
                 release(pattern)
                 release(control)
 
         def invoke_hide(self, candidate: SidebarCandidate) -> bool:
             if self.read_state(candidate) != "open":
+                self.last_control_result = {"stage": "state_recheck", "reason": "sidebar_state_changed", "actionAccepted": False}
                 return False
             return self.invoke_named(candidate, "Hide sidebar")
 
@@ -438,6 +566,7 @@ if os.name == "nt":
         def invoke_layout(self, candidate: SidebarCandidate, action: str | None) -> bool:
             state, current_action = self.read_layout(candidate)
             if state not in {"full", "hidden_tabs"} or action != current_action or action is None:
+                self.last_control_result = {"stage": "state_recheck", "reason": "layout_state_changed", "actionAccepted": False}
                 return False
             return self.invoke_named(candidate, action)
 
@@ -447,10 +576,11 @@ def main() -> int:
     parser.add_argument("--timeout-ms", type=int, default=3000)
     parser.add_argument("--ensure-split", action="store_true", help="GPTDesk only: verify hidden sidebar and split view after native open")
     parser.add_argument("--experience", choices=("desktop-ui", "popout", "web"))
+    parser.add_argument("--inspect-only", action="store_true", help="Read Desk control capabilities without any UI actions")
     args = parser.parse_args()
     if args.timeout_ms < 0 or args.timeout_ms > 10000:
         return emit("failed", message="--timeout-ms must be between 0 and 10000.")
-    if args.experience in {"popout", "web"} or (args.ensure_split and args.experience != "desktop-ui"):
+    if args.experience in {"popout", "web"} or ((args.ensure_split or args.inspect_only) and args.experience != "desktop-ui"):
         return emit("failed", layoutVerified=False, message="Split-view repair requires the explicit desktop-ui destination.")
     if os.name != "nt":
         return emit("unavailable", message="The Codex sidebar helper supports Windows only.")
@@ -458,11 +588,13 @@ def main() -> int:
     backend = None
     try:
         backend = WindowsUiaBackend()
-        operation = ensure_desk_layout if args.ensure_split else ensure_sidebar_hidden
+        operation = inspect_desk_layout if args.inspect_only else ensure_desk_layout if args.ensure_split else ensure_sidebar_hidden
         status, details = operation(backend, args.timeout_ms)
         return emit(status, **details)
     except Exception as error:
-        return emit("failed", message=f"Codex sidebar inspection failed: {error}")
+        return emit("failed", readOnly=args.inspect_only, inputSent=False if args.inspect_only else None,
+                    layoutVerified=False, reason="host_inspection_failed", errorType=type(error).__name__,
+                    message="Codex host inspection failed before layout could be verified.")
     finally:
         if backend is not None:
             backend.close()
