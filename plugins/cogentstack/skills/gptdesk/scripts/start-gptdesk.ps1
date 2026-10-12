@@ -1,7 +1,12 @@
-[CmdletBinding()]
+[CmdletBinding(DefaultParameterSetName = 'Normal')]
 param(
     [ValidateRange(1, 100)]
-    [int]$WorkflowTimeoutSeconds = 100
+    [int]$WorkflowTimeoutSeconds = 100,
+    [Parameter(Mandatory = $true, ParameterSetName = 'VerifiedUpdate')]
+    [switch]$UpdateAlreadyVerified,
+    [Parameter(Mandatory = $true, ParameterSetName = 'VerifiedUpdate')]
+    [ValidatePattern('^\d+\.\d+\.\d+$')]
+    [string]$VerifiedInstalledVersion
 )
 
 Set-StrictMode -Version Latest
@@ -180,7 +185,14 @@ try {
     if ($pluginId -notin @('cogentspec', 'cogentstack')) { throw 'package_identity_invalid' }
     $coreScripts = Join-Path $pluginRoot "skills\$pluginId\scripts"
     $script:powerShellPath = (Get-Process -Id $PID).Path
-    $update = Run-Helper (Join-Path $coreScripts 'check-cogentspec-update.ps1') @('-Surface', 'chatgpt') 'update_check'
+    if ($UpdateAlreadyVerified) {
+        # The caller must have checked the full trusted update-only contract.
+        # Match its version to this installed package; never rerun its update.
+        if ([string]$manifest.version -cne $VerifiedInstalledVersion) { throw 'refreshed_package_identity_invalid' }
+        $update = [pscustomobject]@{ status = 'verified_update'; installedVersion = $VerifiedInstalledVersion }
+    } else {
+        $update = Run-Helper (Join-Path $coreScripts 'check-cogentspec-update.ps1') @('-Surface', 'chatgpt') 'update_check'
+    }
     if ([string]$update.status -eq 'execution_permission_required') { Forward-Failure $update; return }
     if ([string]$update.status -eq 'update_available') {
         $script:codexPath = (Get-Command codex -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
@@ -204,7 +216,7 @@ try {
         if ([string]$manifest.name -cne $pluginId -or [string]$manifest.version -cne [string]$installer.version) { throw 'refreshed_package_identity_invalid' }
         $installerVerified = $true
         $coreScripts = Join-Path $pluginRoot "skills\$pluginId\scripts"
-    } elseif ([string]$update.status -notin @('current', 'check_unavailable')) {
+    } elseif ([string]$update.status -notin @('current', 'check_unavailable', 'verified_update')) {
         Forward-Failure $update
         return
     }

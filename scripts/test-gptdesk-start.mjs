@@ -96,19 +96,23 @@ if ($env:DESK_FIXTURE_SCENARIO -eq 'update-missing-contract') { $result = @{ sta
 $result | ConvertTo-Json -Compress
 `);
     const began = performance.now();
-    const runResult = await run(powershell, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', driver, ...(scenario === 'stall' ? ['-WorkflowTimeoutSeconds', '2'] : scenario === 'update-stall' ? ['-WorkflowTimeoutSeconds', '5'] : [])], env, root);
+    const resume = ['resume-update', 'resume-wrong-version'].includes(scenario);
+    const runResult = await run(powershell, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', driver,
+      ...(resume ? ['-UpdateAlreadyVerified', '-VerifiedInstalledVersion', scenario === 'resume-wrong-version' ? '0.0.1' : versions[plugin][0]] : []),
+      ...(scenario === 'stall' ? ['-WorkflowTimeoutSeconds', '2'] : scenario === 'update-stall' ? ['-WorkflowTimeoutSeconds', '5'] : [])], env, root);
     assert.equal(runResult.code, 0, runResult.stderr);
     const result = JSON.parse(runResult.stdout.trim());
-    const lines = (await readFile(trace, 'utf8')).trim().split(/\r?\n/);
+    const lines = (await readFile(trace, 'utf8').catch(error => { if (error.code === 'ENOENT') return ''; throw error; })).trim().split(/\r?\n/);
     assert.equal(result.protocol, 'cogentspec-gptdesk-start-v1');
-    assert.equal(lines.filter(line => line.endsWith('check-cogentspec-update.ps1')).length, 1);
-    const ready = ['current', 'confirmed', 'legacy-confirmed', 'offline', 'update'].includes(scenario);
+    assert.equal(lines.filter(line => line.endsWith('check-cogentspec-update.ps1')).length, resume ? 0 : 1);
+    const ready = ['current', 'confirmed', 'legacy-confirmed', 'offline', 'update', 'resume-update'].includes(scenario);
     if (ready) {
       assert.equal(result.status, 'ready');
       assert.equal(result.currentConversationConnected, ['confirmed', 'legacy-confirmed'].includes(scenario));
       assert.equal(lines.filter(line => line.endsWith('project-context.ps1')).length, 1);
       assert.equal(lines.filter(line => line.endsWith('start-cogentstack-bridge.ps1')).length, 1);
       assert.equal(result.workflowBudgetSeconds, 100);
+      if (resume) assert.equal(result.updateStatus, 'verified_update');
       if (scenario === 'update') {
         assert.equal(result.pluginVersion, versions[plugin][1]);
         assert.equal(lines.filter(line => line === 'codex:plugin marketplace list --json').length, 2);
@@ -126,7 +130,7 @@ $result | ConvertTo-Json -Compress
       assert.equal(result.workspaceUrl, undefined);
       assert.ok(!runResult.stdout.includes('PRIVATE_HANDOFF_DO_NOT_PRINT'));
       assert.ok(lines.filter(line => line.endsWith('start-cogentstack-bridge.ps1')).length <= 1);
-      if (['permission', 'malformed', 'wrong-source', 'upgrade-failed', 'update-bad-contract', 'update-missing-contract', 'stall', 'update-stall'].includes(scenario)) {
+      if (['permission', 'malformed', 'wrong-source', 'upgrade-failed', 'update-bad-contract', 'update-missing-contract', 'stall', 'update-stall', 'resume-wrong-version'].includes(scenario)) {
         assert.ok(!lines.some(line => line.endsWith('project-context.ps1') || line.endsWith('start-cogentstack-bridge.ps1')));
       }
       if (['stall', 'update-stall'].includes(scenario)) {
@@ -148,7 +152,7 @@ $result | ConvertTo-Json -Compress
 
 for (const plugin of Object.keys(versions)) {
   const results = [];
-  const scenarios = ['current', 'confirmed', 'legacy-confirmed', 'offline', 'update', 'permission', 'unscoped', 'wrong-source', 'upgrade-failed', 'update-bad-contract', 'update-missing-contract', 'wrong-origin', 'wrong-mode', 'duplicate-mode', 'wrong-context', 'wrong-alias', 'already-opened', 'connection-required', 'malformed', 'stall', 'update-stall'];
+  const scenarios = ['current', 'confirmed', 'legacy-confirmed', 'offline', 'update', 'permission', 'unscoped', 'wrong-source', 'upgrade-failed', 'update-bad-contract', 'update-missing-contract', 'wrong-origin', 'wrong-mode', 'duplicate-mode', 'wrong-context', 'wrong-alias', 'already-opened', 'connection-required', 'malformed', 'stall', 'update-stall', 'resume-update', 'resume-wrong-version'];
   const selected = process.argv.slice(2);
   assert.ok(selected.every(scenario => scenarios.includes(scenario)), 'Unknown fixture scenario');
   for (const scenario of selected.length ? selected : scenarios) {
