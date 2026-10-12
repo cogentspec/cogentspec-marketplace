@@ -63,6 +63,12 @@ if ($Mode -ne 'status' -or -not $WorkspaceGrant -or $RequestTimeoutSeconds -ne 6
 
     $projectDataConnectionFixture = @'
 param([string]$Surface)
+$called = Join-Path $PSScriptRoot 'mcp-called.txt'
+Add-Content -LiteralPath $called -Value 'called'
+if (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'mcp-block.flag')) {
+    [ordered]@{ status = 'connection_required'; connection = 'check_timed_out'; userMessage = 'Project-data tool check timed out.' } | ConvertTo-Json -Compress
+    return
+}
 [ordered]@{
     status = 'ready'
     connection = 'already_connected'
@@ -190,12 +196,23 @@ Start-Sleep -Milliseconds 5500
     $runtimeRoot = Split-Path -Parent ([string]$state.watcherScript)
 
     $gptwebCommand = Join-Path $fixturePlugin 'skills\gptweb\scripts\start-gptweb.ps1'
+    $mcpCallsBeforeWeb = @(Get-Content -LiteralPath (Join-Path $fixtureScripts 'mcp-called.txt')).Count
+    Set-Content -LiteralPath (Join-Path $fixtureScripts 'mcp-block.flag') -Value 'blocked'
     $webExperienceOutput = @(& $gptwebCommand -ContextKey $contextKey 2>&1)
     $webExperienceJsonLine = @($webExperienceOutput | ForEach-Object { $_.ToString() } | Where-Object { $_.Trim().StartsWith('{') } | Select-Object -Last 1)
     Assert-BridgeLauncherTest ([bool]$webExperienceJsonLine) 'The GPTWeb Bridge launcher returned no JSON result.'
     $webExperienceResult = $webExperienceJsonLine | ConvertFrom-Json
     $webExperienceWorkspaceUrl = [string]$webExperienceResult.workspaceUrl
     Assert-BridgeLauncherTest ([string]$webExperienceResult.status -eq 'ready') 'The GPTWeb Bridge launcher did not become ready.'
+    Assert-BridgeLauncherTest ([string]$webExperienceResult.mcpState -eq 'not_required' -and [string]$webExperienceResult.projectDataConnection -eq 'authenticated_desktop_bridge') 'Web claimed CLI tool readiness instead of authenticated device readiness.'
+    Assert-BridgeLauncherTest (@(Get-Content -LiteralPath (Join-Path $fixtureScripts 'mcp-called.txt')).Count -eq $mcpCallsBeforeWeb) 'Web still invokes the unrelated CLI login check.'
+    foreach ($guardedExperience in @('legacy', 'desktop-ui', 'popout')) {
+        $guardedOutput = @(& (Join-Path $fixtureScripts 'start-cogentstack-bridge.ps1') -ContextKey $contextKey -Surface chatgpt -Experience $guardedExperience 2>&1)
+        $guardedLine = @($guardedOutput | ForEach-Object { $_.ToString() } | Where-Object { $_.Trim().StartsWith('{') } | Select-Object -Last 1)
+        $guardedResult = $guardedLine | ConvertFrom-Json
+        Assert-BridgeLauncherTest ([string]$guardedResult.status -eq 'connection_required') "The $guardedExperience route lost its existing project-data gate."
+    }
+    Remove-Item -LiteralPath (Join-Path $fixtureScripts 'mcp-block.flag')
     Assert-BridgeLauncherTest ($webExperienceWorkspaceUrl -match '^https://cogentspec\.app/stack\?surface=chatgpt&context=ctx-[a-f0-9]+&experience=web&open=web&nav=[a-f0-9]{32}#desktop-web=') 'The GPTWeb handoff is missing its context-bound web experience route.'
     Assert-BridgeLauncherTest ($webExperienceWorkspaceUrl -notmatch '/popout-launch\?') 'The GPTWeb handoff incorrectly uses the legacy Popout launch route.'
     Assert-BridgeLauncherTest ($webExperienceWorkspaceUrl -notmatch '#desktop=') 'The GPTWeb command exposed the legacy authorization route.'
@@ -620,6 +637,8 @@ $legacyUrl = "https://cogentspec.app/stack?surface=chatgpt&experience=web#deskto
         taskRebindVerified = [string]$replacementMarker.threadId -ceq $replacementThreadId
         workspaceLinksReturned = 2
         webDestinationVerified = $true
+        webIndependentOfCliLoginVerified = $true
+        desktopAndPopoutGatesPreserved = $true
         webCommandFailClosedVerified = $true
         directBrowserNavigationVerified = $true
     } | ConvertTo-Json -Compress

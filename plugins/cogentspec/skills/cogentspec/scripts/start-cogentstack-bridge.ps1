@@ -384,7 +384,12 @@ if ([string]$connection.status -ne 'connected') {
     return
 }
 $mcpState = 'not_required'
-if ($Surface -eq 'chatgpt') {
+# The authenticated device check and browser grant above, plus fresh worker
+# acknowledgement below, authorize Web. A separate CLI tool login is not a
+# prerequisite for opening that workspace. Desk/Popout keep their existing gate.
+$requiresCodexMcp = $Surface -eq 'chatgpt' -and $Experience -ne 'web'
+$projectDataConnection = if ($requiresCodexMcp) { 'codex_mcp' } else { 'authenticated_desktop_bridge' }
+if ($requiresCodexMcp) {
     $mcpSetupScript = Join-Path $PSScriptRoot 'ensure-cogentspec-mcp.ps1'
     $mcpOutput = @(& $mcpSetupScript -Surface $Surface 2>&1)
     $mcpJson = @($mcpOutput | ForEach-Object { $_.ToString() } | Where-Object { $_.Trim().StartsWith('{') } | Select-Object -Last 1)
@@ -495,6 +500,7 @@ if (Test-Path -LiteralPath $statePath -PathType Leaf) {
                     browserOpened = $false
                     accountState = 'signed_in'
                     mcpState = $mcpState
+                    projectDataConnection = $projectDataConnection
                     pluginId = $pluginId
                     pluginVersion = $pluginVersion
                     popoutConnectionConfirmed = [bool]$popoutConnection.confirmed
@@ -572,6 +578,7 @@ Write-CompactJson ([ordered]@{
     browserOpened = $false
     accountState = 'signed_in'
     mcpState = $mcpState
+    projectDataConnection = $projectDataConnection
     pluginId = $pluginId
     pluginVersion = $pluginVersion
     popoutConnectionConfirmed = [bool]$popoutConnection.confirmed

@@ -29,6 +29,8 @@ Determine the requested destination before running any Bridge helper. An explici
 
 Keep `$cogentstack` as the backward-compatible default. These explicit CogentSpec commands change only presentation and opening behavior; they share the same context, project state, Bridge worker, and protected action flow. The compact Desktop layout is identified only by `experience=desktop-ui`; it must not alter Popout geometry or the ordinary web workspace.
 
+The Web-only ready contract uses `projectDataConnection: authenticated_desktop_bridge` and `mcpState: not_required`, backed by the existing signed-in device, protected browser grant, and fresh verified worker. A separate Codex tool-login check is not a Web prerequisite. The generic, Desk, and Popout routes retain their existing project-data-tool gate. Follow the destination skill rather than substituting the generic ready contract for Web.
+
 ## Connect the current AI project
 
 Treat `$cogentstack`, `@cogentstack`, a CogentSpec plugin mention, and a natural-language request to connect or open CogentSpec as the same request.

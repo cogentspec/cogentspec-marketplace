@@ -129,7 +129,8 @@ if ([string](Get-ResultProperty $result 'contextKey' '') -cne $resolvedContext -
     -not [bool](Get-ResultProperty $result 'contextIsolated' $false) -or
     -not [bool](Get-ResultProperty $result 'presenceVerified' $false) -or
     [string](Get-ResultProperty $result 'accountState' '') -cne 'signed_in' -or
-    [string](Get-ResultProperty $result 'mcpState' '') -cne 'ready' -or
+    [string](Get-ResultProperty $result 'projectDataConnection' '') -cne 'authenticated_desktop_bridge' -or
+    [string](Get-ResultProperty $result 'mcpState' '') -cne 'not_required' -or
     [bool](Get-ResultProperty $result 'browserOpened' $true)) {
     Write-InvalidHandoff $resolvedContext 'bridge_ready_contract_mismatch'
     return
@@ -150,7 +151,8 @@ Write-CompactJson ([ordered]@{
     browserNavigationCode = $browserNavigationCode
     browserOpened = $false
     accountState = 'signed_in'
-    mcpState = 'ready'
+    mcpState = 'not_required'
+    projectDataConnection = 'authenticated_desktop_bridge'
     pluginId = [string](Get-ResultProperty $result 'pluginId' '')
     pluginVersion = [string](Get-ResultProperty $result 'pluginVersion' '')
     launcherElapsedMs = [int](Get-ResultProperty $result 'launcherElapsedMs' 0)
