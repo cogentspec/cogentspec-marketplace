@@ -21,6 +21,8 @@ $marketplaceSource = 'https://github.com/cogentspec/cogentspec-marketplace.git'
 $workspaceUrl = 'https://cogentspec.com/stack'
 $requiredSparsePaths = @('.agents/plugins', 'plugins/cogentspec', 'plugins/cogentstack')
 $timer = [Diagnostics.Stopwatch]::StartNew()
+# Reserve time for owned-process cleanup before the two-minute target.
+$installerBudgetSeconds = [Math]::Min($InstallerTimeoutSeconds, 110)
 $privateInstallationRequest = [string]$InstallationRequest
 $InstallationRequest = ''
 $claimJob = $null
@@ -41,6 +43,7 @@ function Set-InstallStage {
 }
 
 function Complete-InstallStage {
+    [void](Get-RemainingMilliseconds)
     $script:completedStages.Add([ordered]@{
         stage = $script:stage
         durationMs = [Math]::Max(0, [int]$script:timer.ElapsedMilliseconds - $script:stageStartedMs)
@@ -49,11 +52,11 @@ function Complete-InstallStage {
 
 function Throw-InstallerTimeout {
     $script:installerTimedOut = $true
-    throw "The running installer exceeded its process-owned $InstallerTimeoutSeconds-second limit."
+    throw "The running installer exceeded its process-owned $installerBudgetSeconds-second limit."
 }
 
 function Get-RemainingMilliseconds {
-    $remaining = ($InstallerTimeoutSeconds * 1000) - [int]$timer.ElapsedMilliseconds
+    $remaining = ($installerBudgetSeconds * 1000) - [int]$timer.ElapsedMilliseconds
     if ($remaining -le 0) {
         Throw-InstallerTimeout
     }
@@ -100,6 +103,30 @@ function ConvertTo-WindowsProcessArgumentLine {
     return (@($Values | ForEach-Object { ConvertTo-WindowsProcessArgument -Value ([string]$_) }) -join ' ')
 }
 
+function Stop-InstallerOwnedProcess {
+    param([Parameter(Mandatory = $true)][Diagnostics.Process]$Process)
+    if ($Process.HasExited) { return }
+    try { $Process.Kill($true) } catch {
+        # Windows PowerShell 5.1 has no Kill(entireProcessTree) overload.
+        if ($Process.HasExited) { return }
+        $info = [Diagnostics.ProcessStartInfo]::new()
+        $info.FileName = Join-Path ([Environment]::SystemDirectory) 'taskkill.exe'
+        $info.Arguments = "/PID $($Process.Id) /T /F"
+        $info.UseShellExecute = $false
+        $info.CreateNoWindow = $true
+        $info.RedirectStandardOutput = $true
+        $info.RedirectStandardError = $true
+        $killer = [Diagnostics.Process]::new()
+        $killer.StartInfo = $info
+        try {
+            if ($killer.Start() -and -not $killer.WaitForExit(1500)) {
+                try { $killer.Kill() } catch { }
+            }
+        } finally { $killer.Dispose() }
+    }
+    [void]$Process.WaitForExit(1500)
+}
+
 function Invoke-BoundedNative {
     param(
         [Parameter(Mandatory = $true)]
@@ -142,7 +169,12 @@ function Invoke-BoundedNative {
         $stdoutTask = $process.StandardOutput.ReadToEndAsync()
         $stderrTask = $process.StandardError.ReadToEndAsync()
         if (-not $process.WaitForExit($remaining)) {
-            try { $process.Kill($true) } catch { }
+            Stop-InstallerOwnedProcess -Process $process
+            Throw-InstallerTimeout
+        }
+        # An exited parent can leave inherited pipes open in a child.
+        if (-not $stdoutTask.Wait((Get-RemainingMilliseconds)) -or
+            -not $stderrTask.Wait((Get-RemainingMilliseconds))) {
             Throw-InstallerTimeout
         }
         $stdout = $stdoutTask.GetAwaiter().GetResult().Trim()
@@ -156,6 +188,17 @@ function Invoke-BoundedNative {
     } finally {
         $process.Dispose()
     }
+}
+
+function Invoke-BoundedInstallerHelper {
+    param(
+        [Parameter(Mandatory = $true)][string]$ScriptPath,
+        [Parameter(Mandatory = $true)][string]$Operation
+    )
+    $output = Invoke-BoundedNative -FilePath $script:hostPowerShellPath -Arguments @(
+        '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $ScriptPath
+    ) -Operation $Operation
+    return Read-JsonResult -Text $output -Operation $Operation
 }
 
 function Read-JsonResult {
@@ -202,6 +245,7 @@ try {
         $gitCommand = @(Get-Command git.cmd -CommandType Application -ErrorAction Stop) | Select-Object -First 1
     }
     $script:codexPath = [string]$codexCommand.Source
+    $script:hostPowerShellPath = (Get-Process -Id $PID -ErrorAction Stop).Path
     $gitPath = [string]$gitCommand.Source
     Complete-InstallStage
 
@@ -337,6 +381,7 @@ try {
         throw 'The installed CogentSpec package does not match the official public-file allowlist.'
     }
     foreach ($relativePath in $allowedFiles) {
+        [void](Get-RemainingMilliseconds)
         $nativeRelativePath = $relativePath.Replace('/', '\')
         $sourceHash = (Get-FileHash -LiteralPath (Join-Path $sourcePluginPath $nativeRelativePath) -Algorithm SHA256).Hash
         $installedHash = (Get-FileHash -LiteralPath (Join-Path $installedPath $nativeRelativePath) -Algorithm SHA256).Hash
@@ -411,8 +456,7 @@ try {
     if ($UpdateOnly) {
         Set-InstallStage -Name 'superseded_bridge_cleanup'
         $resetScript = Join-Path $installedPath 'skills\cogentspec\scripts\reset-cogentspec-update.ps1'
-        $resetOutput = @(& $resetScript 2>&1)
-        $resetResult = Read-JsonResult -Text (($resetOutput | ForEach-Object { [string]$_ }) -join "`n") -Operation 'Superseded Bridge cleanup'
+        $resetResult = Invoke-BoundedInstallerHelper -ScriptPath $resetScript -Operation 'Superseded Bridge cleanup'
         if ([string]$resetResult.status -ne 'reset' -or -not [bool]$resetResult.packageRuntimeCleared -or -not [bool]$resetResult.workerStateCleared -or -not [bool]$resetResult.credentialPreserved) {
             throw 'The superseded Bridge runtime was not cleared safely.'
         }
@@ -420,8 +464,7 @@ try {
 
         Set-InstallStage -Name 'standalone_popout_bridge'
         $popoutBridgeStart = Join-Path $installedPath 'skills\cogentspec\scripts\start-cogentspec-popout-bridge.ps1'
-        $popoutBridgeOutput = @(& $popoutBridgeStart 2>&1)
-        $popoutBridgeResult = Read-JsonResult -Text (($popoutBridgeOutput | ForEach-Object { [string]$_ }) -join "`n") -Operation 'Standalone Popout Bridge startup'
+        $popoutBridgeResult = Invoke-BoundedInstallerHelper -ScriptPath $popoutBridgeStart -Operation 'Standalone Popout Bridge startup'
         if ([string]$popoutBridgeResult.status -ne 'ready') {
             throw 'Standalone Popout Bridge did not become ready after the update.'
         }
@@ -429,8 +472,7 @@ try {
 
         Set-InstallStage -Name 'desktop_ui_bridge'
         $desktopUiBridgeStart = Join-Path $installedPath 'skills\cogentspec\scripts\start-cogentspec-desktop-ui-bridge.ps1'
-        $desktopUiBridgeOutput = @(& $desktopUiBridgeStart 2>&1)
-        $desktopUiBridgeResult = Read-JsonResult -Text (($desktopUiBridgeOutput | ForEach-Object { [string]$_ }) -join "`n") -Operation 'Desktop UI Bridge startup'
+        $desktopUiBridgeResult = Invoke-BoundedInstallerHelper -ScriptPath $desktopUiBridgeStart -Operation 'Desktop UI Bridge startup'
         if ([string]$desktopUiBridgeResult.status -ne 'ready') {
             throw 'Desktop UI Bridge did not become ready after the update.'
         }
@@ -465,6 +507,7 @@ try {
             enabled = $true
             version = [string]$installedManifest.version
             installerElapsedMs = [int]$timer.ElapsedMilliseconds
+            installerBudgetSeconds = $installerBudgetSeconds
         } | ConvertTo-Json -Compress -Depth 5 | Write-Output
         exit 0
     }
@@ -487,6 +530,7 @@ try {
             enabled = $true
             version = [string]$installedManifest.version
             installerElapsedMs = [int]$timer.ElapsedMilliseconds
+            installerBudgetSeconds = $installerBudgetSeconds
         } | ConvertTo-Json -Compress -Depth 5 | Write-Output
         exit 0
     }
@@ -519,8 +563,7 @@ try {
 
     Set-InstallStage -Name 'standalone_popout_bridge'
     $popoutBridgeStart = Join-Path $installedPath 'skills\cogentspec\scripts\start-cogentspec-popout-bridge.ps1'
-    $popoutBridgeOutput = @(& $popoutBridgeStart 2>&1)
-    $popoutBridgeResult = Read-JsonResult -Text (($popoutBridgeOutput | ForEach-Object { [string]$_ }) -join "`n") -Operation 'Standalone Popout Bridge startup'
+    $popoutBridgeResult = Invoke-BoundedInstallerHelper -ScriptPath $popoutBridgeStart -Operation 'Standalone Popout Bridge startup'
     if ([string]$popoutBridgeResult.status -ne 'ready') {
         throw 'Standalone Popout Bridge did not become ready after installation.'
     }
@@ -528,8 +571,7 @@ try {
 
     Set-InstallStage -Name 'desktop_ui_bridge'
     $desktopUiBridgeStart = Join-Path $installedPath 'skills\cogentspec\scripts\start-cogentspec-desktop-ui-bridge.ps1'
-    $desktopUiBridgeOutput = @(& $desktopUiBridgeStart 2>&1)
-    $desktopUiBridgeResult = Read-JsonResult -Text (($desktopUiBridgeOutput | ForEach-Object { [string]$_ }) -join "`n") -Operation 'Desktop UI Bridge startup'
+    $desktopUiBridgeResult = Invoke-BoundedInstallerHelper -ScriptPath $desktopUiBridgeStart -Operation 'Desktop UI Bridge startup'
     if ([string]$desktopUiBridgeResult.status -ne 'ready') {
         throw 'Desktop UI Bridge did not become ready after installation.'
     }
@@ -556,6 +598,7 @@ try {
         projectDataConnectionReady = $projectDataConnectionReady
         version = [string]$installedManifest.version
         installerElapsedMs = [int]$timer.ElapsedMilliseconds
+        installerBudgetSeconds = $installerBudgetSeconds
     } | ConvertTo-Json -Compress -Depth 5 | Write-Output
 } catch {
     [ordered]@{
@@ -574,6 +617,7 @@ try {
         accountRequestConsumed = if ($claimSucceeded) { $true } elseif ($claimAttempted) { $null } else { $false }
         exactReason = [string]$_.Exception.Message
         installerElapsedMs = [int]$timer.ElapsedMilliseconds
+        installerBudgetSeconds = $installerBudgetSeconds
     } | ConvertTo-Json -Compress -Depth 5 | Write-Output
     exit 1
 } finally {

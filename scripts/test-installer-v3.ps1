@@ -1,6 +1,9 @@
 [CmdletBinding()]
 param(
-    [switch]$ExerciseTimeout
+    [ValidateSet('cogentspec', 'cogentstack')]
+    [string]$PluginName = 'cogentspec',
+    [switch]$ExerciseTimeout,
+    [switch]$ExerciseDefaultBudget
 )
 
 Set-StrictMode -Version Latest
@@ -33,9 +36,12 @@ function Invoke-InstallerFixture {
     if ($Reference) { $arguments += @('-InstallationRequest', $Reference) }
     if ($UpdateOnly) { $arguments += '-UpdateOnly' }
     if ($ValidateOnly) { $arguments += '-ValidateOnly' }
+    $runTimer = [Diagnostics.Stopwatch]::StartNew()
     $output = @(& $PowerShellPath @arguments 2>&1)
+    $runTimer.Stop()
     return [ordered]@{
         exitCode = $LASTEXITCODE
+        wallElapsedMs = [int]$runTimer.ElapsedMilliseconds
         result = ($output[-1].ToString() | ConvertFrom-Json)
     }
 }
@@ -49,8 +55,8 @@ if ([IO.Path]::GetDirectoryName($fixtureRoot) -ne [IO.Path]::GetFullPath([IO.Pat
 }
 $fixtureMarketplace = Join-Path $fixtureRoot 'marketplace'
 $fixtureInstallerDirectory = Join-Path $fixtureMarketplace '.agents\plugins'
-$fixturePlugin = Join-Path $fixtureMarketplace 'plugins\cogentspec'
-$fixtureInstalledPlugin = Join-Path $fixtureRoot 'installed\cogentspec'
+$fixturePlugin = Join-Path $fixtureMarketplace "plugins\$PluginName"
+$fixtureInstalledPlugin = Join-Path $fixtureRoot "installed\$PluginName"
 $fixtureBin = Join-Path $fixtureRoot 'bin'
 $originalPath = $env:Path
 
@@ -58,8 +64,8 @@ try {
     [void](New-Item -ItemType Directory -Path $fixtureInstallerDirectory -Force)
     [void](New-Item -ItemType Directory -Path (Split-Path -Parent $fixturePlugin) -Force)
     [void](New-Item -ItemType Directory -Path $fixtureBin -Force)
-    Copy-Item -LiteralPath (Join-Path $repositoryRoot '.agents\plugins\install-cogentspec.ps1') -Destination $fixtureInstallerDirectory
-    Copy-Item -LiteralPath (Join-Path $repositoryRoot 'plugins\cogentspec') -Destination $fixturePlugin -Recurse -Force
+    Copy-Item -LiteralPath (Join-Path $repositoryRoot ".agents\plugins\install-$PluginName.ps1") -Destination $fixtureInstallerDirectory
+    Copy-Item -LiteralPath (Join-Path $repositoryRoot "plugins\$PluginName") -Destination $fixturePlugin -Recurse -Force
 
     $claimFixture = @'
 param(
@@ -75,9 +81,13 @@ if ($Mode -ne 'claim' -or $InstallationRequest -notmatch '^cgb_[A-Za-z0-9_-]{40,
     installationBound = $true
 } | ConvertTo-Json -Compress
 '@
-    Set-Content -LiteralPath (Join-Path $fixturePlugin 'skills\cogentspec\scripts\connect-cogentstack.ps1') -Value $claimFixture -Encoding UTF8
+    Set-Content -LiteralPath (Join-Path $fixturePlugin "skills\$PluginName\scripts\connect-cogentstack.ps1") -Value $claimFixture -Encoding UTF8
 
     $resetFixture = @'
+if ($env:COGENTSPEC_INSTALLER_TEST_STALL_STAGE -eq 'superseded_bridge_cleanup') {
+    [string]$PID | Set-Content -LiteralPath $env:COGENTSPEC_INSTALLER_TEST_PID_PATH
+    Start-Sleep -Seconds 35
+}
 [ordered]@{
     status = 'reset'
     packageRuntimeCleared = $true
@@ -86,25 +96,33 @@ if ($Mode -ne 'claim' -or $InstallationRequest -notmatch '^cgb_[A-Za-z0-9_-]{40,
     credentialPreserved = $true
 } | ConvertTo-Json -Compress
 '@
-    Set-Content -LiteralPath (Join-Path $fixturePlugin 'skills\cogentspec\scripts\reset-cogentspec-update.ps1') -Value $resetFixture -Encoding UTF8
+    Set-Content -LiteralPath (Join-Path $fixturePlugin "skills\$PluginName\scripts\reset-cogentspec-update.ps1") -Value $resetFixture -Encoding UTF8
 
     $popoutBridgeFixture = @'
+if ($env:COGENTSPEC_INSTALLER_TEST_STALL_STAGE -eq 'standalone_popout_bridge') {
+    [string]$PID | Set-Content -LiteralPath $env:COGENTSPEC_INSTALLER_TEST_PID_PATH
+    Start-Sleep -Seconds 35
+}
 [ordered]@{
     status = 'ready'
     bridge = 'started'
     processId = 4242
 } | ConvertTo-Json -Compress
 '@
-    Set-Content -LiteralPath (Join-Path $fixturePlugin 'skills\cogentspec\scripts\start-cogentspec-popout-bridge.ps1') -Value $popoutBridgeFixture -Encoding UTF8
+    Set-Content -LiteralPath (Join-Path $fixturePlugin "skills\$PluginName\scripts\start-cogentspec-popout-bridge.ps1") -Value $popoutBridgeFixture -Encoding UTF8
 
     $desktopUiBridgeFixture = @'
+if ($env:COGENTSPEC_INSTALLER_TEST_STALL_STAGE -eq 'desktop_ui_bridge') {
+    [string]$PID | Set-Content -LiteralPath $env:COGENTSPEC_INSTALLER_TEST_PID_PATH
+    Start-Sleep -Seconds 35
+}
 [ordered]@{
     status = 'ready'
     bridge = 'started'
     processId = 4343
 } | ConvertTo-Json -Compress
 '@
-    Set-Content -LiteralPath (Join-Path $fixturePlugin 'skills\cogentspec\scripts\start-cogentspec-desktop-ui-bridge.ps1') -Value $desktopUiBridgeFixture -Encoding UTF8
+    Set-Content -LiteralPath (Join-Path $fixturePlugin "skills\$PluginName\scripts\start-cogentspec-desktop-ui-bridge.ps1") -Value $desktopUiBridgeFixture -Encoding UTF8
 
     $pluginManifest = Get-Content -LiteralPath (Join-Path $fixturePlugin '.codex-plugin\plugin.json') -Raw | ConvertFrom-Json
     $escapedMarketplace = $fixtureMarketplace.Replace("'", "''")
@@ -117,7 +135,10 @@ if ($Mode -ne 'claim' -or $InstallationRequest -notmatch '^cgb_[A-Za-z0-9_-]{40,
 param([Parameter(ValueFromRemainingArguments = `$true)][string[]]`$CliArgs)
 `$ErrorActionPreference = 'Stop'
 if (`$CliArgs.Count -ge 4 -and `$CliArgs[0] -eq 'plugin' -and `$CliArgs[1] -eq 'marketplace' -and `$CliArgs[2] -eq 'list') {
-    if (`$env:COGENTSPEC_INSTALLER_TEST_STALL -eq '1') { Start-Sleep -Seconds 35 }
+    if (`$env:COGENTSPEC_INSTALLER_TEST_STALL -eq '1') {
+        `$stallSeconds = if (`$env:COGENTSPEC_INSTALLER_TEST_STALL_SECONDS) { [int]`$env:COGENTSPEC_INSTALLER_TEST_STALL_SECONDS } else { 35 }
+        Start-Sleep -Seconds `$stallSeconds
+    }
     [ordered]@{ marketplaces = @([ordered]@{ name = 'cogentstack'; root = '$escapedMarketplace' }) } | ConvertTo-Json -Compress
     exit 0
 }
@@ -129,7 +150,7 @@ if (`$CliArgs.Count -ge 3 -and `$CliArgs[0] -eq 'plugin' -and `$CliArgs[1] -eq '
     exit 0
 }
 if (`$CliArgs.Count -ge 3 -and `$CliArgs[0] -eq 'plugin' -and `$CliArgs[1] -eq 'list') {
-    [ordered]@{ installed = @([ordered]@{ pluginId = 'cogentspec@cogentstack'; installed = `$true; enabled = `$true; version = '$escapedVersion' }) } | ConvertTo-Json -Compress
+    [ordered]@{ installed = @([ordered]@{ pluginId = '$PluginName@cogentstack'; installed = `$true; enabled = `$true; version = '$escapedVersion' }) } | ConvertTo-Json -Compress
     exit 0
 }
 if (`$CliArgs.Count -eq 2 -and `$CliArgs[0] -eq 'mcp' -and `$CliArgs[1] -eq 'list') {
@@ -163,7 +184,8 @@ public static class GitFixture
         if (args.Length >= 4 && args[2] == "sparse-checkout" && args[3] == "list")
         {
             Console.WriteLine(".agents/plugins");
-            Console.WriteLine("plugins/cogentspec");
+            if (System.IO.Directory.Exists(System.IO.Path.Combine(args[1], "plugins", "cogentspec")))
+                Console.WriteLine("plugins/cogentspec");
             Console.WriteLine("plugins/cogentstack");
             return 0;
         }
@@ -176,7 +198,7 @@ public static class GitFixture
     $env:Path = "$fixtureBin$([IO.Path]::PathSeparator)$originalPath"
 
     $powerShellPath = (Get-Process -Id $PID).Path
-    $installerPath = Join-Path $fixtureInstallerDirectory 'install-cogentspec.ps1'
+    $installerPath = Join-Path $fixtureInstallerDirectory "install-$PluginName.ps1"
     $validReference = 'cgb_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'
     $validRun = Invoke-InstallerFixture -PowerShellPath $powerShellPath -InstallerPath $installerPath -Reference $validReference -ValidateOnly
     $valid = $validRun.result
@@ -191,6 +213,7 @@ public static class GitFixture
     Assert-InstallerTest (-not [bool]$valid.claimAttempted) 'ValidateOnly must never attempt an account claim.'
     Assert-InstallerTest ($valid.accountRequestConsumed -eq $false) 'ValidateOnly must report that the account request was not consumed.'
     Assert-InstallerTest ([int]$valid.installerElapsedMs -gt 0 -and [int]$valid.installerElapsedMs -lt 120000) 'The isolated installer duration is outside its process-owned limit.'
+    Assert-InstallerTest ([int]$valid.installerBudgetSeconds -eq 110) 'The installer must reserve cleanup time below the two-minute target.'
     $completedStageNames = @($valid.completedStages | ForEach-Object { [string]$_.stage })
     Assert-InstallerTest ($completedStageNames -contains 'plugin_installation') 'The plugin installation stage was not evidenced.'
     Assert-InstallerTest ($completedStageNames -contains 'package_integrity_verification') 'The package integrity stage was not evidenced.'
@@ -213,6 +236,7 @@ public static class GitFixture
     Assert-InstallerTest ([bool]$update.workspaceReadinessSkipped) 'The update fixture repeated the first-install web readiness check.'
     Assert-InstallerTest ([bool]$update.projectDataConnectionReady) 'The update fixture did not prepare the secure project-data connection.'
     Assert-InstallerTest ([int]$update.installerElapsedMs -gt 0 -and [int]$update.installerElapsedMs -lt 20000) 'The update-only installer exceeded the twenty-second regression limit.'
+    Assert-InstallerTest ([int]$updateRun.wallElapsedMs -lt 20000) 'The update fixture took over twenty seconds including process shutdown.'
     Assert-InstallerTest ([string]$update.refreshedPluginPath -eq $fixtureInstalledPlugin) 'The update fixture did not return the refreshed plugin path.'
     Assert-InstallerTest (-not [bool]$update.claimAttempted) 'The update fixture attempted an account claim.'
     Assert-InstallerTest ($update.accountRequestConsumed -eq $false) 'The update fixture did not prove that no account request was consumed.'
@@ -255,6 +279,8 @@ public static class GitFixture
 
     $timeoutCasePassed = $null
     $timeoutElapsedMs = $null
+    $helperTimeoutCases = @()
+    $postClaimTimeoutCase = $null
     if ($ExerciseTimeout) {
         $env:COGENTSPEC_INSTALLER_TEST_STALL = '1'
         try {
@@ -275,11 +301,72 @@ public static class GitFixture
         Assert-InstallerTest ([int]$timeout.installerElapsedMs -ge 29000 -and [int]$timeout.installerElapsedMs -lt 35000) 'The forced timeout did not stop near its process-owned limit.'
         $timeoutCasePassed = $true
         $timeoutElapsedMs = [int]$timeout.installerElapsedMs
+        foreach ($helperStage in @('superseded_bridge_cleanup', 'standalone_popout_bridge', 'desktop_ui_bridge')) {
+            $originalStallStage = $env:COGENTSPEC_INSTALLER_TEST_STALL_STAGE
+            $originalPidPath = $env:COGENTSPEC_INSTALLER_TEST_PID_PATH
+            $pidPath = Join-Path $fixtureRoot "$helperStage.pid"
+            try {
+                $env:COGENTSPEC_INSTALLER_TEST_STALL_STAGE = $helperStage
+                $env:COGENTSPEC_INSTALLER_TEST_PID_PATH = $pidPath
+                Write-Host "Testing bounded $PluginName $helperStage..."
+                $stalledRun = Invoke-InstallerFixture -PowerShellPath $powerShellPath -InstallerPath $installerPath -UpdateOnly -TimeoutSeconds 30
+            } finally {
+                $env:COGENTSPEC_INSTALLER_TEST_STALL_STAGE = $originalStallStage
+                $env:COGENTSPEC_INSTALLER_TEST_PID_PATH = $originalPidPath
+            }
+            $stalled = $stalledRun.result
+            Assert-InstallerTest ($stalledRun.exitCode -ne 0 -and [bool]$stalled.installerTimedOut) "The $helperStage fixture did not time out."
+            Assert-InstallerTest ([string]$stalled.failureStage -eq $helperStage) "The $helperStage timeout lost its exact failed stage."
+            Assert-InstallerTest ([int]$stalledRun.wallElapsedMs -ge 29000 -and [int]$stalledRun.wallElapsedMs -lt 35000) "The $helperStage fixture escaped the shared thirty-second budget."
+            Assert-InstallerTest (-not [bool]$stalled.claimAttempted -and $stalled.accountRequestConsumed -eq $false) "The $helperStage update tried to consume a claim."
+            Assert-InstallerTest (@($stalled.completedStages.stage) -notcontains $helperStage) "The stalled $helperStage was reported completed."
+            $childId = [int](Get-Content -LiteralPath $pidPath -Raw)
+            Assert-InstallerTest (-not (Get-Process -Id $childId -ErrorAction SilentlyContinue)) "The timed-out $helperStage process survived."
+            $helperTimeoutCases += [ordered]@{ stage = $helperStage; wallElapsedMs = [int]$stalledRun.wallElapsedMs; ownedChildStopped = $true }
+        }
+        $originalStallStage = $env:COGENTSPEC_INSTALLER_TEST_STALL_STAGE
+        $originalPidPath = $env:COGENTSPEC_INSTALLER_TEST_PID_PATH
+        try {
+            $env:COGENTSPEC_INSTALLER_TEST_STALL_STAGE = 'desktop_ui_bridge'
+            $env:COGENTSPEC_INSTALLER_TEST_PID_PATH = Join-Path $fixtureRoot 'post-claim.pid'
+            Write-Host "Testing bounded $PluginName startup after a completed synthetic claim..."
+            $postClaimRun = Invoke-InstallerFixture -PowerShellPath $powerShellPath -InstallerPath $installerPath -Reference $validReference -TimeoutSeconds 30
+        } finally {
+            $env:COGENTSPEC_INSTALLER_TEST_STALL_STAGE = $originalStallStage
+            $env:COGENTSPEC_INSTALLER_TEST_PID_PATH = $originalPidPath
+        }
+        $postClaim = $postClaimRun.result
+        Assert-InstallerTest ($postClaimRun.exitCode -ne 0 -and [bool]$postClaim.installerTimedOut) 'A stalled post-claim worker did not time out.'
+        Assert-InstallerTest ([string]$postClaim.failureStage -eq 'desktop_ui_bridge') 'A post-claim timeout lost its stage.'
+        Assert-InstallerTest ([bool]$postClaim.claimAttempted -and $postClaim.accountRequestConsumed -eq $true) 'A post-claim timeout must not invite another account-bound claim.'
+        Assert-InstallerTest ([int]$postClaimRun.wallElapsedMs -ge 29000 -and [int]$postClaimRun.wallElapsedMs -lt 35000) 'Post-claim startup escaped the shared deadline.'
+        $postClaimTimeoutCase = [ordered]@{ wallElapsedMs = [int]$postClaimRun.wallElapsedMs; accountRequestConsumed = $true; retryAllowed = $false }
+    }
+
+    $defaultBudgetTimeoutCase = $null
+    if ($ExerciseDefaultBudget) {
+        $originalStall = $env:COGENTSPEC_INSTALLER_TEST_STALL
+        $originalStallSeconds = $env:COGENTSPEC_INSTALLER_TEST_STALL_SECONDS
+        try {
+            $env:COGENTSPEC_INSTALLER_TEST_STALL = '1'
+            $env:COGENTSPEC_INSTALLER_TEST_STALL_SECONDS = '130'
+            Write-Host "Testing the default $PluginName 110-second work budget..."
+            $defaultRun = Invoke-InstallerFixture -PowerShellPath $powerShellPath -InstallerPath $installerPath -Reference $validReference -ValidateOnly
+        } finally {
+            $env:COGENTSPEC_INSTALLER_TEST_STALL = $originalStall
+            $env:COGENTSPEC_INSTALLER_TEST_STALL_SECONDS = $originalStallSeconds
+        }
+        Assert-InstallerTest ($defaultRun.exitCode -ne 0 -and [bool]$defaultRun.result.installerTimedOut) 'The default budget did not stop the stall.'
+        Assert-InstallerTest ([int]$defaultRun.result.installerBudgetSeconds -eq 110) 'The default work budget is not 110 seconds.'
+        Assert-InstallerTest ([int]$defaultRun.wallElapsedMs -ge 109000 -and [int]$defaultRun.wallElapsedMs -lt 120000) 'The default fixture did not return below two minutes.'
+        Assert-InstallerTest (-not [bool]$defaultRun.result.claimAttempted -and $defaultRun.result.accountRequestConsumed -eq $false) 'The default timeout attempted an account claim.'
+        $defaultBudgetTimeoutCase = [ordered]@{ wallElapsedMs = [int]$defaultRun.wallElapsedMs; workBudgetSeconds = 110; returnedUnderTwoMinutes = $true }
     }
 
     [ordered]@{
         status = 'valid'
         protocol = [string]$valid.protocol
+        plugin = $PluginName
         installerElapsedMs = [int]$valid.installerElapsedMs
         nativeCommandsStarted = [int]$valid.nativeCommandsStarted
         nativeCommandsCompleted = [int]$valid.nativeCommandsCompleted
@@ -288,11 +375,16 @@ public static class GitFixture
         updateCasePassed = $true
         updatedVersion = [string]$update.version
         updateElapsedMs = [int]$update.installerElapsedMs
+        updateWallElapsedMs = [int]$updateRun.wallElapsedMs
+        installerBudgetSeconds = [int]$update.installerBudgetSeconds
         fastUpdatePath = [bool]$update.fastUpdatePath
         windowsPowerShellExecutablePathPassed = $true
         claimPathCasePassed = $true
         timeoutCasePassed = $timeoutCasePassed
         timeoutElapsedMs = $timeoutElapsedMs
+        helperTimeoutCases = @($helperTimeoutCases)
+        postClaimTimeoutCase = $postClaimTimeoutCase
+        defaultBudgetTimeoutCase = $defaultBudgetTimeoutCase
         claimAttempted = $false
         accountRequestConsumed = $false
     } | ConvertTo-Json -Compress
