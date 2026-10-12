@@ -201,6 +201,11 @@ Start-Sleep -Milliseconds 5500
     Assert-BridgeLauncherTest ($webExperienceWorkspaceUrl -notmatch '#desktop=') 'The GPTWeb command exposed the legacy authorization route.'
     Assert-BridgeLauncherTest (-not $webExperienceResult.PSObject.Properties['webWorkspaceUrl']) 'The GPTWeb command exposed a second web destination.'
     Assert-BridgeLauncherTest (-not $webExperienceResult.PSObject.Properties['chatgptWorkspaceUrl']) 'The GPTWeb command exposed the Desktop destination.'
+    Assert-BridgeLauncherTest ([string]$webExperienceResult.browserNavigationProtocol -ceq 'cogentspec-gptweb-navigation-v1') 'The GPTWeb command omitted its direct navigation protocol.'
+    # Execute the returned call with a fake tab. This checks the JS quoting and
+    # preserves the complete URL across the PowerShell JSON -> browser JS boundary.
+    $navigationTestResult = $webExperienceJsonLine | & node (Join-Path $PSScriptRoot 'test-gptweb-navigation.mjs')
+    Assert-BridgeLauncherTest ($LASTEXITCODE -eq 0 -and $navigationTestResult -eq 'DIRECT_BROWSER_NAVIGATION_VERIFIED=true') 'The GPTWeb browser call did not deliver the exact handoff once.'
 
     $fixtureLauncherPath = Join-Path $fixtureScripts 'start-cogentstack-bridge.ps1'
     $validFixtureLauncher = Get-Content -Raw -LiteralPath $fixtureLauncherPath
@@ -229,6 +234,7 @@ $legacyUrl = "https://cogentspec.app/stack?surface=chatgpt&experience=web#deskto
         $legacyResult = $legacyJsonLine | ConvertFrom-Json
         Assert-BridgeLauncherTest ([string]$legacyResult.status -eq 'invalid_workspace_handoff') 'The GPTWeb command did not reject the legacy authorization route.'
         Assert-BridgeLauncherTest (-not $legacyResult.PSObject.Properties['workspaceUrl']) 'The GPTWeb command returned the rejected legacy URL.'
+        Assert-BridgeLauncherTest (-not $legacyResult.PSObject.Properties['browserNavigationCode']) 'The GPTWeb command returned browser navigation for a rejected handoff.'
     } finally {
         Set-Content -LiteralPath $fixtureLauncherPath -Value $validFixtureLauncher -Encoding UTF8
     }
@@ -615,6 +621,7 @@ $legacyUrl = "https://cogentspec.app/stack?surface=chatgpt&experience=web#deskto
         workspaceLinksReturned = 2
         webDestinationVerified = $true
         webCommandFailClosedVerified = $true
+        directBrowserNavigationVerified = $true
     } | ConvertTo-Json -Compress
 } finally {
     if ($launcherProcess) { $launcherProcess.Dispose() }

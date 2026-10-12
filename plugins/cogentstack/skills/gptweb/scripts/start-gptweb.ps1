@@ -135,6 +135,10 @@ if ([string](Get-ResultProperty $result 'contextKey' '') -cne $resolvedContext -
     return
 }
 
+# Return the exact authorised browser call with JSON quoting already applied.
+# This crosses the tool boundary as an argument, not through either clipboard.
+$browserNavigationCode = 'await gptWebTab.goto(' + (ConvertTo-Json -InputObject $workspaceUrl -Compress) + ');'
+
 Write-CompactJson ([ordered]@{
     status = 'ready'
     bridge = [string](Get-ResultProperty $result 'bridge' '')
@@ -142,6 +146,8 @@ Write-CompactJson ([ordered]@{
     contextKey = $resolvedContext
     contextIsolated = $true
     workspaceUrl = $workspaceUrl
+    browserNavigationProtocol = 'cogentspec-gptweb-navigation-v1'
+    browserNavigationCode = $browserNavigationCode
     browserOpened = $false
     accountState = 'signed_in'
     mcpState = 'ready'
