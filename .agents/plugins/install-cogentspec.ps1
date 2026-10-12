@@ -300,6 +300,7 @@ try {
         'skills/cogentspec/scripts/delete-specification-project.ps1',
         'skills/cogentspec/scripts/delete-project.ps1',
         'skills/cogentspec/scripts/ensure-cogentspec-mcp.ps1',
+        'skills/cogentspec/scripts/ensure-default-project-directory.ps1',
         'skills/cogentspec/scripts/ensure-codex-sidebar-hidden.py',
         'skills/cogentspec/scripts/fulfil-project.ps1',
         'skills/cogentspec/scripts/generate-project-preview.ps1',

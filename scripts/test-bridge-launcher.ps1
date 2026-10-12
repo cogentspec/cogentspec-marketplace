@@ -53,6 +53,10 @@ if ($Mode -ne 'status' -or -not $WorkspaceGrant -or $RequestTimeoutSeconds -ne 6
     throw 'The launcher did not make the bounded direct status request.'
 }
 [string]$PID | Set-Content -LiteralPath $env:COGENTSPEC_LAUNCHER_TEST_CONNECTOR_PROCESS_PATH -Encoding ascii
+if (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'signed-out.flag')) {
+    [ordered]@{ status = 'not_installed'; reason = 'fixture_signed_out' } | ConvertTo-Json -Compress
+    return
+}
 [ordered]@{
     status = 'connected'
     webWorkspaceCode = 'cgw_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'
@@ -76,6 +80,18 @@ if (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'mcp-block.flag')) {
 } | ConvertTo-Json -Compress
 '@
     Set-Content -LiteralPath (Join-Path $fixtureScripts 'ensure-cogentspec-mcp.ps1') -Value $projectDataConnectionFixture -Encoding UTF8
+
+    # Never prepare the real user's folder from the launcher fixture.
+    $directoryFixture = @'
+function Initialize-CogentSpecDefaultProjectDirectory {
+    Add-Content -LiteralPath (Join-Path $PSScriptRoot 'directory-called.txt') -Value 'called'
+    if (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'directory-block.flag')) {
+        return [pscustomobject]@{status='default_directory_unavailable';reason='default_directory_not_writable';userMessage='The default projects folder is not writable.'}
+    }
+    return [pscustomobject]@{status='ready';directory='C:\FixtureProfile\CogentSpec\projects';created=$false;writable=$true}
+}
+'@
+    Set-Content -LiteralPath (Join-Path $fixtureScripts 'ensure-default-project-directory.ps1') -Value $directoryFixture -Encoding UTF8
 
 $watcherFixture = @'
 param(
@@ -134,6 +150,17 @@ Start-Sleep -Milliseconds 5500
 
     $env:COGENTSPEC_LAUNCHER_TEST_CONNECTOR_PROCESS_PATH = $connectorProcessPath
     $env:CODEX_THREAD_ID = $fixtureThreadId
+    $fixtureLauncher = Join-Path $fixtureScripts 'start-cogentstack-bridge.ps1'
+    Set-Content -LiteralPath (Join-Path $fixtureScripts 'signed-out.flag') -Value 'signed out'
+    $signedOut = (& $fixtureLauncher -ContextKey $contextKey -Surface chatgpt -Experience web) | ConvertFrom-Json
+    Assert-BridgeLauncherTest ($signedOut.status -eq 'signed_out') 'The signed-out fixture did not stop.'
+    Assert-BridgeLauncherTest (-not (Test-Path -LiteralPath (Join-Path $fixtureScripts 'directory-called.txt'))) 'The launcher touched a folder before authentication.'
+    Remove-Item -LiteralPath (Join-Path $fixtureScripts 'signed-out.flag')
+    Set-Content -LiteralPath (Join-Path $fixtureScripts 'directory-block.flag') -Value 'blocked'
+    $blockedDirectory = (& $fixtureLauncher -ContextKey $contextKey -Surface chatgpt -Experience web) | ConvertFrom-Json
+    Assert-BridgeLauncherTest ($blockedDirectory.status -eq 'default_directory_unavailable' -and $blockedDirectory.reason -eq 'default_directory_not_writable') 'A folder failure was masked as a login or restart problem.'
+    Assert-BridgeLauncherTest (-not $blockedDirectory.PSObject.Properties['workspaceUrl'] -and -not (Test-Path -LiteralPath $statePath)) 'A folder failure returned a handoff or started a worker.'
+    Remove-Item -LiteralPath (Join-Path $fixtureScripts 'directory-block.flag')
     $powerShellExecutable = (Get-Process -Id $PID).Path
     $launcherCommand = "& '$((Join-Path $fixtureScripts 'start-cogentstack-bridge.ps1').Replace("'", "''"))' -ContextKey '$contextKey' -Surface chatgpt"
     $encodedLauncherCommand = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($launcherCommand))
@@ -168,6 +195,7 @@ Start-Sleep -Milliseconds 5500
     Assert-BridgeLauncherTest ([string]$result.status -eq 'ready') 'The Bridge launcher did not become ready.'
     Assert-BridgeLauncherTest ([string]$result.bridge -eq 'started') 'The Bridge launcher did not start the fixture worker.'
     Assert-BridgeLauncherTest ([bool]$result.presenceVerified) 'The Bridge launcher reported ready before server presence was verified.'
+    Assert-BridgeLauncherTest ([bool]$result.defaultDirectoryReady -and -not [bool]$result.defaultDirectoryCreated) 'The launcher omitted verified default-directory evidence.'
     Assert-BridgeLauncherTest ([string]$result.mcpState -eq 'ready') 'The secure project-data connection was not ready.'
     Assert-BridgeLauncherTest (-not [bool]$result.currentConversationConnected) 'An unverified inspection must not claim the current chat is connected.'
     Assert-BridgeLauncherTest ($result.popoutUserMessage.Contains('workspace remains disconnected')) 'Bridge readiness must preserve the explicit disconnected outcome.'
@@ -194,6 +222,16 @@ Start-Sleep -Milliseconds 5500
     Assert-BridgeLauncherTest ([string]$readyMarker.threadId -ceq $fixtureThreadId) 'The verified worker is not bound to the invoking ChatGPT task.'
     $state = Get-Content -Raw -LiteralPath $statePath | ConvertFrom-Json
     $runtimeRoot = Split-Path -Parent ([string]$state.watcherScript)
+
+    foreach ($route in @(
+        @{ Surface = 'chatgpt'; Experience = 'desktop-ui' },
+        @{ Surface = 'chatgpt'; Experience = 'popout' },
+        @{ Surface = 'claude-desktop'; Experience = 'legacy' },
+        @{ Surface = 'claude-desktop'; Experience = 'web' }
+    )) {
+        $routeResult = (& $fixtureLauncher -ContextKey $contextKey -Surface $route.Surface -Experience $route.Experience) | ConvertFrom-Json
+        Assert-BridgeLauncherTest ($routeResult.status -eq 'ready' -and $routeResult.defaultDirectoryReady) ('Shared default directory check was missing for ' + $route.Surface + ':' + $route.Experience)
+    }
 
     $gptwebCommand = Join-Path $fixturePlugin 'skills\gptweb\scripts\start-gptweb.ps1'
     $mcpCallsBeforeWeb = @(Get-Content -LiteralPath (Join-Path $fixtureScripts 'mcp-called.txt')).Count
@@ -629,6 +667,9 @@ $legacyUrl = "https://cogentspec.app/stack?surface=chatgpt&experience=web#deskto
         launcherElapsedMs = [int]$result.launcherElapsedMs
         observedElapsedMs = [int]$timer.ElapsedMilliseconds
         directAccountCheck = $true
+        directoryAfterAuthenticationVerified = $true
+        directoryFailureFailClosedVerified = $true
+        sharedDirectoryRoutesVerified = $true
         boundedAccountCheckSeconds = 6
         projectDataConnection = 'ready'
         presenceVerified = [bool]$result.presenceVerified

@@ -100,6 +100,7 @@ for (const forbidden of [
 
 const requiredScripts = [
   "connect-cogentstack.ps1",
+  "ensure-default-project-directory.ps1",
   "create-specification-project.ps1",
   "delete-specification-project.ps1",
   "delete-project.ps1",

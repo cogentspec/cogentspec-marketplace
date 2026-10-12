@@ -336,6 +336,7 @@ $chatgptWorkspaceUrl = $connectionUrl
 $connectionScript = Join-Path $PSScriptRoot 'connect-cogentstack.ps1'
 $sourceScriptNames = @(
     'connect-cogentstack.ps1',
+    'ensure-default-project-directory.ps1',
     'create-specification-project.ps1',
     'delete-specification-project.ps1',
     'delete-project.ps1',
@@ -415,6 +416,21 @@ if ($requiresCodexMcp) {
 if ([string]$connection.webWorkspaceCode -notmatch '^cgw_[A-Za-z0-9_-]{32,}$' -or
     [string]$connection.chatgptWorkspaceCode -notmatch '^cgw_[A-Za-z0-9_-]{32,}$') {
     throw 'Desktop Bridge could not create the two private CogentSpec.app workspace handoffs.'
+}
+. (Join-Path $PSScriptRoot 'ensure-default-project-directory.ps1')
+$defaultDirectory = Initialize-CogentSpecDefaultProjectDirectory
+if ([string]$defaultDirectory.status -ne 'ready') {
+    Write-CompactJson ([ordered]@{
+        status = 'default_directory_unavailable'
+        contextKey = $resolvedContext
+        contextIsolated = [bool]$projectContext.Isolated
+        accountState = 'signed_in'
+        browserOpened = $false
+        reason = [string]$defaultDirectory.reason
+        userMessage = [string]$defaultDirectory.userMessage
+        launcherElapsedMs = [int]$launcherTimer.ElapsedMilliseconds
+    })
+    return
 }
 $workspaceBaseUrl = "https://cogentspec.app/stack?surface=$([Uri]::EscapeDataString($Surface))&context=$([Uri]::EscapeDataString($resolvedContext))"
 if ($Experience -ne 'legacy') {
@@ -500,6 +516,8 @@ if (Test-Path -LiteralPath $statePath -PathType Leaf) {
                     browserOpened = $false
                     accountState = 'signed_in'
                     mcpState = $mcpState
+                    defaultDirectoryReady = $true
+                    defaultDirectoryCreated = [bool]$defaultDirectory.created
                     projectDataConnection = $projectDataConnection
                     pluginId = $pluginId
                     pluginVersion = $pluginVersion
@@ -578,6 +596,8 @@ Write-CompactJson ([ordered]@{
     browserOpened = $false
     accountState = 'signed_in'
     mcpState = $mcpState
+    defaultDirectoryReady = $true
+    defaultDirectoryCreated = [bool]$defaultDirectory.created
     projectDataConnection = $projectDataConnection
     pluginId = $pluginId
     pluginVersion = $pluginVersion
