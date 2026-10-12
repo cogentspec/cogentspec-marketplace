@@ -18,6 +18,8 @@ if ($null -eq ('System.Security.Cryptography.ProtectedData' -as [type])) {
 $serviceUrl = 'https://cogentspec.com'
 $stateRoot = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'CogentSpec'
 $credentialPath = Join-Path $stateRoot 'desktop-credential.json'
+$profileDirectory = [Environment]::GetFolderPath('UserProfile')
+$defaultWorkDirectory = if ($profileDirectory) { Join-Path $profileDirectory 'CogentSpec\projects' } else { '' }
 $contextQuery = "context=$([Uri]::EscapeDataString($ContextKey))&pluginId=$([Uri]::EscapeDataString($PluginId))&pluginVersion=$([Uri]::EscapeDataString($PluginVersion))"
 $contextHashAlgorithm = [Security.Cryptography.SHA256]::Create()
 try {
@@ -54,6 +56,10 @@ function Invoke-BridgeApi([string]$Method, [string]$Path, [string]$Token, $Body 
         Uri = "$serviceUrl$Path"
         Headers = @{ Accept = 'application/json'; Authorization = "Bearer $Token" }
         TimeoutSec = 20
+    }
+    # Report this computer's default only on the authenticated heartbeat, never in a URL.
+    if ($Method -eq 'Get' -and $Path.StartsWith('/api/plugin/desktop-actions?') -and $defaultWorkDirectory) {
+        $parameters.Headers['x-cogentspec-project-directory'] = [Uri]::EscapeDataString($defaultWorkDirectory)
     }
     if ($null -ne $Body) {
         $parameters.ContentType = 'application/json'
