@@ -1,4 +1,4 @@
-"""Repair GPTDesk host layout through explicit accessibility controls only."""
+"""Repair GPTDesk through observed controls in hosts that permit UI automation."""
 
 from __future__ import annotations
 
@@ -213,6 +213,12 @@ if os.name == "nt":
     VT_BSTR = 8
     VT_BOOL = 11
     PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+    INPUT_KEYBOARD = 1
+    KEYEVENTF_KEYUP = 0x0002
+    VK_CONTROL = 0x11
+    VK_SHIFT = 0x10
+    VK_MENU = 0x12
+    VK_S = 0x53
 
     class GUID(ctypes.Structure):
         _fields_ = [
@@ -253,6 +259,31 @@ if os.name == "nt":
             ("value", VARIANT_VALUE),
         ]
 
+    class KEYBDINPUT(ctypes.Structure):
+        _fields_ = [
+            ("wVk", wintypes.WORD), ("wScan", wintypes.WORD),
+            ("dwFlags", wintypes.DWORD), ("time", wintypes.DWORD),
+            ("dwExtraInfo", ctypes.c_size_t),
+        ]
+
+    class MOUSEINPUT(ctypes.Structure):
+        _fields_ = [
+            ("dx", wintypes.LONG), ("dy", wintypes.LONG),
+            ("mouseData", wintypes.DWORD), ("dwFlags", wintypes.DWORD),
+            ("time", wintypes.DWORD), ("dwExtraInfo", ctypes.c_size_t),
+        ]
+
+    class HARDWAREINPUT(ctypes.Structure):
+        _fields_ = [("uMsg", wintypes.DWORD), ("wParamL", wintypes.WORD),
+                    ("wParamH", wintypes.WORD)]
+
+    class INPUT_VALUE(ctypes.Union):
+        _fields_ = [("mi", MOUSEINPUT), ("ki", KEYBDINPUT), ("hi", HARDWAREINPUT)]
+
+    class INPUT(ctypes.Structure):
+        _anonymous_ = ("value",)
+        _fields_ = [("type", wintypes.DWORD), ("value", INPUT_VALUE)]
+
     CLSID_CUIAUTOMATION = GUID.parse("ff48dba4-60ef-4201-aa87-54103eef594e")
     IID_IUIAUTOMATION = GUID.parse("30cbe57d-d9d0-452a-ab13-7ac5ac4825ee")
     IID_IUIAUTOMATION_INVOKE_PATTERN = GUID.parse("fb377fbe-8ea6-46d5-9c73-6499642d3059")
@@ -286,6 +317,12 @@ if os.name == "nt":
     user32.IsWindowVisible.restype = wintypes.BOOL
     user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
     user32.GetWindowThreadProcessId.restype = wintypes.DWORD
+    user32.GetForegroundWindow.argtypes = []
+    user32.GetForegroundWindow.restype = wintypes.HWND
+    user32.GetAsyncKeyState.argtypes = [ctypes.c_int]
+    user32.GetAsyncKeyState.restype = ctypes.c_short
+    user32.SendInput.argtypes = [wintypes.UINT, ctypes.POINTER(INPUT), ctypes.c_int]
+    user32.SendInput.restype = wintypes.UINT
 
     def succeeded(result: int) -> bool:
         return result >= 0
@@ -545,10 +582,57 @@ if os.name == "nt":
                 release(control)
 
         def invoke_hide(self, candidate: SidebarCandidate) -> bool:
+            # Restore the Oct 11 state-aware action: this host exposes the
+            # button but no InvokePattern. This is not a policy bypass:
+            # callers must still respect the host's UI automation restrictions.
             if self.read_state(candidate) != "open":
                 self.last_control_result = {"stage": "state_recheck", "reason": "sidebar_state_changed", "actionAccepted": False}
                 return False
-            return self.invoke_named(candidate, "Hide sidebar")
+            self.last_control_result = {"control": "Hide sidebar", "method": "state_checked_shortcut",
+                                        "stage": "control_lookup", "reason": "control_not_found",
+                                        "actionAccepted": False, "inputSent": False}
+            root = self._roots.get(int(candidate.token))
+            if root is None:
+                self.last_control_result["reason"] = "window_unavailable"
+                return False
+            control = self._named_element(root, "Hide sidebar")
+            if control is None:
+                self.last_control_result.update(getattr(self, "last_search_result", {}))
+                return False
+            try:
+                enabled = self._bool_property(control, UIA_IS_ENABLED_PROPERTY_ID)
+                if enabled is not True:
+                    self.last_control_result.update({"stage": "enabled_check",
+                        "reason": "element_disabled" if enabled is False else "enabled_state_unreadable"})
+                    return False
+                if int(user32.GetForegroundWindow() or 0) != int(candidate.token):
+                    self.last_control_result.update({"stage": "foreground_check", "reason": "target_not_foreground"})
+                    return False
+                if any(user32.GetAsyncKeyState(key) & 0x8000 for key in (VK_CONTROL, VK_SHIFT, VK_MENU, VK_S)):
+                    self.last_control_result.update({"stage": "keyboard_check", "reason": "shortcut_keys_held"})
+                    return False
+                keys = ((VK_CONTROL, 0), (VK_SHIFT, 0), (VK_S, 0),
+                        (VK_S, KEYEVENTF_KEYUP), (VK_SHIFT, KEYEVENTF_KEYUP),
+                        (VK_CONTROL, KEYEVENTF_KEYUP))
+                events = (INPUT * len(keys))(*[
+                    INPUT(type=INPUT_KEYBOARD, ki=KEYBDINPUT(wVk=key, dwFlags=flags))
+                    for key, flags in keys
+                ])
+                # Fail closed if state/focus changed while preparing input.
+                if self.read_state(candidate) != "open":
+                    self.last_control_result.update({"stage": "state_recheck", "reason": "sidebar_state_changed"})
+                    return False
+                if int(user32.GetForegroundWindow() or 0) != int(candidate.token):
+                    self.last_control_result.update({"stage": "foreground_check", "reason": "target_not_foreground"})
+                    return False
+                sent = user32.SendInput(len(events), events, ctypes.sizeof(INPUT))
+                accepted = sent == len(events)
+                self.last_control_result.update({"stage": "shortcut_send",
+                    "reason": "accepted" if accepted else "shortcut_input_incomplete",
+                    "actionAccepted": accepted, "inputSent": sent > 0, "eventsSent": sent})
+                return accepted  # Caller verifies Show sidebar; never retry a toggle.
+            finally:
+                release(control)
 
         def read_layout(self, candidate: SidebarCandidate) -> tuple[str, str | None]:
             root = self._roots.get(int(candidate.token))

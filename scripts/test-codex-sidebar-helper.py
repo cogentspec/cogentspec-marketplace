@@ -288,6 +288,74 @@ class WindowsControlTests(unittest.TestCase):
     def test_variant_has_correct_windows_abi_size(self) -> None:
         self.assertEqual(ctypes.sizeof(MODULE.VARIANT), 24 if ctypes.sizeof(ctypes.c_void_p) == 8 else 16)
 
+    def test_input_has_correct_windows_abi_size(self) -> None:
+        self.assertEqual(ctypes.sizeof(MODULE.INPUT), 40 if ctypes.sizeof(ctypes.c_void_p) == 8 else 28)
+
+    def shortcut_case(self, *, states: list[str] | None = None,
+                      foreground: list[int] | None = None, enabled: bool | None = True,
+                      held: bool = False, sent: int = 6, visible: bool = True) -> tuple[object, object]:
+        backend = self.backend()
+        with patch.object(backend, "read_state", side_effect=states or ["open", "open"]), \
+                patch.object(backend, "_named_element", return_value=ctypes.c_void_p(13) if visible else None), \
+                patch.object(backend, "_bool_property", return_value=enabled), \
+                patch.object(backend, "invoke_named", side_effect=AssertionError("InvokePattern must not be required")), \
+                patch.object(MODULE.user32, "GetForegroundWindow", side_effect=foreground or [10, 10]), \
+                patch.object(MODULE.user32, "GetAsyncKeyState", return_value=0x8000 if held else 0), \
+                patch.object(MODULE.user32, "SendInput", return_value=sent) as send, \
+                patch.object(MODULE, "release"):
+            result = backend.invoke_hide(MODULE.SidebarCandidate(1, "open", 10))
+        return (result, backend.last_control_result), send
+
+    def test_sidebar_without_invoke_pattern_uses_one_state_checked_shortcut(self) -> None:
+        (result, details), send = self.shortcut_case()
+        self.assertTrue(result)
+        self.assertEqual(details["method"], "state_checked_shortcut")
+        self.assertTrue(details["inputSent"])
+        send.assert_called_once()
+        count, events, size = send.call_args.args
+        self.assertEqual((count, size), (6, ctypes.sizeof(MODULE.INPUT)))
+        self.assertEqual([(e.ki.wVk, e.ki.dwFlags) for e in events],
+                         [(0x11, 0), (0x10, 0), (0x53, 0),
+                          (0x53, 2), (0x10, 2), (0x11, 2)])
+
+    def test_sidebar_changed_or_already_hidden_sends_no_keys(self) -> None:
+        for states in [["hidden"], ["unknown"], ["open", "hidden"]]:
+            with self.subTest(states=states):
+                (result, details), send = self.shortcut_case(states=states)
+                self.assertFalse(result)
+                self.assertEqual(details["reason"], "sidebar_state_changed")
+                send.assert_not_called()
+
+    def test_other_foreground_window_receives_no_keys(self) -> None:
+        for foreground in [[20], [0], [10, 20]]:
+            with self.subTest(foreground=foreground):
+                (result, details), send = self.shortcut_case(foreground=foreground)
+                self.assertFalse(result)
+                self.assertEqual(details["reason"], "target_not_foreground")
+                send.assert_not_called()
+
+    def test_disabled_unknown_or_missing_hide_control_sends_no_keys(self) -> None:
+        for args in [{"enabled": False}, {"enabled": None}, {"visible": False}]:
+            with self.subTest(args=args):
+                (result, _details), send = self.shortcut_case(**args)
+                self.assertFalse(result)
+                send.assert_not_called()
+
+    def test_held_shortcut_keys_prevent_input(self) -> None:
+        (result, details), send = self.shortcut_case(held=True)
+        self.assertFalse(result)
+        self.assertEqual(details["reason"], "shortcut_keys_held")
+        send.assert_not_called()
+
+    def test_incomplete_keyboard_input_fails_without_retry(self) -> None:
+        for sent in [0, 2]:
+            with self.subTest(sent=sent):
+                (result, details), send = self.shortcut_case(sent=sent)
+                self.assertFalse(result)
+                self.assertEqual(details["reason"], "shortcut_input_incomplete")
+                self.assertEqual(details["eventsSent"], sent)
+                send.assert_called_once()
+
     def test_property_failure_preserves_hresult(self) -> None:
         backend = self.backend()
         with patch.object(MODULE, "com_method", return_value=lambda *_: ctypes.c_int32(0x80070005).value):

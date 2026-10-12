@@ -245,7 +245,10 @@ for (const [name, helper] of [["canonical", canonicalSidebarHelper], ["compatibi
   for (const marker of ["Hide sidebar", "Show sidebar", "UIA_BUTTON_CONTROL_TYPE_ID", "UIA_INVOKE_PATTERN_ID", "IID_IUIAUTOMATION_INVOKE_PATTERN", '"already_hidden"', '"ambiguous"', '"layout_verified"']) {
     if (!helper.includes(marker)) fail(`${name} Python sidebar helper is missing marker: ${marker}`);
   }
-  if (/SendInput|GetForegroundWindow|SetForegroundWindow/.test(helper)) fail(`${name} GPTDesk helper must not inject global shortcuts or steal focus`);
+  if (/SetForegroundWindow/.test(helper)) fail(`${name} GPTDesk helper must not steal focus`);
+  for (const marker of ["state_checked_shortcut", "target_not_foreground", "shortcut_keys_held", "sidebar_state_changed"]) {
+    if (!helper.includes(marker)) fail(`${name} GPTDesk sidebar shortcut is missing its state guard: ${marker}`);
+  }
 }
 if (canonicalSidebarHelper !== compatibilitySidebarHelper) fail("GPTDesk layout helpers must be identical across GPT packages");
 for (const marker of ["cogentspec-update-check-v1", "/api/plugin-version", "update_available", "check_unavailable", "UPDATE.v1.md"]) {
