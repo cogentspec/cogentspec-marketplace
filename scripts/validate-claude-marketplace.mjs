@@ -53,7 +53,10 @@ for (const [root, mainSkill] of [[pluginRoot, "cogentspec"], [compatibilityRoot,
     const commandRoot = join(root, "skills", command);
     const commandSkill = await readFile(join(commandRoot, "SKILL.md"), "utf8");
     const commandMetadata = await readFile(join(commandRoot, "agents", "openai.yaml"), "utf8");
-    for (const marker of [`name: ${command}`, `../${mainSkill}/SKILL.md`, `-Surface claude-desktop -Experience ${experience}`, destination, confirmation]) {
+    const markers = command === "claudeweb"
+      ? [`name: ${command}`, `../${mainSkill}/SKILL.md`, "start-claudeweb.ps1", "-Surface claude-desktop -Experience web", destination, "Claude web workspace is ready", "Bridge connected", "My projects", "cogentspec-claudeweb-navigation-v1"]
+      : [`name: ${command}`, `../${mainSkill}/SKILL.md`, `-Surface claude-desktop -Experience ${experience}`, destination, confirmation];
+    for (const marker of markers) {
       if (!commandSkill.includes(marker)) fail(`${command} is missing Claude destination marker: ${marker}`);
     }
     for (const marker of [`$${command}`, "allow_implicit_invocation: false"]) {
@@ -139,7 +142,14 @@ if (normalized(await readFile(join(scriptsRoot, credentialRunner), "utf8")) !== 
   fail(`${credentialRunner} must remain identical to the shared Desktop Bridge implementation`);
 }
 
-const syntaxPaths = requiredScripts.map((name) => `'${join(scriptsRoot, name).replaceAll("'", "''")}'`).join(", ");
+const claudeWebLaunchers = [pluginRoot, compatibilityRoot].map(root => join(root, "skills", "claudeweb", "scripts", "start-claudeweb.ps1"));
+const canonicalWebSource = await readFile(claudeWebLaunchers[0], "utf8");
+const compatibilityWebSource = await readFile(claudeWebLaunchers[1], "utf8");
+if (normalized(canonicalWebSource) !== normalized(compatibilityWebSource).replaceAll("..\\..\\cogentstack\\scripts", "..\\..\\cogentspec\\scripts")) fail("Claude Web launcher compatibility parity failed");
+for (const marker of ["-Surface claude-desktop -Experience web", "'claude-desktop'", "authenticated_desktop_bridge", "defaultDirectoryReady", "invalid_workspace_handoff", "cogentspec-claudeweb-navigation-v1", "await claudeWebTab.goto("]) {
+  if (!canonicalWebSource.includes(marker)) fail(`Claude Web launcher missing ${marker}`);
+}
+const syntaxPaths = [...requiredScripts.map((name) => join(scriptsRoot, name)), ...claudeWebLaunchers].map(path => `'${path.replaceAll("'", "''")}'`).join(", ");
 const syntaxCommand = `& { $failed = $false; foreach ($path in @(${syntaxPaths})) { $tokens = $null; $errors = $null; [void][System.Management.Automation.Language.Parser]::ParseFile($path, [ref]$tokens, [ref]$errors); if ($errors.Count -gt 0) { $failed = $true; $errors | ForEach-Object { [Console]::Error.WriteLine(\"$($path): $($_.Message)\") } } }; if ($failed) { exit 1 } }`;
 const encodedSyntaxCommand = Buffer.from(syntaxCommand, "utf16le").toString("base64");
 const syntaxCheck = spawnSync("cmd.exe", [

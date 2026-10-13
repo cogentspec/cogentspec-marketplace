@@ -1,15 +1,16 @@
 ---
 name: claudeweb
-description: Connect the current isolated Claude project through the ordinary CogentSpec web workspace. Use only when the user explicitly invokes $claudeweb or asks for the Claude web command.
+description: Connect the current isolated Claude project to the direct CogentSpec Web Bridge. Use for an explicit $claudeweb command; not Claude Desktop, ChatGPT, or Popout.
 ---
 
 # Open the CogentSpec Claude web workspace
 
-Read `../cogentspec/SKILL.md` and follow its project-context, privacy, account, and connection requirements for **Connect this Claude project**, with these destination-specific changes only:
+Read `../cogentspec/SKILL.md` for the shared credential, privacy, and account boundaries only. This explicit Web command replaces the generic connection sequence and its link-only delivery; it does not change $claudedesk or $cogentspec. Use `${CLAUDE_PLUGIN_ROOT}` and the invoking Claude project directory. A browser side panel by itself does not provide local execution: this command requires the CogentSpec plugin and local helper access.
 
-1. Invoke `../cogentspec/scripts/start-cogentstack-bridge.ps1 -ContextKey <resolved context> -Surface claude-desktop -Experience web` exactly once.
-2. Require the normal ready contract and require `workspaceUrl` to be the private `webWorkspaceUrl` with `experience=web`. Do not expose either private URL in commentary or logs.
-3. Return that URL exactly once as `[Open this task’s CogentSpec workspace in web](<URL>)`. Do not return the Claude-labelled Desktop link.
-4. Say: **CogentSpec’s Claude web workspace is ready. Open the link to continue.**
+1. Invoke `scripts/start-claudeweb.ps1` once. It resolves the isolated context and invokes the shared launcher internally with `-Surface claude-desktop -Experience web`; do not run context or Bridge helpers again. If a package update was already verified, resolve this helper only beneath the refreshed plugin root.
+2. Require `status: ready`, `accountState: signed_in`, `presenceVerified: true`, `defaultDirectoryReady: true`, `projectDataConnection: authenticated_desktop_bridge`, and `mcpState: not_required`. The only returned private `workspaceUrl` is the validated `webWorkspaceUrl`: HTTPS cogentspec.app /stack, matching context, Claude surface, experience=web, open=web, nav, and #desktop-web handoff. Reject legacy #desktop, Desktop/Popout, wrong-provider, or mismatched handoffs. On failure show only the plain userMessage and stop.
+3. Where an approved browser tool is available, claim the intended CogentSpec Web tab and bind its handle as `claudeWebTab`. Require `browserNavigationProtocol: cogentspec-claudeweb-navigation-v1` and execute the supplied `browserNavigationCode` once as a tool argument. It preserves the complete validated handoff. Do not navigate Claude's conversation page, use a native Desktop open, rearrange windows, or transfer the URL through files, local servers, clipboards, or logs. If no intended workspace tab exists, create one only in the user's identified browser.
+4. Verify the page's context matches, the one-use fragment is consumed, the LED reports **Bridge connected**, and **My projects** loads without authorization or missing-context errors. An empty authorized library is valid. Only then say **CogentSpec's Claude web workspace is connected. Continue beside this conversation.** Readiness alone is not page connection and the ChatGPT Popout exact-chat gate does not apply.
+5. When browser delivery is unavailable, return the unconsumed workspaceUrl once as **[Open CogentSpec Claude web workspace](<URL>)** and say **CogentSpec's Claude web workspace is ready. Open the link to continue.** Explain that the existing page stays disconnected until the link is opened. Do not return a consumed handoff or retry a failed attempt.
 
-This command selects only the ordinary web destination for the current Claude project. It must not call browser control, create or select a tab, resize or join the Claude window, activate ChatGPT Popout behavior, or alter the shared project flow.
+The authenticated Bridge prepares and verifies only this Windows user's default projects parent; a custom parent and each project directory still require approved creation. Preserve Claude Web's explicit parent-folder choice across navigation without copying GPT Web's preference. Do not activate ChatGPT Desk or Popout helpers, request a custom connector login, expose credentials, or change shared project state merely to connect.

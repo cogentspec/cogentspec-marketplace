@@ -22,7 +22,7 @@ node scripts/validate-claude-marketplace.mjs
 
 The Claude plugin retains `$cogentstack` as the common invocation. It resolves the current Claude Code Desktop project's isolated logical CogentSpec context, starts or reuses the same background Desktop Bridge used by CogentSpec Web and Qwen Desktop, and returns the matching web URL. It does not open or inspect browser tabs, hide the Claude sidebar, resize windows, embed CogentSpec, or automate Claude's private interface.
 
-Claude Web is intentionally outside this package. It may use a separate remote-connector flow later.
+The explicit `$claudeweb` skill prepares the ordinary Web destination through a dedicated validated launcher. Where approved browser control is available it delivers the one-use handoff to the intended CogentSpec workspace tab; otherwise it returns one recovery link. It reports connected only after the workspace LED and project library are verified. This requires the installed plugin and local helper access; a plain Claude-in-Chrome chat is not itself a local Bridge executor. `$claudedesk` and the general connection command retain their separate link-based flows.
 
 ## ChatGPT and Codex Desktop
 
