@@ -166,6 +166,7 @@ const canonicalPopoutWatcher = await readFile(join(sourcePluginPath, "skills", "
 const canonicalDesktopUiStarter = await readFile(join(sourcePluginPath, "skills", "cogentspec", "scripts", "start-cogentspec-desktop-ui-bridge.ps1"), "utf8");
 const canonicalDesktopUiWatcher = await readFile(join(sourcePluginPath, "skills", "cogentspec", "scripts", "watch-cogentspec-desktop-ui-bridge.ps1"), "utf8");
 const canonicalDesktopUiHelper = await readFile(join(sourcePluginPath, "skills", "cogentspec", "scripts", "open-chatgpt-desktop-ui.ps1"), "utf8");
+const canonicalPopoutNormalizer = await readFile(join(sourcePluginPath, "skills", "cogentspec", "scripts", "popout-window-normalizer.ps1"), "utf8");
 const canonicalGptWebStarter = await readFile(join(sourcePluginPath, "skills", "gptweb", "scripts", "start-gptweb.ps1"), "utf8");
 const compatibilityStarter = await readFile(join(compatibilityPluginPath, "skills", "cogentstack", "scripts", "start-cogentstack-bridge.ps1"), "utf8");
 const compatibilitySkill = await readFile(join(compatibilityPluginPath, "skills", "cogentstack", "SKILL.md"), "utf8");
@@ -177,6 +178,7 @@ const compatibilityPopoutWatcher = await readFile(join(compatibilityPluginPath, 
 const compatibilityDesktopUiStarter = await readFile(join(compatibilityPluginPath, "skills", "cogentstack", "scripts", "start-cogentspec-desktop-ui-bridge.ps1"), "utf8");
 const compatibilityDesktopUiWatcher = await readFile(join(compatibilityPluginPath, "skills", "cogentstack", "scripts", "watch-cogentspec-desktop-ui-bridge.ps1"), "utf8");
 const compatibilityDesktopUiHelper = await readFile(join(compatibilityPluginPath, "skills", "cogentstack", "scripts", "open-chatgpt-desktop-ui.ps1"), "utf8");
+const compatibilityPopoutNormalizer = await readFile(join(compatibilityPluginPath, "skills", "cogentstack", "scripts", "popout-window-normalizer.ps1"), "utf8");
 const compatibilityGptWebStarter = await readFile(join(compatibilityPluginPath, "skills", "gptweb", "scripts", "start-gptweb.ps1"), "utf8");
 const commandContracts = [
   ["gptpop", "popout", "webWorkspaceUrl", "CogentSpec GPT Popout work area"],
@@ -194,6 +196,36 @@ for (const pluginPath of [sourcePluginPath, compatibilityPluginPath]) {
     for (const marker of [`$${command}`, "allow_implicit_invocation: false"]) {
       if (!commandMetadata.includes(marker)) fail(`${command} metadata is missing explicit-command marker: ${marker}`);
     }
+  }
+}
+if (canonicalPopoutNormalizer !== compatibilityPopoutNormalizer) {
+  fail("Popout Window Normalizer scripts must be identical across GPT packages");
+}
+for (const [name, normalizer] of [["canonical", canonicalPopoutNormalizer], ["compatibility", compatibilityPopoutNormalizer]]) {
+  for (const marker of [
+    "verified_retained_popout",
+    "single_signed_claude_window_candidate",
+    "clamped_by_application",
+    "SWP_NOACTIVATE",
+    "Restore-NormalizerWindows",
+    "Popout Window Normalizer",
+  ]) {
+    if (!normalizer.includes(marker)) fail(`${name} Popout Window Normalizer is missing ${marker}`);
+  }
+  for (const forbidden of ["SetForegroundWindow", "SendInput", "keybd_event", "mouse_event", "SetWindowLong"]) {
+    if (normalizer.includes(forbidden)) fail(`${name} Popout Window Normalizer must not use ${forbidden}`);
+  }
+}
+for (const pluginPath of [sourcePluginPath, compatibilityPluginPath]) {
+  const popoutSkill = await readFile(join(pluginPath, "skills", "gptpop", "SKILL.md"), "utf8");
+  for (const marker of [
+    "Explicit user-requested Popout sizing",
+    "Window sizing is independent of connection",
+    "popout-window-normalizer.ps1",
+    "clamped_by_application",
+    "not a registered Claude connection command",
+  ]) {
+    if (!popoutSkill.includes(marker)) fail(`gptpop sizing instructions are missing ${marker}`);
   }
 }
 for (const [name, skill] of [["canonical skill", canonicalSkill], ["compatibility skill", compatibilitySkill]]) {

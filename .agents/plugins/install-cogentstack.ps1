@@ -356,6 +356,7 @@ try {
         'skills/cogentstack/scripts/native-command.ps1',
         'skills/cogentstack/scripts/open-chatgpt-desktop-ui.ps1',
         'skills/cogentstack/scripts/open-chatgpt-popup.ps1',
+        'skills/cogentstack/scripts/popout-window-normalizer.ps1',
         'skills/cogentstack/scripts/capture-popout-diagnostics.ps1',
         'skills/cogentstack/scripts/prepare-development-handoff.ps1',
         'skills/cogentstack/scripts/prepare-deployment.ps1',
