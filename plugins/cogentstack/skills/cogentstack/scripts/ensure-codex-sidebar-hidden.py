@@ -319,6 +319,10 @@ if os.name == "nt":
     user32.GetWindowThreadProcessId.restype = wintypes.DWORD
     user32.GetForegroundWindow.argtypes = []
     user32.GetForegroundWindow.restype = wintypes.HWND
+    user32.BringWindowToTop.argtypes = [wintypes.HWND]
+    user32.BringWindowToTop.restype = wintypes.BOOL
+    user32.SetForegroundWindow.argtypes = [wintypes.HWND]
+    user32.SetForegroundWindow.restype = wintypes.BOOL
     user32.GetAsyncKeyState.argtypes = [ctypes.c_int]
     user32.GetAsyncKeyState.restype = ctypes.c_short
     user32.SendInput.argtypes = [wintypes.UINT, ctypes.POINTER(INPUT), ctypes.c_int]
@@ -581,6 +585,63 @@ if os.name == "nt":
                 release(pattern)
                 release(control)
 
+        @staticmethod
+        def _wait_for_foreground(hwnd: int, timeout_seconds: float = 0.5) -> bool:
+            deadline = time.monotonic() + timeout_seconds
+            while True:
+                if int(user32.GetForegroundWindow() or 0) == hwnd:
+                    return True
+                if time.monotonic() >= deadline:
+                    return False
+                time.sleep(0.025)
+
+        def _focus_shortcut_target(self, candidate: SidebarCandidate) -> bool:
+            target = int(candidate.token)
+            current = int(user32.GetForegroundWindow() or 0)
+            self._shortcut_previous_foreground = 0
+            if current == target:
+                self.last_control_result.update({"focusChanged": False, "focusTargetVerified": True})
+                return True
+            if not user32.IsWindowVisible(target):
+                self.last_control_result.update({"stage": "foreground_prepare", "reason": "target_not_visible",
+                                                 "focusChanged": False, "focusTargetVerified": False})
+                return False
+            self._shortcut_previous_foreground = current
+            brought = bool(user32.BringWindowToTop(target))
+            requested = bool(user32.SetForegroundWindow(target))
+            verified = self._wait_for_foreground(target)
+            self.last_control_result.update({"stage": "foreground_prepare",
+                                             "reason": "accepted" if verified else "target_activation_failed",
+                                             "focusChanged": verified, "focusTargetVerified": verified,
+                                             "bringWindowAccepted": brought,
+                                             "foregroundRequestAccepted": requested})
+            return verified
+
+        def _restore_shortcut_focus(self, candidate: SidebarCandidate) -> None:
+            previous = int(getattr(self, "_shortcut_previous_foreground", 0) or 0)
+            self._shortcut_previous_foreground = 0
+            if not previous or previous == int(candidate.token):
+                self.last_control_result.update({"focusRestoreNeeded": False, "focusRestored": True})
+                return
+            current = int(user32.GetForegroundWindow() or 0)
+            if current != int(candidate.token):
+                # The user or host moved focus while the shortcut was settling.
+                # Never override that newer choice.
+                self.last_control_result.update({"focusRestoreNeeded": True, "focusRestored": current == previous,
+                                                 "focusRestoreReason": "foreground_changed"})
+                return
+            if not user32.IsWindowVisible(previous):
+                self.last_control_result.update({"focusRestoreNeeded": True, "focusRestored": False,
+                                                 "focusRestoreReason": "previous_window_unavailable"})
+                return
+            brought = bool(user32.BringWindowToTop(previous))
+            requested = bool(user32.SetForegroundWindow(previous))
+            restored = self._wait_for_foreground(previous)
+            self.last_control_result.update({"focusRestoreNeeded": True, "focusRestored": restored,
+                                             "focusRestoreReason": "accepted" if restored else "restore_failed",
+                                             "restoreBringWindowAccepted": brought,
+                                             "restoreForegroundRequestAccepted": requested})
+
         def invoke_hide(self, candidate: SidebarCandidate) -> bool:
             # Restore the Oct 11 state-aware action: this host exposes the
             # button but no InvokePattern. This is not a policy bypass:
@@ -605,32 +666,40 @@ if os.name == "nt":
                     self.last_control_result.update({"stage": "enabled_check",
                         "reason": "element_disabled" if enabled is False else "enabled_state_unreadable"})
                     return False
-                if int(user32.GetForegroundWindow() or 0) != int(candidate.token):
-                    self.last_control_result.update({"stage": "foreground_check", "reason": "target_not_foreground"})
+                if not self._focus_shortcut_target(candidate):
                     return False
-                if any(user32.GetAsyncKeyState(key) & 0x8000 for key in (VK_CONTROL, VK_SHIFT, VK_MENU, VK_S)):
-                    self.last_control_result.update({"stage": "keyboard_check", "reason": "shortcut_keys_held"})
-                    return False
-                keys = ((VK_CONTROL, 0), (VK_SHIFT, 0), (VK_S, 0),
-                        (VK_S, KEYEVENTF_KEYUP), (VK_SHIFT, KEYEVENTF_KEYUP),
-                        (VK_CONTROL, KEYEVENTF_KEYUP))
-                events = (INPUT * len(keys))(*[
-                    INPUT(type=INPUT_KEYBOARD, ki=KEYBDINPUT(wVk=key, dwFlags=flags))
-                    for key, flags in keys
-                ])
-                # Fail closed if state/focus changed while preparing input.
-                if self.read_state(candidate) != "open":
-                    self.last_control_result.update({"stage": "state_recheck", "reason": "sidebar_state_changed"})
-                    return False
-                if int(user32.GetForegroundWindow() or 0) != int(candidate.token):
-                    self.last_control_result.update({"stage": "foreground_check", "reason": "target_not_foreground"})
-                    return False
-                sent = user32.SendInput(len(events), events, ctypes.sizeof(INPUT))
-                accepted = sent == len(events)
-                self.last_control_result.update({"stage": "shortcut_send",
-                    "reason": "accepted" if accepted else "shortcut_input_incomplete",
-                    "actionAccepted": accepted, "inputSent": sent > 0, "eventsSent": sent})
-                return accepted  # Caller verifies Show sidebar; never retry a toggle.
+                try:
+                    if any(user32.GetAsyncKeyState(key) & 0x8000 for key in (VK_CONTROL, VK_SHIFT, VK_MENU, VK_S)):
+                        self.last_control_result.update({"stage": "keyboard_check", "reason": "shortcut_keys_held"})
+                        return False
+                    keys = ((VK_CONTROL, 0), (VK_SHIFT, 0), (VK_S, 0),
+                            (VK_S, KEYEVENTF_KEYUP), (VK_SHIFT, KEYEVENTF_KEYUP),
+                            (VK_CONTROL, KEYEVENTF_KEYUP))
+                    events = (INPUT * len(keys))(*[
+                        INPUT(type=INPUT_KEYBOARD, ki=KEYBDINPUT(wVk=key, dwFlags=flags))
+                        for key, flags in keys
+                    ])
+                    # Fail closed if state/focus changed while preparing input.
+                    if self.read_state(candidate) != "open":
+                        self.last_control_result.update({"stage": "state_recheck", "reason": "sidebar_state_changed"})
+                        return False
+                    if int(user32.GetForegroundWindow() or 0) != int(candidate.token):
+                        self.last_control_result.update({"stage": "foreground_check", "reason": "target_not_foreground"})
+                        return False
+                    sent = user32.SendInput(len(events), events, ctypes.sizeof(INPUT))
+                    accepted = sent == len(events)
+                    self.last_control_result.update({"stage": "shortcut_send",
+                        "reason": "accepted" if accepted else "shortcut_input_incomplete",
+                        "actionAccepted": accepted, "inputSent": sent > 0, "eventsSent": sent})
+                    if accepted:
+                        # Give the target queue a bounded chance to consume the
+                        # shortcut before restoring the user's prior foreground.
+                        settle_deadline = time.monotonic() + 0.5
+                        while self.read_state(candidate) == "open" and time.monotonic() < settle_deadline:
+                            time.sleep(0.025)
+                    return accepted  # Caller verifies Show sidebar; never retry a toggle.
+                finally:
+                    self._restore_shortcut_focus(candidate)
             finally:
                 release(control)
 

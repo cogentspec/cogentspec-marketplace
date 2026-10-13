@@ -292,14 +292,15 @@ class WindowsControlTests(unittest.TestCase):
         self.assertEqual(ctypes.sizeof(MODULE.INPUT), 40 if ctypes.sizeof(ctypes.c_void_p) == 8 else 28)
 
     def shortcut_case(self, *, states: list[str] | None = None,
-                      foreground: list[int] | None = None, enabled: bool | None = True,
+                      focus_ready: bool = True, enabled: bool | None = True,
                       held: bool = False, sent: int = 6, visible: bool = True) -> tuple[object, object]:
         backend = self.backend()
-        with patch.object(backend, "read_state", side_effect=states or ["open", "open"]), \
+        with patch.object(backend, "read_state", side_effect=states or ["open", "open", "hidden"]), \
                 patch.object(backend, "_named_element", return_value=ctypes.c_void_p(13) if visible else None), \
                 patch.object(backend, "_bool_property", return_value=enabled), \
                 patch.object(backend, "invoke_named", side_effect=AssertionError("InvokePattern must not be required")), \
-                patch.object(MODULE.user32, "GetForegroundWindow", side_effect=foreground or [10, 10]), \
+                patch.object(backend, "_focus_shortcut_target", return_value=focus_ready), \
+                patch.object(MODULE.user32, "GetForegroundWindow", return_value=10), \
                 patch.object(MODULE.user32, "GetAsyncKeyState", return_value=0x8000 if held else 0), \
                 patch.object(MODULE.user32, "SendInput", return_value=sent) as send, \
                 patch.object(MODULE, "release"):
@@ -326,13 +327,48 @@ class WindowsControlTests(unittest.TestCase):
                 self.assertEqual(details["reason"], "sidebar_state_changed")
                 send.assert_not_called()
 
-    def test_other_foreground_window_receives_no_keys(self) -> None:
-        for foreground in [[20], [0], [10, 20]]:
-            with self.subTest(foreground=foreground):
-                (result, details), send = self.shortcut_case(foreground=foreground)
-                self.assertFalse(result)
-                self.assertEqual(details["reason"], "target_not_foreground")
-                send.assert_not_called()
+    def test_failed_target_activation_sends_no_keys(self) -> None:
+        (result, _details), send = self.shortcut_case(focus_ready=False)
+        self.assertFalse(result)
+        send.assert_not_called()
+
+    def test_other_foreground_is_temporarily_targeted_then_restored(self) -> None:
+        backend = self.backend()
+        backend.last_control_result = {}
+        candidate = MODULE.SidebarCandidate(1, "open", 10)
+        with patch.object(MODULE.user32, "GetForegroundWindow", return_value=20), \
+                patch.object(MODULE.user32, "IsWindowVisible", return_value=True), \
+                patch.object(MODULE.user32, "BringWindowToTop", return_value=True) as bring, \
+                patch.object(MODULE.user32, "SetForegroundWindow", return_value=True) as foreground, \
+                patch.object(backend, "_wait_for_foreground", return_value=True):
+            self.assertTrue(backend._focus_shortcut_target(candidate))
+        self.assertEqual(backend._shortcut_previous_foreground, 20)
+        self.assertTrue(backend.last_control_result["focusTargetVerified"])
+        bring.assert_called_once_with(10)
+        foreground.assert_called_once_with(10)
+
+        with patch.object(MODULE.user32, "GetForegroundWindow", return_value=10), \
+                patch.object(MODULE.user32, "IsWindowVisible", return_value=True), \
+                patch.object(MODULE.user32, "BringWindowToTop", return_value=True) as restore_bring, \
+                patch.object(MODULE.user32, "SetForegroundWindow", return_value=True) as restore_foreground, \
+                patch.object(backend, "_wait_for_foreground", return_value=True):
+            backend._restore_shortcut_focus(candidate)
+        self.assertTrue(backend.last_control_result["focusRestored"])
+        restore_bring.assert_called_once_with(20)
+        restore_foreground.assert_called_once_with(20)
+
+    def test_new_user_focus_is_not_overridden_during_restore(self) -> None:
+        backend = self.backend()
+        backend.last_control_result = {}
+        backend._shortcut_previous_foreground = 20
+        candidate = MODULE.SidebarCandidate(1, "open", 10)
+        with patch.object(MODULE.user32, "GetForegroundWindow", return_value=30), \
+                patch.object(MODULE.user32, "BringWindowToTop") as bring, \
+                patch.object(MODULE.user32, "SetForegroundWindow") as foreground:
+            backend._restore_shortcut_focus(candidate)
+        self.assertEqual(backend.last_control_result["focusRestoreReason"], "foreground_changed")
+        bring.assert_not_called()
+        foreground.assert_not_called()
 
     def test_disabled_unknown_or_missing_hide_control_sends_no_keys(self) -> None:
         for args in [{"enabled": False}, {"enabled": None}, {"visible": False}]:

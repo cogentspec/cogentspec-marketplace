@@ -255,7 +255,9 @@ for (const [name, helper] of [["canonical", canonicalSidebarHelper], ["compatibi
   for (const marker of ["Hide sidebar", "Show sidebar", "UIA_BUTTON_CONTROL_TYPE_ID", "UIA_INVOKE_PATTERN_ID", "IID_IUIAUTOMATION_INVOKE_PATTERN", '"already_hidden"', '"ambiguous"', '"layout_verified"']) {
     if (!helper.includes(marker)) fail(`${name} Python sidebar helper is missing marker: ${marker}`);
   }
-  if (/SetForegroundWindow/.test(helper)) fail(`${name} GPTDesk helper must not steal focus`);
+  for (const marker of ["SetForegroundWindow", "focusTargetVerified", "focusRestoreNeeded", "focusRestored", "foreground_changed"]) {
+    if (!helper.includes(marker)) fail(`${name} GPTDesk helper is missing temporary focus restoration marker: ${marker}`);
+  }
   for (const marker of ["state_checked_shortcut", "target_not_foreground", "shortcut_keys_held", "sidebar_state_changed"]) {
     if (!helper.includes(marker)) fail(`${name} GPTDesk sidebar shortcut is missing its state guard: ${marker}`);
   }
