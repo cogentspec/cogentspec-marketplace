@@ -151,10 +151,11 @@ for (const marker of ["-Surface claude-desktop -Experience web", "'claude-deskto
 }
 const syntaxPaths = [...requiredScripts.map((name) => join(scriptsRoot, name)), ...claudeWebLaunchers].map(path => `'${path.replaceAll("'", "''")}'`).join(", ");
 const syntaxCommand = `& { $failed = $false; foreach ($path in @(${syntaxPaths})) { $tokens = $null; $errors = $null; [void][System.Management.Automation.Language.Parser]::ParseFile($path, [ref]$tokens, [ref]$errors); if ($errors.Count -gt 0) { $failed = $true; $errors | ForEach-Object { [Console]::Error.WriteLine(\"$($path): $($_.Message)\") } } }; if ($failed) { exit 1 } }`;
-const encodedSyntaxCommand = Buffer.from(syntaxCommand, "utf16le").toString("base64");
-const syntaxCheck = spawnSync("cmd.exe", [
-  "/d", "/s", "/c", `powershell.exe -NoProfile -EncodedCommand ${encodedSyntaxCommand}`,
-], { encoding: "utf8", timeout: 30000 });
+// Feed the parser script through stdin: a clean release export can have long
+// paths, which exceed cmd.exe's command-line limit after Base64 encoding.
+const syntaxCheck = spawnSync("powershell.exe", [
+  "-NoProfile", "-NonInteractive", "-Command", "-",
+], { input: syntaxCommand + "\n", encoding: "utf8", timeout: 30000 });
 if (syntaxCheck.error) fail(`PowerShell syntax validation could not complete: ${syntaxCheck.error.message}`);
 if (syntaxCheck.status !== 0) fail(`one or more plugin scripts have invalid PowerShell syntax: ${syntaxCheck.stderr.trim()}`);
 
