@@ -44,23 +44,36 @@ foreach ($marker in @(
     'SWP_NOACTIVATE',
     'NOZORDER',
     'NOOWNERZORDER',
-    'verified_retained_popout',
-    'single_signed_claude_window_candidate',
+    'SWP_NOSENDCHANGING',
+    'verified_gpt_codex_desktop_main_window',
+    'single_signed_claude_desktop_main_window',
     'clamped_by_application',
     'OpenAI(?: OpCo)?',
     'Anthropic,? PBC',
-    'Restore-NormalizerWindows'
+    'Restore-NormalizerWindows',
+    'Invoke-MaintainNormalizedWindows',
+    'maintaining_compact_size',
+    'Desktop Window Normalizer'
 )) {
     Assert-NormalizerTest ($source.Contains($marker)) "Missing normalizer safeguard: $marker"
 }
-foreach ($forbidden in @('SetForegroundWindow', 'SendInput', 'keybd_event', 'mouse_event', 'SetWindowLong')) {
+foreach ($retiredMarker in @(
+    'verified_retained_popout',
+    'single_signed_claude_window_candidate',
+    "`$title -eq 'Claude'",
+    "`$mainChatGptHandles -notcontains"
+)) {
+    Assert-NormalizerTest (-not $source.Contains($retiredMarker)) "The desktop normalizer still contains retired Popout targeting: $retiredMarker"
+}
+foreach ($forbidden in @('SetForegroundWindow', 'SendInput', 'keybd_event', 'mouse_event', 'SetWindowLong', 'GetConsoleWindow')) {
     Assert-NormalizerTest (-not $source.Contains($forbidden)) "The normalizer must not use $forbidden."
 }
 
 [ordered]@{
     status = 'valid'
     fixtureTests = 2
-    safetyMarkers = 9
-    forbiddenInputApis = 5
+    safetyMarkers = 13
+    retiredTargetMarkers = 4
+    forbiddenInputApis = 6
     packagedCopies = $packagedCopies.Count
 } | ConvertTo-Json -Depth 4

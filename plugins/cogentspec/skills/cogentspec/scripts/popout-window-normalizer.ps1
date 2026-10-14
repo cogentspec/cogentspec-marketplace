@@ -9,10 +9,12 @@ param(
     [ValidateRange(240, 2160)]
     [int]$Height = 600,
 
-    [ValidateSet('gptpop', 'claudepop', 'both')]
+    [ValidateSet('gptdesktop', 'claudedesktop', 'both')]
     [string]$Target = 'both',
 
-    [switch]$AllowClaudeCandidate
+    [switch]$AllowClaudeCandidate,
+
+    [switch]$CompactOverride
 )
 
 Set-StrictMode -Version Latest
@@ -95,6 +97,9 @@ namespace CogentSpec {
         public static extern bool SetWindowPos(IntPtr window, IntPtr insertAfter, int x, int y, int width, int height, uint flags);
 
         [DllImport("user32.dll")]
+        public static extern bool ShowWindowAsync(IntPtr window, int command);
+
+        [DllImport("user32.dll")]
         public static extern IntPtr MonitorFromWindow(IntPtr window, uint flags);
 
         [DllImport("user32.dll", CharSet = CharSet.Auto)]
@@ -121,8 +126,9 @@ namespace CogentSpec {
 
 [void][CogentSpec.PopoutWindowNormalizerNative]::SetProcessDpiAwarenessContext([IntPtr](-4))
 
-$script:StatePath = Join-Path $env:LOCALAPPDATA 'CogentSpec\popout-window-normalizer-state.json'
+$script:StatePath = Join-Path $env:LOCALAPPDATA 'CogentSpec\desktop-window-normalizer-state.json'
 $script:SetWindowFlags = [uint32](0x0004 -bor 0x0010 -bor 0x0200) # SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOOWNERZORDER
+$script:CompactOverrideFlag = [uint32]0x0400 # SWP_NOSENDCHANGING
 $script:PublisherCache = @{}
 
 function Convert-RectToObject {
@@ -196,39 +202,6 @@ function Test-Publisher {
     return [string]$signature.Status -eq 'Valid' -and $subject -match $pattern
 }
 
-function Test-GptPopComposer {
-    param([IntPtr]$Window)
-    try {
-        Add-Type -AssemblyName UIAutomationClient -ErrorAction Stop
-        $root = [Windows.Automation.AutomationElement]::FromHandle($Window)
-        if (-not $root) { return $false }
-        $composerNames = @(
-            'Work with ChatGPT',
-            'Ask ChatGPT anything locally',
-            'Ask ChatGPT anything',
-            'Do anything',
-            'Work with Codex'
-        )
-        $count = 0
-        foreach ($name in $composerNames) {
-            $condition = [Windows.Automation.AndCondition]::new(
-                [Windows.Automation.PropertyCondition]::new(
-                    [Windows.Automation.AutomationElement]::ControlTypeProperty,
-                    [Windows.Automation.ControlType]::Edit
-                ),
-                [Windows.Automation.PropertyCondition]::new(
-                    [Windows.Automation.AutomationElement]::NameProperty,
-                    $name
-                )
-            )
-            $count += $root.FindAll([Windows.Automation.TreeScope]::Descendants, $condition).Count
-        }
-        return $count -eq 1
-    } catch {
-        return $false
-    }
-}
-
 function Get-NormalizerWindows {
     $processes = @{}
     foreach ($name in @('ChatGPT', 'claude')) {
@@ -252,6 +225,9 @@ function Get-NormalizerWindows {
     $mainChatGptHandles = @($processes.Values | Where-Object { $_.process.ProcessName -eq 'ChatGPT' } | ForEach-Object {
         $_.process.MainWindowHandle.ToInt64()
     } | Where-Object { $_ -ne 0 })
+    $mainClaudeHandles = @($processes.Values | Where-Object { $_.process.ProcessName -eq 'claude' } | ForEach-Object {
+        $_.process.MainWindowHandle.ToInt64()
+    } | Where-Object { $_ -ne 0 })
 
     $rows = @()
     foreach ($window in [CogentSpec.PopoutWindowNormalizerNative]::VisibleWindows()) {
@@ -264,23 +240,28 @@ function Get-NormalizerWindows {
 
         $title = Get-WindowTitle -Window $window
         $placement = Get-WindowPlacementState -Window $window
-        if ($placement.ShowCommand -ne 1) { continue }
+        if ($placement.ShowCommand -notin @(1, 3)) { continue }
         $geometry = Get-WindowGeometry -Window $window
-        $isGptPop = $processEntry.process.ProcessName -eq 'ChatGPT' -and
+        $frameObject = Convert-RectToObject $geometry.frame
+        $isGptDesktop = $processEntry.process.ProcessName -eq 'ChatGPT' -and
             $title -eq 'ChatGPT' -and
-            $mainChatGptHandles -notcontains $window.ToInt64() -and
-            (Test-GptPopComposer -Window $window)
-        $isClaudeCandidate = $processEntry.process.ProcessName -eq 'claude' -and $title -eq 'Claude'
-        if (-not $isGptPop -and -not $isClaudeCandidate) { continue }
+            $mainChatGptHandles -contains $window.ToInt64()
+        $isClaudeDesktop = $processEntry.process.ProcessName -eq 'claude' -and
+            $mainClaudeHandles -contains $window.ToInt64() -and
+            -not [string]::IsNullOrWhiteSpace($title) -and
+            $frameObject.width -ge 320 -and
+            $frameObject.height -ge 240
+        if (-not $isGptDesktop -and -not $isClaudeDesktop) { continue }
 
         $rows += [pscustomobject]@{
-            name = if ($isGptPop) { 'gptpop' } else { 'claudepop' }
-            identity = if ($isGptPop) { 'verified_retained_popout' } else { 'single_signed_claude_window_candidate' }
+            name = if ($isGptDesktop) { 'gptdesktop' } else { 'claudedesktop' }
+            identity = if ($isGptDesktop) { 'verified_gpt_codex_desktop_main_window' } else { 'single_signed_claude_desktop_main_window' }
             window = [IntPtr]$window
             processId = [int]$processId
             processPath = $processEntry.path
             dpi = [CogentSpec.PopoutWindowNormalizerNative]::GetDpiForWindow($window)
             geometry = $geometry
+            showCommand = [int]$placement.ShowCommand
             topmost = Test-WindowTopmost -Window $window
         }
     }
@@ -289,24 +270,20 @@ function Get-NormalizerWindows {
 
 function Resolve-NormalizerTargets {
     param(
-        [ValidateSet('gptpop', 'claudepop', 'both')]
-        [string]$RequestedTarget,
-        [bool]$ClaudeCandidateAllowed
+        [ValidateSet('gptdesktop', 'claudedesktop', 'both')]
+        [string]$RequestedTarget
     )
 
     $rows = @(Get-NormalizerWindows)
     $targets = @()
-    if ($RequestedTarget -in @('gptpop', 'both')) {
-        $matches = @($rows | Where-Object { $_.name -eq 'gptpop' })
-        if ($matches.Count -ne 1) { throw "Expected one verified GPT Popout, found $($matches.Count)." }
+    if ($RequestedTarget -in @('gptdesktop', 'both')) {
+        $matches = @($rows | Where-Object { $_.name -eq 'gptdesktop' })
+        if ($matches.Count -ne 1) { throw "Expected one verified GPT/Codex Desktop main window, found $($matches.Count)." }
         $targets += $matches[0]
     }
-    if ($RequestedTarget -in @('claudepop', 'both')) {
-        if (-not $ClaudeCandidateAllowed) {
-            throw 'ClaudePop is not a registered retained-Popout flow. Select the signed Claude candidate explicitly.'
-        }
-        $matches = @($rows | Where-Object { $_.name -eq 'claudepop' })
-        if ($matches.Count -ne 1) { throw "Expected one signed visible Claude window, found $($matches.Count)." }
+    if ($RequestedTarget -in @('claudedesktop', 'both')) {
+        $matches = @($rows | Where-Object { $_.name -eq 'claudedesktop' })
+        if ($matches.Count -ne 1) { throw "Expected one signed visible Claude Desktop main window, found $($matches.Count)." }
         $targets += $matches[0]
     }
     return @($targets)
@@ -340,7 +317,7 @@ function Save-NormalizerState {
     $directory = Split-Path -Parent $script:StatePath
     [IO.Directory]::CreateDirectory($directory) | Out-Null
     $payload = [ordered]@{
-        protocol = 'cogentspec-popout-normalizer-state-v1'
+        protocol = 'cogentspec-desktop-normalizer-state-v1'
         savedAt = [DateTime]::UtcNow.ToString('o')
         windows = @($Targets | ForEach-Object {
             [ordered]@{
@@ -351,6 +328,7 @@ function Save-NormalizerState {
                 hwnd = $_.window.ToInt64()
                 outer = Convert-RectToObject $_.geometry.outer
                 frame = Convert-RectToObject $_.geometry.frame
+                showCommand = $_.showCommand
                 topmost = $_.topmost
             }
         })
@@ -362,13 +340,21 @@ function Invoke-NormalizeWindows {
     param(
         [object[]]$Targets,
         [int]$TargetWidth,
-        [int]$TargetHeight
+        [int]$TargetHeight,
+        [bool]$UseCompactOverride = $false
     )
 
     Save-NormalizerState -Targets $Targets
     $foregroundBefore = [CogentSpec.PopoutWindowNormalizerNative]::GetForegroundWindow()
     $results = @()
     foreach ($target in $Targets) {
+        if ($target.showCommand -ne 1) {
+            if (-not [CogentSpec.PopoutWindowNormalizerNative]::ShowWindowAsync($target.window, 4)) {
+                throw "Windows could not restore $($target.name) without activation before sizing."
+            }
+            Start-Sleep -Milliseconds 350
+            $target.geometry = Get-WindowGeometry -Window $target.window
+        }
         $monitor = [CogentSpec.PopoutWindowNormalizerNative]::MonitorFromWindow($target.window, 2)
         $monitorInfo = New-Object CogentSpec.PopoutWindowNormalizerNative+MonitorInfo
         $monitorInfo.Size = [Runtime.InteropServices.Marshal]::SizeOf([type]'CogentSpec.PopoutWindowNormalizerNative+MonitorInfo')
@@ -393,27 +379,134 @@ function Invoke-NormalizeWindows {
         if ($actualTopmost -ne $target.topmost) { throw "The topmost state changed unexpectedly for $($target.name)." }
         $actualFrame = Convert-RectToObject $actual.frame
         $clamped = $actualFrame.width -ne $TargetWidth -or $actualFrame.height -ne $TargetHeight
+        $overrideAttempted = $false
+        if ($clamped -and $UseCompactOverride) {
+            $overrideAttempted = $true
+            if (-not [CogentSpec.PopoutWindowNormalizerNative]::SetWindowPos(
+                $target.window,
+                [IntPtr]::Zero,
+                $request.x,
+                $request.y,
+                $request.width,
+                $request.height,
+                [uint32]($script:SetWindowFlags -bor $script:CompactOverrideFlag)
+            )) {
+                throw "Windows rejected the compact override for $($target.name): $([Runtime.InteropServices.Marshal]::GetLastWin32Error())."
+            }
+            Start-Sleep -Milliseconds 800
+            $actual = Get-WindowGeometry -Window $target.window
+            $actualFrame = Convert-RectToObject $actual.frame
+            $clamped = $actualFrame.width -ne $TargetWidth -or $actualFrame.height -ne $TargetHeight
+        }
+        $actualTopmost = Test-WindowTopmost -Window $target.window
+        if ($actualTopmost -ne $target.topmost) { throw "The topmost state changed unexpectedly for $($target.name)." }
         $results += [ordered]@{
             name = $target.name
             identity = $target.identity
             requestedFrame = [ordered]@{ width = $TargetWidth; height = $TargetHeight }
             acceptedFrame = $actualFrame
-            status = if ($clamped) { 'clamped_by_application' } else { 'applied' }
+            status = if ($clamped) { 'clamped_by_application' }
+                elseif ($overrideAttempted) { 'applied_with_compact_override' }
+                else { 'applied' }
+            compactOverrideAttempted = $overrideAttempted
             topmostPreserved = $true
         }
     }
+    $acceptedCount = @($results | Where-Object { $_.status -in @('applied', 'applied_with_compact_override') }).Count
+    $overallStatus = if ($results.Count -eq 0) { 'no_targets' }
+        elseif ($acceptedCount -eq $results.Count) { 'applied' }
+        elseif ($acceptedCount -eq 0) { 'clamped_by_application' }
+        else { 'partial' }
     return [ordered]@{
-        status = 'normalized'
+        status = $overallStatus
         foregroundPreserved = $foregroundBefore -eq [CogentSpec.PopoutWindowNormalizerNative]::GetForegroundWindow()
         statePath = $script:StatePath
         results = $results
     }
 }
 
+function Invoke-MaintainNormalizedWindows {
+    param(
+        [object[]]$TrackedTargets,
+        [int]$TargetWidth,
+        [int]$TargetHeight
+    )
+
+    $foregroundBefore = [CogentSpec.PopoutWindowNormalizerNative]::GetForegroundWindow()
+    $current = @(Get-NormalizerWindows)
+    $results = @()
+    foreach ($tracked in $TrackedTargets) {
+        $target = @($current | Where-Object {
+            $_.name -eq $tracked.name -and
+            $_.window.ToInt64() -eq $tracked.window.ToInt64() -and
+            $_.processId -eq $tracked.processId -and
+            $_.processPath -eq $tracked.processPath
+        })
+        if ($target.Count -ne 1) {
+            $results += [ordered]@{ name = $tracked.name; status = 'target_no_longer_available' }
+            continue
+        }
+
+        $placement = Get-WindowPlacementState -Window $target[0].window
+        if ($placement.ShowCommand -ne 1) {
+            $results += [ordered]@{ name = $tracked.name; status = 'paused_while_window_not_normal' }
+            continue
+        }
+
+        $geometry = Get-WindowGeometry -Window $target[0].window
+        $frame = Convert-RectToObject $geometry.frame
+        if ($frame.width -eq $TargetWidth -and $frame.height -eq $TargetHeight) {
+            $results += [ordered]@{ name = $tracked.name; status = 'unchanged'; frame = $frame }
+            continue
+        }
+
+        $topmostBefore = Test-WindowTopmost -Window $target[0].window
+        $monitor = [CogentSpec.PopoutWindowNormalizerNative]::MonitorFromWindow($target[0].window, 2)
+        $monitorInfo = New-Object CogentSpec.PopoutWindowNormalizerNative+MonitorInfo
+        $monitorInfo.Size = [Runtime.InteropServices.Marshal]::SizeOf([type]'CogentSpec.PopoutWindowNormalizerNative+MonitorInfo')
+        if (-not [CogentSpec.PopoutWindowNormalizerNative]::GetMonitorInfo($monitor, [ref]$monitorInfo)) {
+            $results += [ordered]@{ name = $tracked.name; status = 'monitor_unavailable' }
+            continue
+        }
+        $request = Get-NormalizedOuterRequest -Outer $geometry.outer -Frame $geometry.frame -WorkArea $monitorInfo.Work -TargetWidth $TargetWidth -TargetHeight $TargetHeight
+        if (-not [CogentSpec.PopoutWindowNormalizerNative]::SetWindowPos(
+            $target[0].window,
+            [IntPtr]::Zero,
+            $request.x,
+            $request.y,
+            $request.width,
+            $request.height,
+            [uint32]($script:SetWindowFlags -bor $script:CompactOverrideFlag)
+        )) {
+            $results += [ordered]@{ name = $tracked.name; status = 'correction_rejected' }
+            continue
+        }
+
+        $actual = Get-WindowGeometry -Window $target[0].window
+        $actualFrame = Convert-RectToObject $actual.frame
+        $topmostPreserved = (Test-WindowTopmost -Window $target[0].window) -eq $topmostBefore
+        $results += [ordered]@{
+            name = $tracked.name
+            status = if ($actualFrame.width -eq $TargetWidth -and $actualFrame.height -eq $TargetHeight) { 'corrected' } else { 'correction_pending' }
+            frame = $actualFrame
+            topmostPreserved = $topmostPreserved
+        }
+    }
+
+    $correctionCount = @($results | Where-Object { $_.status -eq 'corrected' }).Count
+    return [ordered]@{
+        status = 'maintaining_compact_size'
+        corrections = $correctionCount
+        foregroundPreserved = $foregroundBefore -eq [CogentSpec.PopoutWindowNormalizerNative]::GetForegroundWindow()
+        results = $results
+    }
+}
+
 function Restore-NormalizerWindows {
-    if (-not (Test-Path -LiteralPath $script:StatePath)) { throw 'No saved Popout Normalizer state exists.' }
+    $foregroundBefore = [CogentSpec.PopoutWindowNormalizerNative]::GetForegroundWindow()
+    if (-not (Test-Path -LiteralPath $script:StatePath)) { throw 'No saved Desktop Window Normalizer state exists.' }
     $state = Get-Content -Raw -LiteralPath $script:StatePath | ConvertFrom-Json
-    if ($state.protocol -ne 'cogentspec-popout-normalizer-state-v1') { throw 'The saved normalizer state is not recognized.' }
+    if ($state.protocol -ne 'cogentspec-desktop-normalizer-state-v1') { throw 'The saved normalizer state is not recognized.' }
     $current = @(Get-NormalizerWindows)
     $results = @()
     foreach ($saved in @($state.windows)) {
@@ -427,6 +520,11 @@ function Restore-NormalizerWindows {
             $results += [ordered]@{ name = $saved.name; status = 'original_window_no_longer_available' }
             continue
         }
+        $currentPlacement = Get-WindowPlacementState -Window $target[0].window
+        if ($currentPlacement.ShowCommand -ne 1) {
+            [void][CogentSpec.PopoutWindowNormalizerNative]::ShowWindowAsync($target[0].window, 4)
+            Start-Sleep -Milliseconds 250
+        }
         if (-not [CogentSpec.PopoutWindowNormalizerNative]::SetWindowPos(
             $target[0].window,
             [IntPtr]::Zero,
@@ -438,11 +536,23 @@ function Restore-NormalizerWindows {
         )) {
             throw "Windows rejected the restore request for $($saved.name)."
         }
+        # SW_SHOWMAXIMIZED activates the window. Restore geometry only and
+        # report deferred maximization rather than stealing the foreground.
+        $maximizeDeferred = [int]$saved.showCommand -eq 3
         Start-Sleep -Milliseconds 250
         $actual = Get-WindowGeometry -Window $target[0].window
-        $results += [ordered]@{ name = $saved.name; status = 'restored'; frame = Convert-RectToObject $actual.frame }
+        $results += [ordered]@{
+            name = $saved.name
+            status = if ($maximizeDeferred) { 'geometry_restored_maximize_deferred' } else { 'restored' }
+            frame = Convert-RectToObject $actual.frame
+            userMessage = if ($maximizeDeferred) { 'Geometry restored without activation. Maximize this window manually to restore its original maximized state.' } else { $null }
+        }
     }
-    return [ordered]@{ status = 'restore_complete'; results = $results }
+    return [ordered]@{
+        status = if (@($results | Where-Object { $_.status -ne 'restored' }).Count) { 'restore_partial' } else { 'restore_complete' }
+        foregroundPreserved = $foregroundBefore -eq [CogentSpec.PopoutWindowNormalizerNative]::GetForegroundWindow()
+        results = $results
+    }
 }
 
 function Get-NormalizerInspection {
@@ -456,6 +566,7 @@ function Get-NormalizerInspection {
                 processId = $_.processId
                 dpi = $_.dpi
                 frame = Convert-RectToObject $_.geometry.frame
+                windowState = if ($_.showCommand -eq 3) { 'maximized' } else { 'normal' }
                 topmost = $_.topmost
             }
         })
@@ -466,11 +577,10 @@ function Show-NormalizerWidget {
     Add-Type -AssemblyName System.Windows.Forms
     Add-Type -AssemblyName System.Drawing
     [Windows.Forms.Application]::EnableVisualStyles()
-
     $form = [Windows.Forms.Form]::new()
-    $form.Text = 'Popout Window Normalizer'
+    $form.Text = 'Desktop Window Normalizer'
     $form.Width = 470
-    $form.Height = 390
+    $form.Height = 430
     $form.StartPosition = 'CenterScreen'
     $form.FormBorderStyle = 'FixedDialog'
     $form.MaximizeBox = $false
@@ -495,60 +605,124 @@ function Show-NormalizerWidget {
     $heightInput.SetBounds(305, 18, 110, 28)
 
     $gptCheck = [Windows.Forms.CheckBox]::new()
-    $gptCheck.Text = 'GPTPop (verified retained Popout)'
-    $gptCheck.Checked = $Target -in @('gptpop', 'both')
+    $gptCheck.Text = 'GPT/Codex Desktop main window'
+    $gptCheck.Checked = $Target -in @('gptdesktop', 'both')
     $gptCheck.SetBounds(20, 60, 390, 28)
 
     $claudeCheck = [Windows.Forms.CheckBox]::new()
-    $claudeCheck.Text = 'ClaudePop candidate (one signed visible Claude window)'
-    $claudeCheck.Checked = $AllowClaudeCandidate -or $Target -eq 'claudepop'
+    $claudeCheck.Text = 'Claude Desktop main window'
+    $claudeCheck.Checked = $Target -in @('claudedesktop', 'both')
     $claudeCheck.SetBounds(20, 90, 420, 28)
+
+    $compactCheck = [Windows.Forms.CheckBox]::new()
+    $compactCheck.Text = 'Maintain compact size while this widget is open'
+    $compactCheck.Checked = $CompactOverride.IsPresent
+    $compactCheck.SetBounds(20, 120, 420, 28)
 
     $statusBox = [Windows.Forms.TextBox]::new()
     $statusBox.Multiline = $true
     $statusBox.ReadOnly = $true
     $statusBox.ScrollBars = 'Vertical'
-    $statusBox.SetBounds(20, 130, 415, 145)
+    $statusBox.SetBounds(20, 155, 415, 155)
 
     $refreshButton = [Windows.Forms.Button]::new()
     $refreshButton.Text = 'Refresh'
-    $refreshButton.SetBounds(20, 292, 90, 32)
+    $refreshButton.SetBounds(20, 327, 90, 32)
     $applyButton = [Windows.Forms.Button]::new()
     $applyButton.Text = 'Apply'
-    $applyButton.SetBounds(120, 292, 90, 32)
+    $applyButton.SetBounds(120, 327, 90, 32)
     $restoreButton = [Windows.Forms.Button]::new()
     $restoreButton.Text = 'Restore'
-    $restoreButton.SetBounds(220, 292, 90, 32)
+    $restoreButton.SetBounds(220, 327, 90, 32)
     $closeButton = [Windows.Forms.Button]::new()
     $closeButton.Text = 'Close'
-    $closeButton.SetBounds(345, 292, 90, 32)
+    $closeButton.SetBounds(345, 327, 90, 32)
 
     $render = {
         param($Value)
         $statusBox.Text = $Value | ConvertTo-Json -Depth 8
     }
+    $maintenance = [pscustomobject]@{
+        Active = $false
+        TrackedTargets = @()
+        TargetWidth = 0
+        TargetHeight = 0
+        CorrectionCount = 0
+    }
+    $maintenanceTimer = [Windows.Forms.Timer]::new()
+    $maintenanceTimer.Interval = 2000
+    $maintenanceTimer.Add_Tick({
+        $maintenanceTimer.Stop()
+        if (-not $maintenance.Active) { return }
+        try {
+            $cycle = Invoke-MaintainNormalizedWindows -TrackedTargets $maintenance.TrackedTargets -TargetWidth $maintenance.TargetWidth -TargetHeight $maintenance.TargetHeight
+            $maintenance.CorrectionCount += [int]$cycle.corrections
+            & $render ([ordered]@{
+                status = 'maintaining_compact_size'
+                correctionCount = $maintenance.CorrectionCount
+                targetFrame = [ordered]@{ width = $maintenance.TargetWidth; height = $maintenance.TargetHeight }
+                foregroundPreserved = $cycle.foregroundPreserved
+                results = $cycle.results
+            })
+        } catch {
+            $maintenanceTimer.Stop()
+            $maintenance.Active = $false
+            $statusBox.Text = "Compact-size maintenance stopped: $($_.Exception.Message)"
+        } finally {
+            if ($maintenance.Active) { $maintenanceTimer.Start() }
+        }
+    })
     $refresh = {
         try { & $render (Get-NormalizerInspection) } catch { $statusBox.Text = $_.Exception.Message }
     }
     $refreshButton.Add_Click($refresh)
     $applyButton.Add_Click({
         try {
+            $maintenanceTimer.Stop()
+            $maintenance.Active = $false
             $requested = if ($gptCheck.Checked -and $claudeCheck.Checked) { 'both' }
-                elseif ($gptCheck.Checked) { 'gptpop' }
-                elseif ($claudeCheck.Checked) { 'claudepop' }
+                elseif ($gptCheck.Checked) { 'gptdesktop' }
+                elseif ($claudeCheck.Checked) { 'claudedesktop' }
                 else { throw 'Select at least one target.' }
-            $targets = @(Resolve-NormalizerTargets -RequestedTarget $requested -ClaudeCandidateAllowed $claudeCheck.Checked)
-            & $render (Invoke-NormalizeWindows -Targets $targets -TargetWidth ([int]$widthInput.Value) -TargetHeight ([int]$heightInput.Value))
+            $targets = @(Resolve-NormalizerTargets -RequestedTarget $requested)
+            $result = Invoke-NormalizeWindows -Targets $targets -TargetWidth ([int]$widthInput.Value) -TargetHeight ([int]$heightInput.Value) -UseCompactOverride $compactCheck.Checked
+            if ($compactCheck.Checked) {
+                $maintenance.TrackedTargets = $targets
+                $maintenance.TargetWidth = [int]$widthInput.Value
+                $maintenance.TargetHeight = [int]$heightInput.Value
+                $maintenance.CorrectionCount = 0
+                $maintenance.Active = $true
+                $result['maintenance'] = [ordered]@{
+                    status = 'active_while_widget_open'
+                    intervalMilliseconds = $maintenanceTimer.Interval
+                }
+                $maintenanceTimer.Start()
+            }
+            & $render $result
         } catch { $statusBox.Text = $_.Exception.Message }
     })
     $restoreButton.Add_Click({
-        try { & $render (Restore-NormalizerWindows) } catch { $statusBox.Text = $_.Exception.Message }
+        try {
+            $maintenanceTimer.Stop()
+            $maintenance.Active = $false
+            & $render (Restore-NormalizerWindows)
+        } catch { $statusBox.Text = $_.Exception.Message }
+    })
+    $compactCheck.Add_CheckedChanged({
+        if (-not $compactCheck.Checked) {
+            $maintenanceTimer.Stop()
+            $maintenance.Active = $false
+        }
     })
     $closeButton.Add_Click({ $form.Close() })
+    $form.Add_FormClosed({
+        $maintenanceTimer.Stop()
+        $maintenanceTimer.Dispose()
+    })
 
     $form.Controls.AddRange(@(
         $widthLabel, $widthInput, $heightLabel, $heightInput,
-        $gptCheck, $claudeCheck, $statusBox,
+        $gptCheck, $claudeCheck, $compactCheck, $statusBox,
         $refreshButton, $applyButton, $restoreButton, $closeButton
     ))
     $form.Add_Shown($refresh)
@@ -559,8 +733,8 @@ if ($MyInvocation.InvocationName -ne '.') {
     switch ($Mode) {
         'Inspect' { Get-NormalizerInspection | ConvertTo-Json -Depth 8 }
         'Apply' {
-            $targets = @(Resolve-NormalizerTargets -RequestedTarget $Target -ClaudeCandidateAllowed $AllowClaudeCandidate.IsPresent)
-            Invoke-NormalizeWindows -Targets $targets -TargetWidth $Width -TargetHeight $Height | ConvertTo-Json -Depth 8
+            $targets = @(Resolve-NormalizerTargets -RequestedTarget $Target)
+            Invoke-NormalizeWindows -Targets $targets -TargetWidth $Width -TargetHeight $Height -UseCompactOverride $CompactOverride.IsPresent | ConvertTo-Json -Depth 8
         }
         'Restore' { Restore-NormalizerWindows | ConvertTo-Json -Depth 8 }
         'Widget' { Show-NormalizerWidget }

@@ -232,6 +232,15 @@ Start-Sleep -Milliseconds 5500
     )) {
         $routeResult = (& $fixtureLauncher -ContextKey $contextKey -Surface $route.Surface -Experience $route.Experience) | ConvertFrom-Json
         Assert-BridgeLauncherTest ($routeResult.status -eq 'ready' -and $routeResult.defaultDirectoryReady) ('Shared default directory check was missing for ' + $route.Surface + ':' + $route.Experience)
+        if ($route.Surface -eq 'chatgpt' -and $route.Experience -eq 'desktop-ui') {
+            Assert-BridgeLauncherTest ([bool]$routeResult.currentConversationConnected) 'GPTDesk did not accept the exact server-acknowledged thread-bound Bridge presence.'
+            Assert-BridgeLauncherTest (-not [bool]$routeResult.popoutConnectionConfirmed) 'GPTDesk incorrectly reported a standalone Popout confirmation.'
+            Assert-BridgeLauncherTest ([string]$routeResult.conversationVerification -eq 'desktop_thread_presence') 'GPTDesk did not expose its destination-specific conversation proof.'
+        }
+        if ($route.Surface -eq 'chatgpt' -and $route.Experience -eq 'popout') {
+            Assert-BridgeLauncherTest (-not [bool]$routeResult.currentConversationConnected) 'An unverified Popout inspection was accepted by the destination router.'
+            Assert-BridgeLauncherTest ([string]$routeResult.conversationVerification -eq 'popout_fingerprint') 'Popout lost its fingerprint confirmation contract.'
+        }
     }
 
     $gptwebCommand = Join-Path $fixturePlugin 'skills\gptweb\scripts\start-gptweb.ps1'
@@ -239,22 +248,26 @@ Start-Sleep -Milliseconds 5500
     Set-Content -LiteralPath (Join-Path $fixtureScripts 'mcp-block.flag') -Value 'blocked'
     $popoutProbePath = Join-Path $fixtureScripts 'popout-inspected.txt'
     $popoutProbesBeforeSplit = if (Test-Path -LiteralPath $popoutProbePath) { @(Get-Content -LiteralPath $popoutProbePath).Count } else { 0 }
-    foreach ($splitThread in @($fixtureThreadId, [Guid]::NewGuid().ToString(), $fixtureThreadId)) {
+    foreach ($splitThread in @($fixtureThreadId, [Guid]::NewGuid().ToString())) {
         $env:CODEX_THREAD_ID = $splitThread
         $splitResult = (& $fixtureLauncher -ContextKey $contextKey -Surface chatgpt -Experience split-screen) | ConvertFrom-Json
-        Assert-BridgeLauncherTest ($splitResult.status -eq 'ready' -and $splitResult.presenceVerified) 'Split screen must accept authenticated Bridge presence without a Popout.'
+        Assert-BridgeLauncherTest ($splitResult.status -eq 'ready' -and $splitResult.presenceVerified) 'GPTPop split screen must accept authenticated context-bound Bridge presence without a Popout.'
         Assert-BridgeLauncherTest ($splitResult.mcpState -eq 'not_required' -and $splitResult.projectDataConnection -eq 'authenticated_desktop_bridge') 'Split screen still requires CLI login.'
         Assert-BridgeLauncherTest ($splitResult.workspaceUrl -ceq $splitResult.webWorkspaceUrl) 'Split screen must select the browser destination.'
-        Assert-BridgeLauncherTest ($splitResult.workspaceUrl -match '^https://cogentspec\.app/stack\?surface=chatgpt&context=ctx-[a-f0-9]{64}&experience=split-screen&open=web&nav=[a-f0-9]{32}#desktop-web=cgw_') 'Split screen lost its authenticated browser route.'
-        Assert-BridgeLauncherTest (-not $splitResult.currentConversationConnected -and -not $splitResult.popoutConnectionConfirmed) 'Split screen must not invent native conversation confirmation.'
-        Assert-BridgeLauncherTest ($splitResult.conversationVerification -eq 'authenticated_workspace') 'Split screen returned the Popout verification contract.'
+        Assert-BridgeLauncherTest ($splitResult.workspaceUrl -match '^https://cogentspec\.app/stack\?surface=chatgpt&context=ctx-[a-f0-9]{64}&experience=split-screen&open=web&nav=[a-f0-9]{32}#desktop-web=cgw_') 'Split screen lost its authenticated browser handoff or selected the Popout launch route.'
+        Assert-BridgeLauncherTest (-not $splitResult.currentConversationConnected -and -not $splitResult.popoutConnectionConfirmed) 'Split screen must not invent a native conversation or Popout confirmation.'
+        Assert-BridgeLauncherTest ($splitResult.conversationVerification -eq 'authenticated_workspace') 'Split screen returned the old Popout verification contract.'
         $splitResult | ConvertTo-Json -Depth 6 -Compress | node (Join-Path $repositoryRoot 'scripts/test-gptpop-navigation.mjs') --launcher-result
         Assert-BridgeLauncherTest ($LASTEXITCODE -eq 0) 'GPTPop did not return an executable exact handoff to the external browser tab.'
         $workerProcessId = [int]$splitResult.processId
     }
+    $env:CODEX_THREAD_ID = $fixtureThreadId
     $popoutProbesAfterSplit = if (Test-Path -LiteralPath $popoutProbePath) { @(Get-Content -LiteralPath $popoutProbePath).Count } else { 0 }
     Assert-BridgeLauncherTest ($popoutProbesAfterSplit -eq $popoutProbesBeforeSplit) 'Split screen inspected a native Popout.'
-    Assert-BridgeLauncherTest (@(Get-Content -LiteralPath (Join-Path $fixtureScripts 'mcp-called.txt')).Count -eq $mcpCallsBeforeWeb) 'Split screen still invokes CLI login.'
+    $splitResult = (& $fixtureLauncher -ContextKey $contextKey -Surface chatgpt -Experience split-screen) | ConvertFrom-Json
+    $splitResult | ConvertTo-Json -Depth 6 -Compress | node (Join-Path $repositoryRoot 'scripts/test-gptpop-navigation.mjs') --launcher-result
+    Assert-BridgeLauncherTest ($LASTEXITCODE -eq 0) 'Reused GPTPop Bridge lost the external browser navigation contract.'
+    $workerProcessId = [int]$splitResult.processId
     foreach ($claudeSnapAttempt in @(1, 2)) {
         $claudeSnapResult = (& $fixtureLauncher -ContextKey $contextKey -Surface claude-desktop -Experience split-screen) | ConvertFrom-Json
         Assert-BridgeLauncherTest ($claudeSnapResult.status -eq 'ready' -and $claudeSnapResult.presenceVerified) 'ClaudeSnap must verify the authenticated context-bound Bridge.'
@@ -650,13 +663,18 @@ $legacyUrl = "https://cogentspec.app/stack?surface=chatgpt&experience=web#deskto
     Assert-BridgeLauncherTest ($launcherText.Contains("Invoke-CogentSpecNativeCommand -FilePath `$popupHelperPath -ArgumentList @('-Mode', 'inspect') -TimeoutSeconds 15")) 'The task Bridge does not allow a bounded fifteen-second cold Popout inspection.'
     Assert-BridgeLauncherTest ($launcherText.Contains('TimeoutSec = 5')) 'The Popout connection confirmation request is not bounded to five seconds.'
     Assert-BridgeLauncherTest ($launcherText.Contains("reason = 'popout_inspection_timed_out'")) 'The task Bridge hides a Popout inspection timeout.'
-    Assert-BridgeLauncherTest ($launcherText.Contains('popoutConnectionReason = [string]$popoutConnection.reason')) 'The task Bridge does not expose the exact-chat confirmation outcome.'
+    Assert-BridgeLauncherTest ($launcherText.Contains('function Confirm-CurrentConversationConnection')) 'The task Bridge does not route exact-chat confirmation by destination.'
+    Assert-BridgeLauncherTest ($launcherText.Contains("`$ExperienceName -eq 'desktop-ui'")) 'GPTDesk does not use its task-bound presence proof.'
+    Assert-BridgeLauncherTest ($launcherText.Contains("reason = 'desktop_thread_presence_confirmed'")) 'GPTDesk does not expose its exact confirmation reason.'
+    Assert-BridgeLauncherTest ($launcherText.Contains("verification = 'popout_fingerprint'")) 'Popout does not retain its fingerprint confirmation contract.'
+    Assert-BridgeLauncherTest ($launcherText.Contains("`$ExperienceName -eq 'web'")) 'Web does not bypass the unrelated desktop conversation probe.'
+    Assert-BridgeLauncherTest ($launcherText.Contains('conversationConnectionReason = [string]$conversationConnection.reason')) 'The task Bridge does not expose the destination-specific confirmation outcome.'
     Assert-BridgeLauncherTest ($launcherText.Contains("`$conversationState -ne 'identified'")) 'The task Bridge can confirm a blank or unidentified Popout conversation.'
     Assert-BridgeLauncherTest ($launcherText.Contains("`$currentConversationKey -cne `$chatFingerprint")) 'The task Bridge can confirm a connection receipt for a different conversation.'
     Assert-BridgeLauncherTest ($launcherText.Contains("chatFingerprint = `$chatFingerprint")) 'The task Bridge does not bind confirmation to the active Popout chat fingerprint.'
-    Assert-BridgeLauncherTest (($launcherText.Split('Confirm-StandalonePopoutConnection').Count - 1) -ge 3) 'The Popout confirmation is not applied to both reused and newly started task Bridge workers.'
-    Assert-BridgeLauncherTest ($launcherText.Contains('popoutConnectionConfirmed = [bool]$popoutConnection.confirmed')) 'The task Bridge does not report whether it confirmed a waiting Popout connection.'
-    Assert-BridgeLauncherTest ($launcherText.Contains('currentConversationConnected = [bool]$popoutConnection.confirmed')) 'The launcher must return the authoritative exact-chat gate, not just project-data readiness.'
+    Assert-BridgeLauncherTest (($launcherText.Split('Confirm-CurrentConversationConnection').Count - 1) -ge 3) 'Destination-specific confirmation is not applied to both reused and newly started task Bridge workers.'
+    Assert-BridgeLauncherTest ($launcherText.Contains('popoutConnectionConfirmed = [bool]$conversationConnection.popoutConfirmed')) 'The task Bridge does not preserve the Popout-only compatibility field.'
+    Assert-BridgeLauncherTest ($launcherText.Contains('currentConversationConnected = [bool]$conversationConnection.confirmed')) 'The launcher must return the destination-specific exact-chat gate, not just project-data readiness.'
     Assert-BridgeLauncherTest ($launcherText.Contains('The workspace remains disconnected.')) 'An unverified Popout must have an explicit disconnected user message.'
     $cogentSpecSkillText = Get-Content -Raw -LiteralPath (Join-Path $repositoryRoot 'plugins\cogentspec\skills\cogentspec\SKILL.md')
     Assert-BridgeLauncherTest ($cogentSpecSkillText.Contains('Only `currentConversationConnected: true` confirms')) 'The CogentSpec workflow can still mistake Popout visibility for a connected conversation.'

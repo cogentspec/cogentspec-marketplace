@@ -219,7 +219,6 @@ function Read-FreshPopoutInspection([string]$HelperPath) {
 }
 
 function Confirm-StandalonePopoutConnection([string]$SurfaceName, [string]$ConnectedContextKey, [string]$ConnectedThreadId) {
-    if ($Experience -eq 'split-screen') { return [ordered]@{ confirmed = $false; reason = 'not_applicable' } }
     if ($SurfaceName -ne 'chatgpt') { return [ordered]@{ confirmed = $false; reason = 'not_applicable' } }
     $token = ''
     try {
@@ -288,6 +287,64 @@ function Confirm-StandalonePopoutConnection([string]$SurfaceName, [string]$Conne
         return [ordered]@{ confirmed = $false; reason = 'connection_confirmation_failed' }
     } finally {
         $token = $null
+    }
+}
+
+function Confirm-CurrentConversationConnection(
+    [string]$SurfaceName,
+    [string]$ExperienceName,
+    [string]$ConnectedContextKey,
+    [string]$ConnectedThreadId,
+    [bool]$PresenceVerified,
+    [bool]$ContextIsolated
+) {
+    if ($SurfaceName -ne 'chatgpt') {
+        return [ordered]@{
+            confirmed = $false; popoutConfirmed = $false; reason = 'not_applicable'
+            verification = 'not_applicable'; userMessage = 'Exact ChatGPT conversation verification does not apply to this surface.'
+        }
+    }
+    if ($ExperienceName -eq 'desktop-ui') {
+        # GPTDesk is attached to the invoking host task, not to the standalone
+        # Popout window. The ready marker has already been authenticated by the
+        # service and matched to this exact context, package, process and thread.
+        $threadVerified = $ConnectedThreadId -match '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+        if (-not $PresenceVerified -or -not $ContextIsolated -or -not $threadVerified) {
+            return [ordered]@{
+                confirmed = $false; popoutConfirmed = $false; reason = 'current_desktop_conversation_not_verified'
+                verification = 'desktop_thread_presence'
+                userMessage = 'The project-data Bridge is ready, but the current GPT Desk conversation could not be verified. The workspace remains disconnected.'
+            }
+        }
+        return [ordered]@{
+            confirmed = $true; popoutConfirmed = $false; reason = 'desktop_thread_presence_confirmed'
+            verification = 'desktop_thread_presence'; userMessage = 'The current GPT Desk conversation is connected.'
+        }
+    }
+    if ($ExperienceName -eq 'split-screen') {
+        return [ordered]@{
+            confirmed = $false; popoutConfirmed = $false; reason = 'not_applicable'
+            verification = 'authenticated_workspace'
+            userMessage = 'The split-screen workspace uses the authenticated project Bridge; no Popout conversation is required.'
+        }
+    }
+    if ($ExperienceName -eq 'web') {
+        return [ordered]@{
+            confirmed = $false; popoutConfirmed = $false; reason = 'not_applicable'
+            verification = 'web_destination'; userMessage = 'Exact desktop-conversation verification does not apply to the Web destination.'
+        }
+    }
+    $popout = Confirm-StandalonePopoutConnection `
+        -SurfaceName $SurfaceName `
+        -ConnectedContextKey $ConnectedContextKey `
+        -ConnectedThreadId $ConnectedThreadId
+    return [ordered]@{
+        confirmed = [bool]$popout.confirmed
+        popoutConfirmed = [bool]$popout.confirmed
+        reason = [string]$popout.reason
+        verification = 'popout_fingerprint'
+        userMessage = if ($popout.confirmed) { 'The current Popout conversation is connected.' }
+            else { 'The project-data Bridge is ready, but the current Popout conversation could not be verified. The workspace remains disconnected.' }
     }
 }
 
@@ -537,10 +594,13 @@ if (Test-Path -LiteralPath $statePath -PathType Leaf) {
                 -ExpectedThreadId $threadId `
                 -TimeoutMilliseconds 3000
             if ($presenceReady) {
-                $popoutConnection = Confirm-StandalonePopoutConnection `
+                $conversationConnection = Confirm-CurrentConversationConnection `
                     -SurfaceName $Surface `
+                    -ExperienceName $Experience `
                     -ConnectedContextKey $resolvedContext `
-                    -ConnectedThreadId $threadId
+                    -ConnectedThreadId $threadId `
+                    -PresenceVerified $true `
+                    -ContextIsolated ([bool]$projectContext.Isolated)
                 Write-CompactJson ([ordered]@{
                     status = 'ready'
                     bridge = 'already_running'
@@ -561,11 +621,13 @@ if (Test-Path -LiteralPath $statePath -PathType Leaf) {
                     projectDataConnection = $projectDataConnection
                     pluginId = $pluginId
                     pluginVersion = $pluginVersion
-                    popoutConnectionConfirmed = [bool]$popoutConnection.confirmed
-                    currentConversationConnected = [bool]$popoutConnection.confirmed
-                    conversationVerification = if ($Experience -eq 'split-screen') { 'authenticated_workspace' } else { 'popout_fingerprint' }
-                    popoutUserMessage = if ($Experience -eq 'split-screen') { 'The authenticated split-screen project Bridge is ready.' } elseif ($popoutConnection.confirmed) { 'The current Popout conversation is connected.' } else { 'The project-data Bridge is ready, but the current Popout conversation could not be verified. The workspace remains disconnected.' }
-                    popoutConnectionReason = [string]$popoutConnection.reason
+                    currentConversationConnected = [bool]$conversationConnection.confirmed
+                    conversationVerification = [string]$conversationConnection.verification
+                    conversationUserMessage = [string]$conversationConnection.userMessage
+                    conversationConnectionReason = [string]$conversationConnection.reason
+                    popoutConnectionConfirmed = [bool]$conversationConnection.popoutConfirmed
+                    popoutUserMessage = [string]$conversationConnection.userMessage
+                    popoutConnectionReason = [string]$conversationConnection.reason
                     launcherElapsedMs = [int]$launcherTimer.ElapsedMilliseconds
                 })
                 return
@@ -604,10 +666,13 @@ if (-not $presenceReady) {
     Remove-Item -LiteralPath $readyPath -Force -ErrorAction SilentlyContinue
     throw 'Desktop Bridge started, but CogentSpec did not verify this AI task.'
 }
-$popoutConnection = Confirm-StandalonePopoutConnection `
+$conversationConnection = Confirm-CurrentConversationConnection `
     -SurfaceName $Surface `
+    -ExperienceName $Experience `
     -ConnectedContextKey $resolvedContext `
-    -ConnectedThreadId $threadId
+    -ConnectedThreadId $threadId `
+    -PresenceVerified $true `
+    -ContextIsolated ([bool]$projectContext.Isolated)
 
 [ordered]@{
     processId = $watcher.Id
@@ -644,10 +709,12 @@ Write-CompactJson ([ordered]@{
     projectDataConnection = $projectDataConnection
     pluginId = $pluginId
     pluginVersion = $pluginVersion
-    popoutConnectionConfirmed = [bool]$popoutConnection.confirmed
-    currentConversationConnected = [bool]$popoutConnection.confirmed
-    conversationVerification = if ($Experience -eq 'split-screen') { 'authenticated_workspace' } else { 'popout_fingerprint' }
-    popoutUserMessage = if ($Experience -eq 'split-screen') { 'The authenticated split-screen project Bridge is ready.' } elseif ($popoutConnection.confirmed) { 'The current Popout conversation is connected.' } else { 'The project-data Bridge is ready, but the current Popout conversation could not be verified. The workspace remains disconnected.' }
-    popoutConnectionReason = [string]$popoutConnection.reason
+    currentConversationConnected = [bool]$conversationConnection.confirmed
+    conversationVerification = [string]$conversationConnection.verification
+    conversationUserMessage = [string]$conversationConnection.userMessage
+    conversationConnectionReason = [string]$conversationConnection.reason
+    popoutConnectionConfirmed = [bool]$conversationConnection.popoutConfirmed
+    popoutUserMessage = [string]$conversationConnection.userMessage
+    popoutConnectionReason = [string]$conversationConnection.reason
     launcherElapsedMs = [int]$launcherTimer.ElapsedMilliseconds
 })

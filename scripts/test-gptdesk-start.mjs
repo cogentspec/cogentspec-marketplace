@@ -6,7 +6,7 @@ import { spawn } from 'node:child_process';
 
 const repository = resolve(import.meta.dirname, '..');
 const context = 'ctx-' + 'a'.repeat(64);
-const versions = { cogentspec: ['0.6.144', '0.6.145'], cogentstack: ['0.5.133', '0.5.134'] };
+const versions = { cogentspec: ['0.6.145', '0.6.146'], cogentstack: ['0.5.134', '0.5.135'] };
 const powershell = 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe';
 
 async function put(path, text) {
@@ -50,8 +50,9 @@ switch ([IO.Path]::GetFileName($PSCommandPath)) {
   $native = $base + '&open=chatgpt&nav=' + ('b' * 32) + '#desktop-chatgpt=' + ('c' * 40)
   $web = $base + '&open=web&nav=' + ('b' * 32) + '#desktop-web=' + ('d' * 40)
   $selected = if ($scenario -eq 'wrong-alias') { $web } else { $native }
-  $result = @{ status = 'ready'; bridge = 'already_running'; accountState = 'signed_in'; mcpState = 'ready'; browserOpened = ($scenario -eq 'already-opened'); contextKey = $context; workspaceUrl = $selected; chatgptWorkspaceUrl = $native; webWorkspaceUrl = $web; currentConversationConnected = ($scenario -eq 'confirmed'); popoutConnectionConfirmed = $true; launcherElapsedMs = 1; popoutConnectionReason = 'fixture_not_verified'; popoutUserMessage = 'Fixture conversation remains unverified.' }
-  if ($scenario -eq 'legacy-confirmed') { $result.Remove('currentConversationConnected') }
+  $verified = $scenario -ne 'unverified'
+  $result = @{ status = 'ready'; bridge = 'already_running'; accountState = 'signed_in'; mcpState = 'ready'; browserOpened = ($scenario -eq 'already-opened'); contextKey = $context; workspaceUrl = $selected; chatgptWorkspaceUrl = $native; webWorkspaceUrl = $web; currentConversationConnected = $verified; conversationVerification = 'desktop_thread_presence'; conversationConnectionReason = if ($verified) { 'desktop_thread_presence_confirmed' } else { 'current_desktop_conversation_not_verified' }; conversationUserMessage = if ($verified) { 'The current GPT Desk conversation is connected.' } else { 'Fixture conversation remains unverified.' }; popoutConnectionConfirmed = $false; launcherElapsedMs = 1; popoutConnectionReason = 'not_applicable'; popoutUserMessage = 'Legacy fallback.' }
+  if ($scenario -eq 'legacy-confirmed') { $result.Remove('currentConversationConnected'); $result.popoutConnectionConfirmed = $true }
   $result | ConvertTo-Json -Compress
  }
  default { throw 'Unexpected helper' }
@@ -105,10 +106,15 @@ $result | ConvertTo-Json -Compress
     const lines = (await readFile(trace, 'utf8').catch(error => { if (error.code === 'ENOENT') return ''; throw error; })).trim().split(/\r?\n/);
     assert.equal(result.protocol, 'cogentspec-gptdesk-start-v1');
     assert.equal(lines.filter(line => line.endsWith('check-cogentspec-update.ps1')).length, resume ? 0 : 1);
-    const ready = ['current', 'confirmed', 'legacy-confirmed', 'offline', 'update', 'resume-update'].includes(scenario);
+    const ready = ['current', 'confirmed', 'legacy-confirmed', 'unverified', 'offline', 'update', 'resume-update'].includes(scenario);
     if (ready) {
       assert.equal(result.status, 'ready');
-      assert.equal(result.currentConversationConnected, ['confirmed', 'legacy-confirmed'].includes(scenario));
+      assert.equal(result.currentConversationConnected, scenario !== 'unverified');
+      if (scenario !== 'legacy-confirmed') {
+        assert.equal(result.conversationVerification, 'desktop_thread_presence');
+        assert.equal(result.conversationConnectionReason, scenario === 'unverified'
+          ? 'current_desktop_conversation_not_verified' : 'desktop_thread_presence_confirmed');
+      }
       assert.equal(lines.filter(line => line.endsWith('project-context.ps1')).length, 1);
       assert.equal(lines.filter(line => line.endsWith('start-cogentstack-bridge.ps1')).length, 1);
       assert.equal(result.workflowBudgetSeconds, 100);
@@ -152,7 +158,7 @@ $result | ConvertTo-Json -Compress
 
 for (const plugin of Object.keys(versions)) {
   const results = [];
-  const scenarios = ['current', 'confirmed', 'legacy-confirmed', 'offline', 'update', 'permission', 'unscoped', 'wrong-source', 'upgrade-failed', 'update-bad-contract', 'update-missing-contract', 'wrong-origin', 'wrong-mode', 'duplicate-mode', 'wrong-context', 'wrong-alias', 'already-opened', 'connection-required', 'malformed', 'stall', 'update-stall', 'resume-update', 'resume-wrong-version'];
+  const scenarios = ['current', 'confirmed', 'legacy-confirmed', 'unverified', 'offline', 'update', 'permission', 'unscoped', 'wrong-source', 'upgrade-failed', 'update-bad-contract', 'update-missing-contract', 'wrong-origin', 'wrong-mode', 'duplicate-mode', 'wrong-context', 'wrong-alias', 'already-opened', 'connection-required', 'malformed', 'stall', 'update-stall', 'resume-update', 'resume-wrong-version'];
   const selected = process.argv.slice(2);
   assert.ok(selected.every(scenario => scenarios.includes(scenario)), 'Unknown fixture scenario');
   for (const scenario of selected.length ? selected : scenarios) {

@@ -142,7 +142,8 @@ function Forward-Failure($Result) {
         failureStage = $script:stage
         userMessage = [string](Value $Result 'userMessage' 'CogentSpec could not verify GPTDesk startup. No workspace-open request was made.')
     }
-    foreach ($name in @('reason', 'userMessage', 'popoutConnectionReason', 'popoutUserMessage')) {
+    foreach ($name in @('reason', 'userMessage', 'conversationConnectionReason', 'conversationUserMessage',
+        'popoutConnectionReason', 'popoutUserMessage')) {
         $property = $Result.PSObject.Properties[$name]
         if ($property) { $safe | Add-Member -NotePropertyName $name -NotePropertyValue $property.Value -Force }
     }
@@ -243,6 +244,9 @@ try {
         workspaceUrl = $result.workspaceUrl; chatgptWorkspaceUrl = $result.chatgptWorkspaceUrl; webWorkspaceUrl = $result.webWorkspaceUrl
         pluginVersion = [string]$manifest.version; refreshedPluginPath = $pluginRoot
         currentConversationConnected = (Value $result 'currentConversationConnected' (Value $result 'popoutConnectionConfirmed' $false)) -ceq $true
+        conversationVerification = Value $result 'conversationVerification'
+        conversationConnectionReason = Value $result 'conversationConnectionReason' (Value $result 'popoutConnectionReason')
+        conversationUserMessage = Value $result 'conversationUserMessage' (Value $result 'popoutUserMessage')
         popoutConnectionConfirmed = (Value $result 'popoutConnectionConfirmed' $false) -ceq $true
         launcherElapsedMs = Value $result 'launcherElapsedMs'
         popoutConnectionReason = Value $result 'popoutConnectionReason'

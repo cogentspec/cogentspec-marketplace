@@ -209,31 +209,38 @@ for (const pluginPath of [sourcePluginPath, compatibilityPluginPath]) {
   }
 }
 if (canonicalPopoutNormalizer !== compatibilityPopoutNormalizer) {
-  fail("Popout Window Normalizer scripts must be identical across GPT packages");
+  fail("Desktop Window Normalizer scripts must be identical across GPT packages");
 }
 for (const [name, normalizer] of [["canonical", canonicalPopoutNormalizer], ["compatibility", compatibilityPopoutNormalizer]]) {
   for (const marker of [
-    "verified_retained_popout",
-    "single_signed_claude_window_candidate",
+    "verified_gpt_codex_desktop_main_window",
+    "single_signed_claude_desktop_main_window",
     "clamped_by_application",
+    "SWP_NOSENDCHANGING",
     "SWP_NOACTIVATE",
     "Restore-NormalizerWindows",
-    "Popout Window Normalizer",
+    "Invoke-MaintainNormalizedWindows",
+    "maintaining_compact_size",
+    "Desktop Window Normalizer",
   ]) {
-    if (!normalizer.includes(marker)) fail(`${name} Popout Window Normalizer is missing ${marker}`);
+    if (!normalizer.includes(marker)) fail(`${name} Desktop Window Normalizer is missing ${marker}`);
   }
   for (const forbidden of ["SetForegroundWindow", "SendInput", "keybd_event", "mouse_event", "SetWindowLong"]) {
-    if (normalizer.includes(forbidden)) fail(`${name} Popout Window Normalizer must not use ${forbidden}`);
+    if (normalizer.includes(forbidden)) fail(`${name} Desktop Window Normalizer must not use ${forbidden}`);
+  }
+  for (const retired of ["verified_retained_popout", "single_signed_claude_window_candidate", "$title -eq 'Claude'", "$mainChatGptHandles -notcontains"]) {
+    if (normalizer.includes(retired)) fail(`${name} Desktop Window Normalizer still contains retired Popout targeting: ${retired}`);
   }
 }
 for (const pluginPath of [sourcePluginPath, compatibilityPluginPath]) {
   const popoutSkill = await readFile(join(pluginPath, "skills", "gptpop", "SKILL.md"), "utf8");
   for (const marker of [
-    "Explicit user-requested Popout sizing",
+    "Explicit user-requested Desktop sizing",
     "Window sizing is independent of connection",
     "popout-window-normalizer.ps1",
     "clamped_by_application",
-    "not a registered Claude connection command",
+    "never resize the retained GPTPop window",
+    "never describe it as a retained Claude Popout",
   ]) {
     if (!popoutSkill.includes(marker)) fail(`gptpop sizing instructions are missing ${marker}`);
   }
@@ -288,6 +295,9 @@ const deskStartPath = (pluginPath) => join(pluginPath, 'skills', 'gptdesk', 'scr
 const canonicalDeskStart = await readFile(deskStartPath(sourcePluginPath), 'utf8');
 const compatibilityDeskStart = await readFile(deskStartPath(compatibilityPluginPath), 'utf8');
 if (canonicalDeskStart !== compatibilityDeskStart) fail('GPTDesk startup supervisors must match across GPT packages');
+for (const marker of ['conversationVerification', 'conversationConnectionReason', 'conversationUserMessage']) {
+  if (!canonicalDeskStart.includes(marker)) fail(`GPTDesk startup does not preserve ${marker}`);
+}
 if (/SendInput|open_in_codex|ensure-codex-sidebar-hidden\.py/.test(canonicalDeskStart)) {
   fail('GPTDesk startup must leave native opening and permitted UI checks to the host');
 }
@@ -331,6 +341,9 @@ for (const [name, source] of [["starter", canonicalStarter], ["connector", canon
 }
 for (const marker of ["[ValidateSet('legacy', 'popout', 'desktop-ui', 'web', 'split-screen')]", "$Experience = 'legacy'", "experience=$([Uri]::EscapeDataString($Experience))", "$Experience -in @('popout', 'web', 'split-screen')"]) {
   if (!canonicalStarter.includes(marker)) fail(`the Desktop Bridge starter is missing experience routing marker: ${marker}`);
+}
+for (const marker of ['Confirm-CurrentConversationConnection', "'desktop_thread_presence'", "'popout_fingerprint'", "'web_destination'", 'conversationConnectionReason']) {
+  if (!canonicalStarter.includes(marker)) fail(`the Desktop Bridge starter is missing destination confirmation marker: ${marker}`);
 }
 if (canonicalStarter.includes("-File $connectionScript")) fail("the Desktop Bridge starter still launches a nested account-check process");
 if (canonicalConnector.includes("exit 0")) fail("the Desktop Bridge connector can still terminate its calling launcher process");
