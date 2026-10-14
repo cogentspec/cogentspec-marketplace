@@ -1,6 +1,6 @@
 interface:
   display_name: "GPTPop"
-  short_description: "Open CogentSpec beside the main desktop chat window"
-  default_prompt: "Use $gptpop to open CogentSpec for Windows split screen beside this desktop chat."
+  short_description: "Connect the external browser beside your desktop chat"
+  default_prompt: "Use $gptpop to connect the existing external CogentSpec browser beside this desktop chat, not an in-app browser pane."
 policy:
   allow_implicit_invocation: false

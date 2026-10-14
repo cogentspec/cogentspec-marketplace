@@ -248,6 +248,8 @@ Start-Sleep -Milliseconds 5500
         Assert-BridgeLauncherTest ($splitResult.workspaceUrl -match '^https://cogentspec\.app/stack\?surface=chatgpt&context=ctx-[a-f0-9]{64}&experience=split-screen&open=web&nav=[a-f0-9]{32}#desktop-web=cgw_') 'Split screen lost its authenticated browser route.'
         Assert-BridgeLauncherTest (-not $splitResult.currentConversationConnected -and -not $splitResult.popoutConnectionConfirmed) 'Split screen must not invent native conversation confirmation.'
         Assert-BridgeLauncherTest ($splitResult.conversationVerification -eq 'authenticated_workspace') 'Split screen returned the Popout verification contract.'
+        $splitResult | ConvertTo-Json -Depth 6 -Compress | node (Join-Path $repositoryRoot 'scripts/test-gptpop-navigation.mjs') --launcher-result
+        Assert-BridgeLauncherTest ($LASTEXITCODE -eq 0) 'GPTPop did not return an executable exact handoff to the external browser tab.'
         $workerProcessId = [int]$splitResult.processId
     }
     $popoutProbesAfterSplit = if (Test-Path -LiteralPath $popoutProbePath) { @(Get-Content -LiteralPath $popoutProbePath).Count } else { 0 }

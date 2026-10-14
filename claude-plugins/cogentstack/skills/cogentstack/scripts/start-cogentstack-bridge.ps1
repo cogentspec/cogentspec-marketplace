@@ -15,6 +15,18 @@ $launcherTimer = [Diagnostics.Stopwatch]::StartNew()
 . (Join-Path $PSScriptRoot 'project-context.ps1')
 . (Join-Path $PSScriptRoot 'native-command.ps1')
 
+function Get-GptPopBrowserNavigation([string]$WorkspaceUrl, [string]$ContextKey, [string]$SurfaceName) {
+    # Return only the exact context-bound external-tab call; never open a host pane.
+    $expected = '^https://cogentspec\.app/stack\?surface=chatgpt&context=' + [Regex]::Escape($ContextKey) + '&experience=split-screen&open=web&nav=[a-f0-9]{32}#desktop-web=cgw_[A-Za-z0-9_-]{32,}$'
+    if ($SurfaceName -cne 'chatgpt' -or $ContextKey -cnotmatch '^ctx-[a-f0-9]{64}$' -or $WorkspaceUrl -cnotmatch $expected) {
+        throw 'The GPTPop external browser handoff is invalid.'
+    }
+    return [ordered]@{
+        protocol = 'cogentspec-gptpop-navigation-v1'
+        code = 'await gptPopTab.goto(' + (ConvertTo-Json -InputObject $WorkspaceUrl -Compress) + ');'
+    }
+}
+
 function Write-CompactJson($Value) {
     $Value | ConvertTo-Json -Depth 6 -Compress | Write-Output
 }
@@ -442,6 +454,15 @@ $webLaunchBaseUrl = if ($Surface -eq 'chatgpt' -and $Experience -in @('legacy', 
 $webWorkspaceUrl = "$webLaunchBaseUrl&open=web&nav=$navigationKey#desktop-web=$([Uri]::EscapeDataString([string]$connection.webWorkspaceCode))"
 $chatgptWorkspaceUrl = "$workspaceBaseUrl&open=chatgpt&nav=$navigationKey#desktop-chatgpt=$([Uri]::EscapeDataString([string]$connection.chatgptWorkspaceCode))"
 $workspaceUrl = if ($Experience -in @('popout', 'web', 'split-screen')) { $webWorkspaceUrl } else { $chatgptWorkspaceUrl }
+$splitScreenNavigation = $null
+if ($Experience -eq 'split-screen') {
+    try {
+        $splitScreenNavigation = Get-GptPopBrowserNavigation -WorkspaceUrl $workspaceUrl -ContextKey $resolvedContext -SurfaceName $Surface
+    } catch {
+        Write-CompactJson ([ordered]@{ status = 'invalid_workspace_handoff'; reason = 'split_screen_url_contract_mismatch'; userMessage = 'CogentSpec could not prepare the verified external split-screen workspace link.' })
+        return
+    }
+}
 
 $localStateRoot = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'CogentSpec'
 $stateRoot = Join-Path $localStateRoot 'bridge'
@@ -515,6 +536,8 @@ if (Test-Path -LiteralPath $statePath -PathType Leaf) {
                     webWorkspaceUrl = $webWorkspaceUrl
                     chatgptWorkspaceUrl = $chatgptWorkspaceUrl
                     browserOpened = $false
+                    browserNavigationProtocol = if ($splitScreenNavigation) { $splitScreenNavigation.protocol } else { $null }
+                    browserNavigationCode = if ($splitScreenNavigation) { $splitScreenNavigation.code } else { $null }
                     accountState = 'signed_in'
                     mcpState = $mcpState
                     defaultDirectoryReady = $true
@@ -596,6 +619,8 @@ Write-CompactJson ([ordered]@{
     webWorkspaceUrl = $webWorkspaceUrl
     chatgptWorkspaceUrl = $chatgptWorkspaceUrl
     browserOpened = $false
+    browserNavigationProtocol = if ($splitScreenNavigation) { $splitScreenNavigation.protocol } else { $null }
+    browserNavigationCode = if ($splitScreenNavigation) { $splitScreenNavigation.code } else { $null }
     accountState = 'signed_in'
     mcpState = $mcpState
     defaultDirectoryReady = $true

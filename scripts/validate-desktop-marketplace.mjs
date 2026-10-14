@@ -190,6 +190,14 @@ for (const pluginPath of [sourcePluginPath, compatibilityPluginPath]) {
     const commandRoot = join(pluginPath, "skills", command);
     const commandSkill = await readFile(join(commandRoot, "SKILL.md"), "utf8");
     const commandMetadata = await readFile(join(commandRoot, "agents", "openai.yaml"), "utf8");
+    if (command === "gptpop") {
+      if (commandSkill.includes("mcp__codex_app__open_in_codex") || !commandSkill.includes("Never use `open_in_codex`") || !commandSkill.includes("live-claim")) {
+        fail("gptpop must target a claimed external browser tab, never an embedded pane");
+      }
+      for (const marker of ["cogentspec-gptpop-navigation-v1", "browserNavigationCode", "Bridge connected", "My projects"]) {
+        if (!commandSkill.includes(marker)) fail(`gptpop external delivery is missing ${marker}`);
+      }
+    }
     for (const marker of [`name: ${command}`, `-Experience ${experience}`, destination, confirmation]) {
       if (!commandSkill.includes(marker)) fail(`${command} is missing destination marker: ${marker}`);
     }
