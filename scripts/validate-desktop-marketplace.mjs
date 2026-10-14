@@ -181,7 +181,7 @@ const compatibilityDesktopUiHelper = await readFile(join(compatibilityPluginPath
 const compatibilityPopoutNormalizer = await readFile(join(compatibilityPluginPath, "skills", "cogentstack", "scripts", "popout-window-normalizer.ps1"), "utf8");
 const compatibilityGptWebStarter = await readFile(join(compatibilityPluginPath, "skills", "gptweb", "scripts", "start-gptweb.ps1"), "utf8");
 const commandContracts = [
-  ["gptpop", "popout", "webWorkspaceUrl", "CogentSpec GPT Popout work area"],
+  ["gptpop", "split-screen", "webWorkspaceUrl", "CogentSpec GPT split-screen workspace"],
   ["gptdesk", "desktop-ui", "chatgptWorkspaceUrl", "CogentSpec is connected beside this GPT conversation"],
   ["gptweb", "web", "scripts/start-gptweb.ps1", "CogentSpec GPT web workspace is ready"],
 ];
@@ -232,7 +232,7 @@ for (const [name, skill] of [["canonical skill", canonicalSkill], ["compatibilit
   for (const marker of [
     "Explicit one-word destination dispatch",
     "before running any Bridge helper",
-    "-Experience popout",
+    "-Experience split-screen",
     "-Experience desktop-ui",
     "-Experience web",
     "../gptweb/scripts/start-gptweb.ps1",
@@ -319,7 +319,7 @@ for (const [name, source] of [["starter", canonicalStarter], ["connector", canon
     if (!source.includes(marker)) fail(`the Desktop Bridge ${name} is missing bound workspace marker: ${marker}`);
   }
 }
-for (const marker of ["[ValidateSet('legacy', 'popout', 'desktop-ui', 'web')]", "$Experience = 'legacy'", "experience=$([Uri]::EscapeDataString($Experience))", "$Experience -in @('popout', 'web')"]) {
+for (const marker of ["[ValidateSet('legacy', 'popout', 'desktop-ui', 'web', 'split-screen')]", "$Experience = 'legacy'", "experience=$([Uri]::EscapeDataString($Experience))", "$Experience -in @('popout', 'web', 'split-screen')"]) {
   if (!canonicalStarter.includes(marker)) fail(`the Desktop Bridge starter is missing experience routing marker: ${marker}`);
 }
 if (canonicalStarter.includes("-File $connectionScript")) fail("the Desktop Bridge starter still launches a nested account-check process");

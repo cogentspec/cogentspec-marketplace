@@ -122,6 +122,7 @@ for ($heartbeat = 0; $heartbeat -lt 15; $heartbeat += 1) {
     $popupInspectionFixture = @'
 param([string]$Mode)
 if ($Mode -ne 'inspect') { throw 'The launcher requested an unexpected Popout operation.' }
+Add-Content -LiteralPath (Join-Path $PSScriptRoot 'popout-inspected.txt') -Value 'inspect'
 [ordered]@{
     status = 'ready'
     publisherVerified = $true
@@ -236,6 +237,22 @@ Start-Sleep -Milliseconds 5500
     $gptwebCommand = Join-Path $fixturePlugin 'skills\gptweb\scripts\start-gptweb.ps1'
     $mcpCallsBeforeWeb = @(Get-Content -LiteralPath (Join-Path $fixtureScripts 'mcp-called.txt')).Count
     Set-Content -LiteralPath (Join-Path $fixtureScripts 'mcp-block.flag') -Value 'blocked'
+    $popoutProbePath = Join-Path $fixtureScripts 'popout-inspected.txt'
+    $popoutProbesBeforeSplit = if (Test-Path -LiteralPath $popoutProbePath) { @(Get-Content -LiteralPath $popoutProbePath).Count } else { 0 }
+    foreach ($splitThread in @($fixtureThreadId, [Guid]::NewGuid().ToString(), $fixtureThreadId)) {
+        $env:CODEX_THREAD_ID = $splitThread
+        $splitResult = (& $fixtureLauncher -ContextKey $contextKey -Surface chatgpt -Experience split-screen) | ConvertFrom-Json
+        Assert-BridgeLauncherTest ($splitResult.status -eq 'ready' -and $splitResult.presenceVerified) 'Split screen must accept authenticated Bridge presence without a Popout.'
+        Assert-BridgeLauncherTest ($splitResult.mcpState -eq 'not_required' -and $splitResult.projectDataConnection -eq 'authenticated_desktop_bridge') 'Split screen still requires CLI login.'
+        Assert-BridgeLauncherTest ($splitResult.workspaceUrl -ceq $splitResult.webWorkspaceUrl) 'Split screen must select the browser destination.'
+        Assert-BridgeLauncherTest ($splitResult.workspaceUrl -match '^https://cogentspec\.app/stack\?surface=chatgpt&context=ctx-[a-f0-9]{64}&experience=split-screen&open=web&nav=[a-f0-9]{32}#desktop-web=cgw_') 'Split screen lost its authenticated browser route.'
+        Assert-BridgeLauncherTest (-not $splitResult.currentConversationConnected -and -not $splitResult.popoutConnectionConfirmed) 'Split screen must not invent native conversation confirmation.'
+        Assert-BridgeLauncherTest ($splitResult.conversationVerification -eq 'authenticated_workspace') 'Split screen returned the Popout verification contract.'
+        $workerProcessId = [int]$splitResult.processId
+    }
+    $popoutProbesAfterSplit = if (Test-Path -LiteralPath $popoutProbePath) { @(Get-Content -LiteralPath $popoutProbePath).Count } else { 0 }
+    Assert-BridgeLauncherTest ($popoutProbesAfterSplit -eq $popoutProbesBeforeSplit) 'Split screen inspected a native Popout.'
+    Assert-BridgeLauncherTest (@(Get-Content -LiteralPath (Join-Path $fixtureScripts 'mcp-called.txt')).Count -eq $mcpCallsBeforeWeb) 'Split screen still invokes CLI login.'
     $webExperienceOutput = @(& $gptwebCommand -ContextKey $contextKey 2>&1)
     $webExperienceJsonLine = @($webExperienceOutput | ForEach-Object { $_.ToString() } | Where-Object { $_.Trim().StartsWith('{') } | Select-Object -Last 1)
     Assert-BridgeLauncherTest ([bool]$webExperienceJsonLine) 'The GPTWeb Bridge launcher returned no JSON result.'
@@ -680,6 +697,7 @@ $legacyUrl = "https://cogentspec.app/stack?surface=chatgpt&experience=web#deskto
         workspaceLinksReturned = 2
         webDestinationVerified = $true
         webIndependentOfCliLoginVerified = $true
+        splitScreenWithoutPopoutVerified = $true
         desktopAndPopoutGatesPreserved = $true
         webCommandFailClosedVerified = $true
         directBrowserNavigationVerified = $true

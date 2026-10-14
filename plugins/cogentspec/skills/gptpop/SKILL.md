@@ -1,18 +1,19 @@
 ---
 name: gptpop
-description: Open the current isolated CogentSpec project in its ChatGPT Popout work-area flow, or open the user-requested Popout Window Normalizer. Use when the user explicitly invokes $gptpop, asks for the GPT Popout command, or explicitly asks to resize or normalize GPTPop and the signed Claude window candidate.
+description: Open the isolated CogentSpec workspace beside the main desktop chat window for Windows split screen using $gptpop.
 ---
 
-# Open the CogentSpec GPT Popout work area
+# Open the CogentSpec GPT split-screen workspace
 
-Read `../cogentspec/SKILL.md` and follow its update, project-context, privacy, account, and connection requirements for **Connect the current AI project**, with these destination-specific changes only:
+The command name `$gptpop` is retained for compatibility. It now uses the main desktop chat window beside a CogentSpec browser window in Windows split screen. Read `../cogentspec/SKILL.md` for the update, isolated context, privacy and account steps, then follow this flow instead of its generic Popout connection steps:
 
-1. Invoke `../cogentspec/scripts/start-cogentstack-bridge.ps1 -ContextKey <resolved context> -Surface chatgpt -Experience popout` exactly once.
-2. Require the normal ready contract and require `workspaceUrl` to be the private `webWorkspaceUrl` with `experience=popout`. Do not expose either private URL in commentary or logs.
-3. Call `mcp__codex_app__open_in_codex` exactly once with `target: { type: "browser", url: workspaceUrl }`. Omit `threadId`, `tabId`, and `placement`. Treat `opened` or `queued` as accepted and do not retry.
-4. On acceptance say: **CogentSpec GPT Popout work area is connected.** If the native open is unavailable, return `workspaceUrl` once as `[Open CogentSpec GPT Popout work area](<URL>)`.
+1. Invoke `../cogentspec/scripts/start-cogentstack-bridge.ps1 -ContextKey <resolved context> -Surface chatgpt -Experience split-screen` exactly once.
+2. Require `status: ready`, the matching isolated context, `presenceVerified: true`, `accountState: signed_in`, `projectDataConnection: authenticated_desktop_bridge`, `mcpState: not_required`, `defaultDirectoryReady: true`, and `browserOpened: false`.
+3. Validate `workspaceUrl` equals `webWorkspaceUrl`, has origin `https://cogentspec.app` and path `/stack`, and contains the resolved context, `surface=chatgpt`, `experience=split-screen`, `open=web`, a fresh nav and complete `#desktop-web=cgw_...` handoff. Keep private links out of commentary, logs, clipboard and files.
+4. Open that exact link once using the browser-opening action. In Codex use `mcp__codex_app__open_in_codex` with `target: { type: "browser", url: workspaceUrl }`, omitting thread, tab and placement. Accept `opened` or `queued` without retry. If opening is unavailable, return the link once as `[Open CogentSpec GPT split-screen workspace](<URL>)`.
+5. Report Bridge readiness and opening separately. Say the split-screen workspace was opened or queued. Only claim a visibly connected page after observing its context-matched green LED. Popout fields including `currentConversationConnected: false` do not apply here; do not report them as a failed main desktop conversation or inspect, open, pin or hide a Popout.
 
-This command selects only the ChatGPT Popout destination. A normal `$gptpop` connection must not switch to the compact Desktop UI layout or the ordinary web destination, resize windows, or alter the shared project flow.
+Help explains launching ChatGPT Desktop, resizing it to fit, and **Win + Left/Right arrow** to snap each window. Physical snapping is user-controlled; Bridge readiness and an accepted browser open do not prove the split is arranged. Keep `$gptdesk` and `$gptweb` as separate destinations.
 
 ## Explicit user-requested Popout sizing
 

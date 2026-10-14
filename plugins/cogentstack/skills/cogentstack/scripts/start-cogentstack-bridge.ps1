@@ -5,7 +5,7 @@ param(
     [ValidateSet('chatgpt', 'claude-desktop')]
     [string]$Surface = 'chatgpt',
 
-    [ValidateSet('legacy', 'popout', 'desktop-ui', 'web')]
+    [ValidateSet('legacy', 'popout', 'desktop-ui', 'web', 'split-screen')]
     [string]$Experience = 'legacy'
 )
 
@@ -195,6 +195,7 @@ function Read-FreshPopoutInspection([string]$HelperPath) {
 }
 
 function Confirm-StandalonePopoutConnection([string]$SurfaceName, [string]$ConnectedContextKey, [string]$ConnectedThreadId) {
+    if ($Experience -eq 'split-screen') { return [ordered]@{ confirmed = $false; reason = 'not_applicable' } }
     if ($SurfaceName -ne 'chatgpt') { return [ordered]@{ confirmed = $false; reason = 'not_applicable' } }
     $token = ''
     try {
@@ -388,7 +389,7 @@ $mcpState = 'not_required'
 # The authenticated device check and browser grant above, plus fresh worker
 # acknowledgement below, authorize Web. A separate CLI tool login is not a
 # prerequisite for opening that workspace. Desk/Popout keep their existing gate.
-$requiresCodexMcp = $Surface -eq 'chatgpt' -and $Experience -ne 'web'
+$requiresCodexMcp = $Surface -eq 'chatgpt' -and $Experience -notin @('web', 'split-screen')
 $projectDataConnection = if ($requiresCodexMcp) { 'codex_mcp' } else { 'authenticated_desktop_bridge' }
 if ($requiresCodexMcp) {
     $mcpSetupScript = Join-Path $PSScriptRoot 'ensure-cogentspec-mcp.ps1'
@@ -440,7 +441,7 @@ $navigationKey = [Guid]::NewGuid().ToString('N')
 $webLaunchBaseUrl = if ($Surface -eq 'chatgpt' -and $Experience -in @('legacy', 'popout')) { $workspaceBaseUrl.Replace('/stack?', '/popout-launch?') } else { $workspaceBaseUrl }
 $webWorkspaceUrl = "$webLaunchBaseUrl&open=web&nav=$navigationKey#desktop-web=$([Uri]::EscapeDataString([string]$connection.webWorkspaceCode))"
 $chatgptWorkspaceUrl = "$workspaceBaseUrl&open=chatgpt&nav=$navigationKey#desktop-chatgpt=$([Uri]::EscapeDataString([string]$connection.chatgptWorkspaceCode))"
-$workspaceUrl = if ($Experience -in @('popout', 'web')) { $webWorkspaceUrl } else { $chatgptWorkspaceUrl }
+$workspaceUrl = if ($Experience -in @('popout', 'web', 'split-screen')) { $webWorkspaceUrl } else { $chatgptWorkspaceUrl }
 
 $localStateRoot = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'CogentSpec'
 $stateRoot = Join-Path $localStateRoot 'bridge'
@@ -523,7 +524,8 @@ if (Test-Path -LiteralPath $statePath -PathType Leaf) {
                     pluginVersion = $pluginVersion
                     popoutConnectionConfirmed = [bool]$popoutConnection.confirmed
                     currentConversationConnected = [bool]$popoutConnection.confirmed
-                    popoutUserMessage = if ($popoutConnection.confirmed) { 'The current Popout conversation is connected.' } else { 'The project-data Bridge is ready, but the current Popout conversation could not be verified. The workspace remains disconnected.' }
+                    conversationVerification = if ($Experience -eq 'split-screen') { 'authenticated_workspace' } else { 'popout_fingerprint' }
+                    popoutUserMessage = if ($Experience -eq 'split-screen') { 'The authenticated split-screen project Bridge is ready.' } elseif ($popoutConnection.confirmed) { 'The current Popout conversation is connected.' } else { 'The project-data Bridge is ready, but the current Popout conversation could not be verified. The workspace remains disconnected.' }
                     popoutConnectionReason = [string]$popoutConnection.reason
                     launcherElapsedMs = [int]$launcherTimer.ElapsedMilliseconds
                 })
@@ -603,7 +605,8 @@ Write-CompactJson ([ordered]@{
     pluginVersion = $pluginVersion
     popoutConnectionConfirmed = [bool]$popoutConnection.confirmed
     currentConversationConnected = [bool]$popoutConnection.confirmed
-    popoutUserMessage = if ($popoutConnection.confirmed) { 'The current Popout conversation is connected.' } else { 'The project-data Bridge is ready, but the current Popout conversation could not be verified. The workspace remains disconnected.' }
+    conversationVerification = if ($Experience -eq 'split-screen') { 'authenticated_workspace' } else { 'popout_fingerprint' }
+    popoutUserMessage = if ($Experience -eq 'split-screen') { 'The authenticated split-screen project Bridge is ready.' } elseif ($popoutConnection.confirmed) { 'The current Popout conversation is connected.' } else { 'The project-data Bridge is ready, but the current Popout conversation could not be verified. The workspace remains disconnected.' }
     popoutConnectionReason = [string]$popoutConnection.reason
     launcherElapsedMs = [int]$launcherTimer.ElapsedMilliseconds
 })
