@@ -1,6 +1,6 @@
 interface:
-  display_name: "GPTPop"
+  display_name: "GPTPop (legacy alias)"
   short_description: "Connect the external browser beside your desktop chat"
-  default_prompt: "Use $gptpop to connect the existing external CogentSpec browser beside this desktop chat, not an in-app browser pane."
+  default_prompt: "Use $gptpop, the compatibility alias for $gptsnap, to connect the existing external CogentSpec browser beside this desktop chat, not an in-app browser pane."
 policy:
   allow_implicit_invocation: false

@@ -1,0 +1,6 @@
+interface:
+  display_name: "ClaudeSnap"
+  short_description: "Connect the external browser beside your Claude Desktop"
+  default_prompt: "Use $claudesnap to connect the existing external CogentSpec browser beside this Claude Desktop, not an in-app browser pane."
+policy:
+  allow_implicit_invocation: false

@@ -181,16 +181,18 @@ const compatibilityDesktopUiHelper = await readFile(join(compatibilityPluginPath
 const compatibilityPopoutNormalizer = await readFile(join(compatibilityPluginPath, "skills", "cogentstack", "scripts", "popout-window-normalizer.ps1"), "utf8");
 const compatibilityGptWebStarter = await readFile(join(compatibilityPluginPath, "skills", "gptweb", "scripts", "start-gptweb.ps1"), "utf8");
 const commandContracts = [
-  ["gptpop", "split-screen", "webWorkspaceUrl", "CogentSpec GPT split-screen workspace"],
+  ["gptsnap", "split-screen", "webWorkspaceUrl", "CogentSpec GPT split-screen workspace"],
   ["gptdesk", "desktop-ui", "chatgptWorkspaceUrl", "CogentSpec is connected beside this GPT conversation"],
   ["gptweb", "web", "scripts/start-gptweb.ps1", "CogentSpec GPT web workspace is ready"],
 ];
 for (const pluginPath of [sourcePluginPath, compatibilityPluginPath]) {
+  const alias = await readFile(join(pluginPath, "skills/gptpop/SKILL.md"), "utf8");
+  if (!alias.includes("../gptsnap/SKILL.md") || alias.includes("-Experience ")) fail("gptpop must delegate to gptsnap without a second launcher");
   for (const [command, experience, destination, confirmation] of commandContracts) {
     const commandRoot = join(pluginPath, "skills", command);
     const commandSkill = await readFile(join(commandRoot, "SKILL.md"), "utf8");
     const commandMetadata = await readFile(join(commandRoot, "agents", "openai.yaml"), "utf8");
-    if (command === "gptpop") {
+    if (command === "gptsnap") {
       if (commandSkill.includes("mcp__codex_app__open_in_codex") || !commandSkill.includes("Never use `open_in_codex`") || !commandSkill.includes("live-claim")) {
         fail("gptpop must target a claimed external browser tab, never an embedded pane");
       }

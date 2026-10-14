@@ -45,6 +45,7 @@ const scriptsRoot = join(pluginRoot, "skills", "cogentspec", "scripts");
 const codexScriptsRoot = join(repositoryRoot, "plugins", "cogentspec", "skills", "cogentspec", "scripts");
 
 const commandContracts = [
+  ["claudesnap", "split-screen", "webWorkspaceUrl", "Claude split-screen workspace is connected"],
   ["claudedesk", "desktop", "chatgptWorkspaceUrl", "Claude Desktop workspace is ready"],
   ["claudeweb", "web", "webWorkspaceUrl", "Claude web workspace is ready"],
 ];
@@ -56,6 +57,11 @@ for (const [root, mainSkill] of [[pluginRoot, "cogentspec"], [compatibilityRoot,
     const markers = command === "claudeweb"
       ? [`name: ${command}`, `../${mainSkill}/SKILL.md`, "start-claudeweb.ps1", "-Surface claude-desktop -Experience web", destination, "Claude web workspace is ready", "Bridge connected", "My projects", "cogentspec-claudeweb-navigation-v1"]
       : [`name: ${command}`, `../${mainSkill}/SKILL.md`, `-Surface claude-desktop -Experience ${experience}`, destination, confirmation];
+    if (command === "claudesnap") {
+      for (const marker of ["cogentspec-claudesnap-navigation-v1", "claudeSnapTab", "browserNavigationCode", "live-claim", "Bridge connected", "My projects", "Never use `open_in_codex`"]) {
+        if (!commandSkill.includes(marker)) fail(`ClaudeSnap external split-screen delivery is missing ${marker}`);
+      }
+    }
     for (const marker of markers) {
       if (!commandSkill.includes(marker)) fail(`${command} is missing Claude destination marker: ${marker}`);
     }

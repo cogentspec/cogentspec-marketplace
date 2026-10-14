@@ -335,6 +335,8 @@ try {
         'skills/gptdesk/scripts/start-gptdesk.ps1',
         'skills/gptpop/agents/openai.yaml',
         'skills/gptpop/SKILL.md',
+        'skills/gptsnap/agents/openai.yaml',
+        'skills/gptsnap/SKILL.md',
         'skills/gptweb/agents/openai.yaml',
         'skills/gptweb/SKILL.md',
         'skills/gptweb/scripts/start-gptweb.ps1',

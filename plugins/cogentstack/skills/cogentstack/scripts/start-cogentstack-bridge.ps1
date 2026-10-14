@@ -27,6 +27,18 @@ function Get-GptPopBrowserNavigation([string]$WorkspaceUrl, [string]$ContextKey,
     }
 }
 
+function Get-ClaudeSnapBrowserNavigation([string]$WorkspaceUrl, [string]$ContextKey, [string]$SurfaceName) {
+    # Keep Claude's context-bound handoff separate from GPT and ordinary Web.
+    $expected = '^https://cogentspec\.app/stack\?surface=claude-desktop&context=' + [Regex]::Escape($ContextKey) + '&experience=split-screen&open=web&nav=[a-f0-9]{32}#desktop-web=cgw_[A-Za-z0-9_-]{32,}$'
+    if ($SurfaceName -cne 'claude-desktop' -or $ContextKey -cnotmatch '^ctx-[a-f0-9]{64}$' -or $WorkspaceUrl -cnotmatch $expected) {
+        throw 'The ClaudeSnap external browser handoff is invalid.'
+    }
+    return [ordered]@{
+        protocol = 'cogentspec-claudesnap-navigation-v1'
+        code = 'await claudeSnapTab.goto(' + (ConvertTo-Json -InputObject $WorkspaceUrl -Compress) + ');'
+    }
+}
+
 function Write-CompactJson($Value) {
     $Value | ConvertTo-Json -Depth 6 -Compress | Write-Output
 }
@@ -457,7 +469,11 @@ $workspaceUrl = if ($Experience -in @('popout', 'web', 'split-screen')) { $webWo
 $splitScreenNavigation = $null
 if ($Experience -eq 'split-screen') {
     try {
-        $splitScreenNavigation = Get-GptPopBrowserNavigation -WorkspaceUrl $workspaceUrl -ContextKey $resolvedContext -SurfaceName $Surface
+        $splitScreenNavigation = if ($Surface -eq 'claude-desktop') {
+            Get-ClaudeSnapBrowserNavigation -WorkspaceUrl $workspaceUrl -ContextKey $resolvedContext -SurfaceName $Surface
+        } else {
+            Get-GptPopBrowserNavigation -WorkspaceUrl $workspaceUrl -ContextKey $resolvedContext -SurfaceName $Surface
+        }
     } catch {
         Write-CompactJson ([ordered]@{ status = 'invalid_workspace_handoff'; reason = 'split_screen_url_contract_mismatch'; userMessage = 'CogentSpec could not prepare the verified external split-screen workspace link.' })
         return

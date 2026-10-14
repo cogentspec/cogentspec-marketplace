@@ -105,9 +105,13 @@ foreach ($pair in @(@($url, 'unscoped', 'chatgpt'), @($url, $key, 'claude-deskto
     ]) await assert.rejects(verifyDelivery({ ...good, browserNavigationCode: code }));
   });
 
-  test("both GPTPop instructions prohibit embedded delivery and require claimed external verification", () => {
+  test("both GPTSnap instructions prohibit embedded delivery and require claimed external verification", () => {
     for (const pkg of ["cogentspec", "cogentstack"]) {
-      const skill = readFileSync(resolve(root, "plugins", pkg, "skills/gptpop/SKILL.md"), "utf8");
+      const skill = readFileSync(resolve(root, "plugins", pkg, "skills/gptsnap/SKILL.md"), "utf8");
+      const alias = readFileSync(resolve(root, "plugins", pkg, "skills/gptpop/SKILL.md"), "utf8");
+      assert.ok(alias.includes("../gptsnap/SKILL.md"));
+      assert.ok(!alias.includes("-Experience "));
+      assert.ok(skill.includes("name: gptsnap"));
       assert.ok(skill.includes("live-claim"));
       assert.ok(skill.includes("Never use `open_in_codex`"));
       assert.ok(skill.includes("cogentspec-gptpop-navigation-v1"));

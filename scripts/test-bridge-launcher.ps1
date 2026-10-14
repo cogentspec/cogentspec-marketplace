@@ -255,6 +255,18 @@ Start-Sleep -Milliseconds 5500
     $popoutProbesAfterSplit = if (Test-Path -LiteralPath $popoutProbePath) { @(Get-Content -LiteralPath $popoutProbePath).Count } else { 0 }
     Assert-BridgeLauncherTest ($popoutProbesAfterSplit -eq $popoutProbesBeforeSplit) 'Split screen inspected a native Popout.'
     Assert-BridgeLauncherTest (@(Get-Content -LiteralPath (Join-Path $fixtureScripts 'mcp-called.txt')).Count -eq $mcpCallsBeforeWeb) 'Split screen still invokes CLI login.'
+    foreach ($claudeSnapAttempt in @(1, 2)) {
+        $claudeSnapResult = (& $fixtureLauncher -ContextKey $contextKey -Surface claude-desktop -Experience split-screen) | ConvertFrom-Json
+        Assert-BridgeLauncherTest ($claudeSnapResult.status -eq 'ready' -and $claudeSnapResult.presenceVerified) 'ClaudeSnap must verify the authenticated context-bound Bridge.'
+        Assert-BridgeLauncherTest ($claudeSnapResult.workspaceUrl -ceq $claudeSnapResult.webWorkspaceUrl) 'ClaudeSnap selected a native Desktop destination.'
+        Assert-BridgeLauncherTest ($claudeSnapResult.mcpState -eq 'not_required' -and $claudeSnapResult.projectDataConnection -eq 'authenticated_desktop_bridge') 'ClaudeSnap requires an unrelated GPT tool login.'
+        Assert-BridgeLauncherTest (-not $claudeSnapResult.currentConversationConnected -and -not $claudeSnapResult.popoutConnectionConfirmed) 'ClaudeSnap invented a native Popout verification.'
+        $claudeSnapResult | ConvertTo-Json -Depth 6 -Compress | node (Join-Path $repositoryRoot 'scripts/test-claudesnap-navigation.mjs') --launcher-result
+        Assert-BridgeLauncherTest ($LASTEXITCODE -eq 0) 'ClaudeSnap did not return its exact external-browser handoff.'
+        $workerProcessId = [int]$claudeSnapResult.processId
+    }
+    $popoutProbesAfterClaudeSnap = if (Test-Path -LiteralPath $popoutProbePath) { @(Get-Content -LiteralPath $popoutProbePath).Count } else { 0 }
+    Assert-BridgeLauncherTest ($popoutProbesAfterClaudeSnap -eq $popoutProbesBeforeSplit) 'ClaudeSnap inspected a native Popout.'
     $webExperienceOutput = @(& $gptwebCommand -ContextKey $contextKey 2>&1)
     $webExperienceJsonLine = @($webExperienceOutput | ForEach-Object { $_.ToString() } | Where-Object { $_.Trim().StartsWith('{') } | Select-Object -Last 1)
     Assert-BridgeLauncherTest ([bool]$webExperienceJsonLine) 'The GPTWeb Bridge launcher returned no JSON result.'

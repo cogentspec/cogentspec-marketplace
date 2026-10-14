@@ -13,7 +13,9 @@ Use `${CLAUDE_PLUGIN_ROOT}` for every bundled script path. Run project-context, 
 
 Treat `$cogentstack`, a direct skill invocation, and a natural-language request to connect CogentSpec as the same request.
 
-Keep `$cogentstack` as the backward-compatible default. `$claudedesk` selects only the Claude-labelled Desktop workspace link, while `$claudeweb` selects only the ordinary web-workspace link. Both explicit commands use the same isolated Claude project context and Bridge state. No `$claudepop` command is registered because Claude has no verified retained-Popout flow.
+Keep `$cogentstack` as the backward-compatible default. `$claudedesk` selects only the Claude-labelled Desktop workspace link, while `$claudeweb` selects only the ordinary web-workspace link. Both explicit commands use the same isolated Claude project context and Bridge state. `$claudesnap` selects the Claude-labelled external-browser Windows split-screen workspace. No `$claudepop` command is registered; split screen uses the main Claude Desktop window, not a retained Popout.
+
+For an explicit `$claudesnap`, read `../claudesnap/SKILL.md` and follow its one context resolution, one shared launcher with `-Surface claude-desktop -Experience split-screen`, external-tab delivery and visible connection verification. Do not run the generic link-only sequence first, substitute ClaudeDesk/Web, or manipulate Claude's window.
 
 For an explicit `$claudeweb`, follow `../claudeweb/SKILL.md` and its dedicated validated launcher instead of the generic steps below. Its ordinary Web-tab delivery does not permit manipulating the Claude application or affect `$claudedesk`.
 
