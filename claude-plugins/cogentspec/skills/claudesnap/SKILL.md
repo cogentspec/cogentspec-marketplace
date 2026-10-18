@@ -5,8 +5,6 @@ description: Open the isolated CogentSpec workspace beside the main Claude Deskt
 
 # Open the CogentSpec Claude split-screen workspace
 
-Before the ready-handoff steps, handle `status: preview` separately: explain `userMessage`, open the helper's fragment-free `previewUrl` once in this command's intended external work-area browser (or return one labelled preview link), and stop. Report an opened read-only preview only after opening succeeds; never report Bridge connected, request a new handoff, start workers or perform paid project actions.
-
 `$claudesnap` connects the main Claude Desktop window beside an external CogentSpec browser; it does not create a Claude Popout. It uses the main Claude Desktop window beside a CogentSpec browser window in Windows split screen. Read `../cogentspec/SKILL.md` for shared isolated-context, privacy and account boundaries only. This explicit command replaces its generic link-only connection sequence. Use `${CLAUDE_PLUGIN_ROOT}` for bundled scripts and run them from the invoking Claude project directory. A normal Claude chat without plugin/local helper access cannot perform this connection.
 
 1. Run `${CLAUDE_PLUGIN_ROOT}\skills\cogentspec\scripts\project-context.ps1` exactly once and require an isolated context. If a package update was already verified, use only the refreshed plugin root.

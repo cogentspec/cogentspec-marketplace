@@ -26,12 +26,6 @@ For an explicit `$claudeweb`, follow `../claudeweb/SKILL.md` and its dedicated v
 
 Each Claude project receives its own stable logical CogentSpec context. Starting another context does not make CogentSpec appear inside that Claude project and does not create another browser tab. Multiple logical contexts may have background watchers, but the user may keep one physical CogentSpec Web tab and navigate it deliberately.
 
-## Read-only preview when a licence is inactive
-
-Handle `status: preview` before the normal ready/signed-out paths. Explain `userMessage`, then deliver the helper's fragment-free `previewUrl` once using the requested destination's normal browser/native opening method; if opening is unavailable or this destination is link-only, return one labelled preview link. Do not switch destinations, start workers, confirm a green LED or claim a licensed connection. Say the preview opened only after opening is accepted. Example tabs are viewable, but no real projects, models or files may be changed. Stop before project activity/build work.
-
-For `status: free_web_available`, deliver the returned validated account-entry URL in the requested Web browser, or return it once as a free Web Bridge link. Explain that free planning remains usable, while paid project operations require a licence. Do not treat this account-entry URL as a verified Bridge handoff or report a paid connection. Unknown authentication/network failures are not evidence of a missing licence. Never request credentials or delete an existing installation to resolve an inactive licence.
-
 ## Shared installation boundary
 
 - Desktop Bridge is the required small local component for approved project creation, deletion, preview, and repository actions.

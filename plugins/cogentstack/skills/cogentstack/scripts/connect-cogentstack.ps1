@@ -149,32 +149,12 @@ if ($Mode -eq 'status') {
                         return
                     } catch {
                         $renewStatus = if ($_.Exception.Response) { [int]$_.Exception.Response.StatusCode } else { 0 }
-                        $renewCode = ''
-                        try { $renewCode = [string](($_.ErrorDetails.Message | ConvertFrom-Json).code) } catch { }
-                        if ($renewStatus -eq 403 -and $renewCode -ceq 'subscription_inactive') {
-                            # Keep the existing protected installation credential.
-                            # An inactive licence is not sign-out or revocation.
-                            Write-CompactJson ([ordered]@{
-                                status = 'licence_required'; reason = 'subscription_inactive'
-                                licenceState = 'inactive'; credentialPreserved = $true
-                                userMessage = 'This account has no active CogentSpec licence. Paid work areas are available in read-only preview; the free Web Bridge remains available.'
-                            })
-                            return
-                        }
                         if ($renewStatus -eq 428) {
                             Remove-Item -LiteralPath $credentialPath -Force
                             Write-CompactJson ([ordered]@{ status = 'signed_out'; reason = 'legal_update_required' })
                             return
                         }
-                        if ($renewStatus -eq 403) {
-                            Write-CompactJson ([ordered]@{
-                                status = 'access_check_unavailable'; reason = 'licence_check_unavailable'
-                                credentialPreserved = $true
-                                userMessage = 'CogentSpec could not verify licence access. This is not confirmation that your licence is missing. Your existing installation was preserved.'
-                            })
-                            return
-                        }
-                        if ($renewStatus -eq 401) {
+                        if ($renewStatus -eq 401 -or $renewStatus -eq 403) {
                             Remove-Item -LiteralPath $credentialPath -Force
                             Write-CompactJson ([ordered]@{ status = 'signed_out'; reason = 'installation_replaced_revoked_or_inactive' })
                             return

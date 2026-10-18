@@ -137,21 +137,6 @@ function Finish($Result) {
 }
 
 function Forward-Failure($Result) {
-    if ([string](Value $Result 'status') -ceq 'preview') {
-        $previewUrl = [string](Value $Result 'previewUrl' '')
-        $previewContext = [string](Value $Result 'contextKey' '')
-        if ($previewContext -cne [string]$context.contextKey) { throw 'desk_ready_contract_invalid' }
-        $expected = '^https://cogentspec\.app/stack\?surface=chatgpt&context=' + [Regex]::Escape($previewContext) + '&experience=desktop-ui&preview=1$'
-        if ($previewUrl -cnotmatch $expected) { throw 'desk_ready_contract_invalid' }
-        Finish ([pscustomobject]@{
-            status = 'preview'; reason = 'licence_required'; licenceState = 'inactive'
-            previewUrl = $previewUrl; workspaceUrl = $previewUrl; webWorkspaceUrl = $previewUrl
-            contextKey = $previewContext
-            canUsePaidWorkspace = $false; currentConversationConnected = $false; browserOpened = $false
-            userMessage = 'This account has no active CogentSpec licence. Open GPTDesk in read-only preview to explore its features. No licensed connection was activated.'
-        })
-        return
-    }
     $safe = [pscustomobject]@{
         status = [string](Value $Result 'status' 'failed')
         failureStage = $script:stage

@@ -5,8 +5,6 @@ description: Connect the current isolated Claude project to the direct CogentSpe
 
 # Open the CogentSpec Claude web workspace
 
-Before the ready-handoff steps, handle `status: free_web_available` separately: explain `userMessage`, deliver the helper's validated, fragment-free `previewUrl` in this command's normal Web browser (or return one free Web Bridge link), and stop the paid connection flow. This is account entry to free planning, not a verified Bridge handoff. Never report a paid connection or infer a missing licence from an unknown/network error.
-
 Read `../cogentstack/SKILL.md` for the shared credential, privacy, and account boundaries only. This explicit Web command replaces the generic connection sequence and its link-only delivery; it does not change $claudedesk or $cogentstack. Use `${CLAUDE_PLUGIN_ROOT}` and the invoking Claude project directory. A browser side panel by itself does not provide local execution: this command requires the CogentSpec plugin and local helper access.
 
 1. Invoke `scripts/start-claudeweb.ps1` once. It resolves the isolated context and invokes the shared launcher internally with `-Surface claude-desktop -Experience web`; do not run context or Bridge helpers again. If a package update was already verified, resolve this helper only beneath the refreshed plugin root.

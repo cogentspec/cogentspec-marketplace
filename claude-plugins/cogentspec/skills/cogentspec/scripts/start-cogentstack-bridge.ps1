@@ -418,7 +418,6 @@ $chatgptWorkspaceUrl = $connectionUrl
 $connectionScript = Join-Path $PSScriptRoot 'connect-cogentstack.ps1'
 $sourceScriptNames = @(
     'connect-cogentstack.ps1',
-    'workspace-preview.ps1',
     'ensure-default-project-directory.ps1',
     'create-specification-project.ps1',
     'delete-specification-project.ps1',
@@ -454,19 +453,6 @@ if ([string]$connection.status -eq 'execution_permission_required') {
     exit 0
 }
 if ([string]$connection.status -ne 'connected') {
-    if ([string]$connection.status -eq 'access_check_unavailable') {
-        Write-CompactJson ([ordered]@{
-            status = 'access_check_unavailable'; reason = 'licence_check_unavailable'
-            contextKey = $resolvedContext; browserOpened = $false
-            userMessage = 'CogentSpec could not verify licence access. This is not confirmation that your licence is missing. Your existing installation was preserved.'
-        })
-        return
-    }
-    if ([string]$connection.status -eq 'licence_required') {
-        . (Join-Path $PSScriptRoot 'workspace-preview.ps1')
-        Write-CompactJson (New-CogentSpecPreviewResult -ContextKey $resolvedContext -Surface $Surface -Experience $Experience)
-        return
-    }
     Write-CompactJson ([ordered]@{
         status = 'signed_out'
         contextKey = $resolvedContext

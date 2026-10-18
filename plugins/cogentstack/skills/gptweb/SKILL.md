@@ -5,8 +5,6 @@ description: Open the current isolated CogentSpec project through the ordinary w
 
 # Open the CogentSpec GPT web workspace
 
-Before the ready-handoff steps, handle `status: free_web_available` separately: explain `userMessage`, deliver the helper's validated, fragment-free `previewUrl` in this command's normal Web browser (or return one free Web Bridge link), and stop the paid connection flow. This is account entry to free planning, not a verified Bridge handoff. Never report a paid connection or infer a missing licence from an unknown/network error.
-
 Read `../cogentstack/SKILL.md` and follow its update, execution-permission, privacy, and account-error requirements. Do not run the generic connection flow. After any package refresh, use only the refreshed package's command-specific launcher:
 
 1. Invoke `scripts/start-gptweb.ps1` exactly once from the invoking workspace. This is the sole GPTWeb entry point: it resolves the isolated context, starts or reuses Desktop Bridge with `-Experience web`, requests the web grant, and validates the complete handoff. Do not invoke `project-context.ps1`, `connect-cogentstack.ps1`, or `start-cogentstack-bridge.ps1` directly.
