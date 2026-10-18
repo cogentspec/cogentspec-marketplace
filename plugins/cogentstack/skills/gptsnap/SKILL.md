@@ -5,6 +5,8 @@ description: Open the isolated CogentSpec workspace beside the main desktop chat
 
 # Open the CogentSpec GPT split-screen workspace
 
+Before the ready-handoff steps, handle `status: preview` separately: explain `userMessage`, open the helper's fragment-free `previewUrl` once in this command's intended external work-area browser (or return one labelled preview link), and stop. Report an opened read-only preview only after opening succeeds; never report Bridge connected, request a new handoff, start workers or perform paid project actions.
+
 `$gptsnap` is the canonical command; `$gptpop` remains a compatibility alias. It uses the main desktop chat window beside a CogentSpec browser window in Windows split screen. Read `../cogentstack/SKILL.md` for the update, isolated context, privacy and account steps, then follow this flow instead of its generic Popout connection steps:
 
 1. Invoke `../cogentstack/scripts/start-cogentstack-bridge.ps1 -ContextKey <resolved context> -Surface chatgpt -Experience split-screen` exactly once.

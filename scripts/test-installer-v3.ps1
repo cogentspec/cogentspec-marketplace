@@ -65,6 +65,21 @@ try {
     [void](New-Item -ItemType Directory -Path (Split-Path -Parent $fixturePlugin) -Force)
     [void](New-Item -ItemType Directory -Path $fixtureBin -Force)
     Copy-Item -LiteralPath (Join-Path $repositoryRoot ".agents\plugins\install-$PluginName.ps1") -Destination $fixtureInstallerDirectory
+    # Keep installer tests isolated from live hosting, credentials and entitlements.
+    $fixtureInstallerPath = Join-Path $fixtureInstallerDirectory "install-$PluginName.ps1"
+    $fixtureInstallerSource = Get-Content -LiteralPath $fixtureInstallerPath -Raw
+    $healthFixture = @'
+function Invoke-WebRequest {
+    param($Uri, [switch]$UseBasicParsing, $MaximumRedirection, $TimeoutSec)
+    if ($Uri -cne 'https://cogentspec.com/api/health' -or $MaximumRedirection -ne 0) { throw 'Unexpected readiness target.' }
+    $state = if ($env:COGENTSPEC_INSTALLER_TEST_UNHEALTHY -eq '1') { 'unhealthy' } else { 'ok' }
+    [pscustomobject]@{StatusCode=200; BaseResponse=[pscustomobject]@{ResponseUri=[Uri]$Uri}; Content=('{"status":"' + $state + '","service":"cogentstack","release":"' + ('a' * 40) + '"}')}
+}
+try {
+    if ($UpdateOnly) {
+'@
+    $fixtureInstallerSource = $fixtureInstallerSource.Replace("try {`n    if (`$UpdateOnly) {", $healthFixture).Replace("try {`r`n    if (`$UpdateOnly) {", $healthFixture)
+    Set-Content -LiteralPath $fixtureInstallerPath -Value $fixtureInstallerSource -Encoding UTF8
     Copy-Item -LiteralPath (Join-Path $repositoryRoot "plugins\$PluginName") -Destination $fixturePlugin -Recurse -Force
 
     $claimFixture = @'
@@ -200,6 +215,12 @@ public static class GitFixture
     $powerShellPath = (Get-Process -Id $PID).Path
     $installerPath = Join-Path $fixtureInstallerDirectory "install-$PluginName.ps1"
     $validReference = 'cgb_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'
+    $env:COGENTSPEC_INSTALLER_TEST_UNHEALTHY = '1'
+    try {
+        $unhealthyRun = Invoke-InstallerFixture -PowerShellPath $powerShellPath -InstallerPath $installerPath -Reference $validReference -ValidateOnly
+        Assert-InstallerTest ($unhealthyRun.exitCode -ne 0 -and $unhealthyRun.result.failureStage -eq 'workspace_readiness') 'An unhealthy service must block installation before any account claim.'
+        Assert-InstallerTest (-not $unhealthyRun.result.claimAttempted) 'An unhealthy service attempted an account claim.'
+    } finally { Remove-Item Env:COGENTSPEC_INSTALLER_TEST_UNHEALTHY -ErrorAction SilentlyContinue }
     $validRun = Invoke-InstallerFixture -PowerShellPath $powerShellPath -InstallerPath $installerPath -Reference $validReference -ValidateOnly
     $valid = $validRun.result
 

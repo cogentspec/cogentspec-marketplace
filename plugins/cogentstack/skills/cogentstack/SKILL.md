@@ -65,6 +65,12 @@ Before resolving any connected project instruction, including discussion or refi
 
 A blank New idea page is not a current draft. Ask the user to create/select it in CogentSpec first. A verified draft permits only instructions about that draft; it is not authority to edit or build an existing project. Existing-project work additionally requires a fresh change/build handoff with the same project identity and verified local manifest. Recheck activity before mutations and after any pause or user approval. If its ID or revision changed, stop and clarify the intended target; never transfer a pending instruction to a different selection. Connection, update, and user-directed project-selection/creation controls remain available; this gate must not prevent selecting a project. Never run a build, repair, preview, file inspection or filesystem edit to work around a failed gate.
 
+## Read-only preview when a licence is inactive
+
+Handle `status: preview` before the normal ready/signed-out paths. Explain `userMessage`, then deliver the helper's fragment-free `previewUrl` once using the requested destination's normal browser/native opening method; if opening is unavailable or this destination is link-only, return one labelled preview link. Do not switch destinations, start workers, confirm a green LED or claim a licensed connection. Say the preview opened only after opening is accepted. Example tabs are viewable, but no real projects, models or files may be changed. Stop before project activity/build work.
+
+For `status: free_web_available`, deliver the returned validated account-entry URL in the requested Web browser, or return it once as a free Web Bridge link. Explain that free planning remains usable, while paid project operations require a licence. Do not treat this account-entry URL as a verified Bridge handoff or report a paid connection. Unknown authentication/network failures are not evidence of a missing licence. Never request credentials or delete an existing installation to resolve an inactive licence.
+
 ## Account and service boundaries
 
 - The plugin package and unprotected Project Type browsing are public. Protected credentials and project-changing actions are not.

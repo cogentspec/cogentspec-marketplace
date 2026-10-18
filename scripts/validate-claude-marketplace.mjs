@@ -129,6 +129,7 @@ const requiredScripts = [
   "reset-cogentspec-update.ps1",
   "start-cogentstack-bridge.ps1",
   "watch-cogentstack-bridge.ps1",
+  "workspace-preview.ps1",
 ];
 const actualScripts = (await readdir(scriptsRoot)).filter((name) => name.endsWith(".ps1")).sort();
 if (JSON.stringify(actualScripts) !== JSON.stringify([...requiredScripts].sort())) {

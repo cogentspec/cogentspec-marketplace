@@ -75,6 +75,20 @@ if (-not $launcherJson) {
 $result = $launcherJson | ConvertFrom-Json
 $status = [string](Get-ResultProperty $result 'status' '')
 if ($status -ne 'ready') {
+    if ($status -ceq 'free_web_available') {
+        $previewUrl = [string](Get-ResultProperty $result 'previewUrl' '')
+        $freeDestination = '^https://cogentspec\.com/workspace\?surface=claude-desktop&context=' + [Regex]::Escape($resolvedContext) + '&experience=web$'
+        if ($previewUrl -cnotmatch $freeDestination) {
+            Write-InvalidHandoff $resolvedContext 'free_web_destination_invalid'
+            return
+        }
+        Write-CompactJson ([ordered]@{
+            status = 'free_web_available'; reason = 'licence_required'; previewUrl = $previewUrl
+            contextKey = $resolvedContext; canUsePaidWorkspace = $false; currentConversationConnected = $false
+            userMessage = 'This account has no active paid licence. The free Web Bridge remains available through your CogentSpec account. No paid connection was activated.'
+        })
+        return
+    }
     $failure = [ordered]@{
         status = if ($status) { $status } else { 'bridge_start_failed' }
         contextKey = $resolvedContext

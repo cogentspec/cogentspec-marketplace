@@ -53,6 +53,10 @@ if ($Mode -ne 'status' -or -not $WorkspaceGrant -or $RequestTimeoutSeconds -ne 6
     throw 'The launcher did not make the bounded direct status request.'
 }
 [string]$PID | Set-Content -LiteralPath $env:COGENTSPEC_LAUNCHER_TEST_CONNECTOR_PROCESS_PATH -Encoding ascii
+if (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'licence-required.flag')) {
+    [ordered]@{ status = 'licence_required'; reason = 'subscription_inactive' } | ConvertTo-Json -Compress
+    return
+}
 if (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'signed-out.flag')) {
     [ordered]@{ status = 'not_installed'; reason = 'fixture_signed_out' } | ConvertTo-Json -Compress
     return
@@ -157,6 +161,20 @@ Start-Sleep -Milliseconds 5500
     Assert-BridgeLauncherTest ($signedOut.status -eq 'signed_out') 'The signed-out fixture did not stop.'
     Assert-BridgeLauncherTest (-not (Test-Path -LiteralPath (Join-Path $fixtureScripts 'directory-called.txt'))) 'The launcher touched a folder before authentication.'
     Remove-Item -LiteralPath (Join-Path $fixtureScripts 'signed-out.flag')
+    Set-Content -LiteralPath (Join-Path $fixtureScripts 'licence-required.flag') -Value 'inactive'
+    foreach ($previewExperience in @('split-screen','desktop-ui','popout','web')) {
+        $previewOutput = @(& (Join-Path $fixtureScripts 'start-cogentstack-bridge.ps1') -ContextKey $contextKey -Surface chatgpt -Experience $previewExperience 2>&1)
+        $previewLine = @($previewOutput | ForEach-Object { $_.ToString() } | Where-Object { $_.Trim().StartsWith('{') } | Select-Object -Last 1)
+        $previewResult = $previewLine | ConvertFrom-Json
+        $expectedStatus = if ($previewExperience -eq 'web') { 'free_web_available' } else { 'preview' }
+        Assert-BridgeLauncherTest ([string]$previewResult.status -ceq $expectedStatus) 'Inactive licence did not return the selected preview/free destination.'
+        Assert-BridgeLauncherTest (-not $previewResult.canUsePaidWorkspace -and -not $previewResult.currentConversationConnected) 'An inactive licence claimed paid connection authority.'
+        Assert-BridgeLauncherTest (-not ([string]$previewResult.previewUrl).Contains('#')) 'A read-only preview contained a private handoff.'
+        Assert-BridgeLauncherTest ([string]$previewResult.previewUrl -match ('experience=' + $previewExperience)) 'The preview changed the requested destination.'
+        Assert-BridgeLauncherTest (-not (Test-Path -LiteralPath $statePath)) 'The preview started a Bridge worker.'
+        Assert-BridgeLauncherTest (-not (Test-Path -LiteralPath (Join-Path $fixtureScripts 'mcp-called.txt'))) 'The preview attempted the paid project-data connection.'
+    }
+    Remove-Item -LiteralPath (Join-Path $fixtureScripts 'licence-required.flag')
     Set-Content -LiteralPath (Join-Path $fixtureScripts 'directory-block.flag') -Value 'blocked'
     $blockedDirectory = (& $fixtureLauncher -ContextKey $contextKey -Surface chatgpt -Experience web) | ConvertFrom-Json
     Assert-BridgeLauncherTest ($blockedDirectory.status -eq 'default_directory_unavailable' -and $blockedDirectory.reason -eq 'default_directory_not_writable') 'A folder failure was masked as a login or restart problem.'

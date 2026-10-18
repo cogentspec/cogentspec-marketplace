@@ -42,6 +42,13 @@ switch ([IO.Path]::GetFileName($PSCommandPath)) {
  'start-cogentstack-bridge.ps1' {
   if ($args.Count -ne 6 -or $args[0] -ne '-ContextKey' -or $args[1] -ne $context -or $args[2] -ne '-Surface' -or $args[3] -ne 'chatgpt' -or $args[4] -ne '-Experience' -or $args[5] -ne 'desktop-ui') { throw 'Wrong destination arguments' }
   if ($scenario -eq 'connection-required') { @{ status = 'connection_required'; userMessage = 'Fixture connection needs permission.' } | ConvertTo-Json -Compress; return }
+  if ($scenario -in @('preview', 'preview-wrong-origin', 'preview-wrong-context')) {
+    $previewContext = if ($scenario -eq 'preview-wrong-context') { 'ctx-' + ('b' * 64) } else { $context }
+    $url = "https://cogentspec.app/stack?surface=chatgpt&context=$previewContext&experience=desktop-ui&preview=1"
+    if ($scenario -eq 'preview-wrong-origin') { $url = $url.Replace('cogentspec.app','attacker.invalid') }
+    @{ status = 'preview'; contextKey = $previewContext; previewUrl = $url; userMessage = 'No active licence. Preview only.' } | ConvertTo-Json -Compress
+    return
+  }
   $base = "https://cogentspec.app/stack?surface=chatgpt&context=$context&experience=desktop-ui"
   if ($scenario -eq 'wrong-origin') { $base = $base.Replace('cogentspec.app','cogentspec.app.evil.invalid') }
   if ($scenario -eq 'wrong-mode') { $base = $base.Replace('desktop-ui','popout') }
@@ -131,6 +138,14 @@ $result | ConvertTo-Json -Compress
       } else {
         assert.ok(!lines.some(line => line.startsWith('codex:') || line.startsWith('installer:')));
       }
+    } else if (scenario === 'preview') {
+      assert.equal(result.status, 'preview');
+      assert.equal(result.contextKey, context);
+      assert.equal(result.currentConversationConnected, false);
+      assert.equal(result.canUsePaidWorkspace, false);
+      assert.match(result.previewUrl, /^https:\/\/cogentspec\.app\/stack\?/);
+      assert.ok(result.previewUrl.endsWith('&experience=desktop-ui&preview=1'));
+      assert.equal(result.previewUrl.includes('#'), false);
     } else {
       assert.notEqual(result.status, 'ready');
       assert.equal(result.workspaceUrl, undefined);
@@ -158,7 +173,7 @@ $result | ConvertTo-Json -Compress
 
 for (const plugin of Object.keys(versions)) {
   const results = [];
-  const scenarios = ['current', 'confirmed', 'legacy-confirmed', 'unverified', 'offline', 'update', 'permission', 'unscoped', 'wrong-source', 'upgrade-failed', 'update-bad-contract', 'update-missing-contract', 'wrong-origin', 'wrong-mode', 'duplicate-mode', 'wrong-context', 'wrong-alias', 'already-opened', 'connection-required', 'malformed', 'stall', 'update-stall', 'resume-update', 'resume-wrong-version'];
+  const scenarios = ['current', 'confirmed', 'legacy-confirmed', 'unverified', 'offline', 'update', 'permission', 'unscoped', 'wrong-source', 'upgrade-failed', 'update-bad-contract', 'update-missing-contract', 'wrong-origin', 'wrong-mode', 'duplicate-mode', 'wrong-context', 'wrong-alias', 'already-opened', 'connection-required', 'malformed', 'stall', 'update-stall', 'resume-update', 'resume-wrong-version', 'preview', 'preview-wrong-origin', 'preview-wrong-context'];
   const selected = process.argv.slice(2);
   assert.ok(selected.every(scenario => scenarios.includes(scenario)), 'Unknown fixture scenario');
   for (const scenario of selected.length ? selected : scenarios) {

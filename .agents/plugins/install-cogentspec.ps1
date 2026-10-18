@@ -18,7 +18,7 @@ $ErrorActionPreference = 'Stop'
 $protocol = 'trusted-marketplace-v3'
 $marketplaceName = 'cogentstack'
 $marketplaceSource = 'https://github.com/cogentspec/cogentspec-marketplace.git'
-$workspaceUrl = 'https://cogentspec.com/stack'
+$workspaceUrl = 'https://cogentspec.com/api/health'
 $requiredSparsePaths = @('.agents/plugins', 'plugins/cogentspec', 'plugins/cogentstack')
 $timer = [Diagnostics.Stopwatch]::StartNew()
 # Reserve time for owned-process cleanup before the two-minute target.
@@ -261,7 +261,7 @@ try {
             -MaximumRedirection 0 `
             -TimeoutSec $webTimeout
         if ([int]$response.StatusCode -ne 200) {
-            throw 'The CogentSpec workspace did not return HTTP 200.'
+            throw 'The CogentSpec service health endpoint did not return HTTP 200.'
         }
         $baseResponseProperties = @($response.BaseResponse.PSObject.Properties.Name)
         $finalUrl = if ($baseResponseProperties -contains 'RequestMessage' -and $response.BaseResponse.RequestMessage.RequestUri) {
@@ -272,10 +272,11 @@ try {
             $workspaceUrl
         }
         if ($finalUrl -ne $workspaceUrl) {
-            throw 'The CogentSpec workspace redirected instead of returning the official web workspace.'
+            throw 'The CogentSpec service health endpoint redirected unexpectedly.'
         }
-        if ($response.Content -notmatch 'What would you like to create\?' -or $response.Content -notmatch 'project-idea') {
-            throw 'The CogentSpec workspace is missing a required project-creation marker.'
+        $health = $response.Content | ConvertFrom-Json
+        if ([string]$health.status -cne 'ok' -or [string]$health.service -cne 'cogentstack' -or [string]$health.release -cnotmatch '^[a-f0-9]{40}$') {
+            throw 'The CogentSpec service health response is invalid or unhealthy.'
         }
         Complete-InstallStage
     }
@@ -343,6 +344,7 @@ try {
         'skills/cogentspec/agents/openai.yaml',
         'skills/cogentspec/scripts/check-cogentspec-update.ps1',
         'skills/cogentspec/scripts/connect-cogentstack.ps1',
+        'skills/cogentspec/scripts/workspace-preview.ps1',
         'skills/cogentspec/scripts/create-specification-project.ps1',
         'skills/cogentspec/scripts/delete-specification-project.ps1',
         'skills/cogentspec/scripts/delete-project.ps1',
