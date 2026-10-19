@@ -250,6 +250,7 @@ Start-Sleep -Milliseconds 5500
     Assert-BridgeLauncherTest ($actionHelperNames -contains $nativeVisibilityHelper) 'The worker action inventory did not include the main-window visibility helper.'
     foreach ($actionHelperName in $actionHelperNames) {
         Assert-BridgeLauncherTest (Test-Path -LiteralPath (Join-Path $runtimeRoot $actionHelperName) -PathType Leaf) ("The worker runtime omitted an action helper: $actionHelperName")
+        Assert-BridgeLauncherTest ((Get-FileHash -LiteralPath (Join-Path $runtimeRoot $actionHelperName)).Hash -ceq (Get-FileHash -LiteralPath (Join-Path $fixtureScripts $actionHelperName)).Hash) ("The worker runtime helper differs from its package: $actionHelperName")
     }
 
     foreach ($route in @(

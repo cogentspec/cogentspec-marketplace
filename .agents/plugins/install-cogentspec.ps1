@@ -361,6 +361,7 @@ try {
         'skills/cogentspec/scripts/save-project-version.ps1',
         'skills/cogentspec/scripts/native-command.ps1',
         'skills/cogentspec/scripts/open-chatgpt-desktop-ui.ps1',
+        'skills/cogentspec/scripts/open-claude-desktop-ui.ps1',
         'skills/cogentspec/scripts/open-chatgpt-popup.ps1',
         'skills/cogentspec/scripts/popout-window-normalizer.ps1',
         'skills/cogentspec/scripts/capture-popout-diagnostics.ps1',
