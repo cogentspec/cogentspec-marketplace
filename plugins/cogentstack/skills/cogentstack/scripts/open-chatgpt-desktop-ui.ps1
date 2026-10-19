@@ -1,5 +1,7 @@
 [CmdletBinding()]
 param(
+    [ValidateSet('open', 'pin', 'unpin')]
+    [string]$Mode = 'open',
     [switch]$StartNewChat,
     [switch]$PasteClipboard
 )
@@ -185,18 +187,18 @@ function Start-ChatGptDesktop {
     Start-Process explorer.exe -ArgumentList ("shell:AppsFolder\" + [string]$startApps[0].AppID) -ErrorAction Stop
 }
 
-if (-not $StartNewChat) {
+if ($Mode -eq 'open' -and -not $StartNewChat) {
     Write-Failure -Status 'new_chat_required' -Reason 'Desktop UI Bridge requires an explicit new-chat request.'
     return
 }
-if (-not $PasteClipboard) {
+if ($Mode -eq 'open' -and -not $PasteClipboard) {
     Write-Failure -Status 'composer_request_required' -Reason 'Desktop UI Bridge requires the verified request to be copied before launch.'
     return
 }
 
 $desktopLaunched = $false
 $chatGptProcesses = Get-ChatGptProcesses
-if ($chatGptProcesses.Count -eq 0) {
+if ($chatGptProcesses.Count -eq 0 -and $Mode -eq 'open') {
     try {
         Start-ChatGptDesktop
         $desktopLaunched = $true
@@ -211,7 +213,7 @@ if ($chatGptProcesses.Count -eq 0) {
     } while ($chatGptProcesses.Count -eq 0 -and [DateTime]::UtcNow -lt $processDeadline)
 }
 if ($chatGptProcesses.Count -eq 0) {
-    Write-Failure -Status 'chatgpt_not_available' -Reason 'ChatGPT Desktop did not start.'
+    Write-Failure -Status 'chatgpt_not_available' -Reason $(if ($Mode -eq 'open') { 'ChatGPT Desktop did not start.' } else { 'Open the main ChatGPT Desktop window before changing its visibility.' })
     return
 }
 
@@ -242,11 +244,13 @@ namespace CogentSpec {
         private const ushort VK_V = 0x56;
         private const int GWL_EXSTYLE = -20;
         private const long WS_EX_TOOLWINDOW = 0x00000080L;
+        private const long WS_EX_TOPMOST = 0x00000008L;
         private const int SW_RESTORE = 9;
         private static readonly IntPtr HWND_TOPMOST = new IntPtr(-1);
         private static readonly IntPtr HWND_NOTOPMOST = new IntPtr(-2);
         private const uint SWP_NOSIZE = 0x0001;
         private const uint SWP_NOMOVE = 0x0002;
+        private const uint SWP_NOACTIVATE = 0x0010;
         private const uint SWP_SHOWWINDOW = 0x0040;
 
         private delegate bool EnumWindowsProc(IntPtr window, IntPtr parameter);
@@ -333,6 +337,17 @@ namespace CogentSpec {
             return windows.ToArray();
         }
 
+        public static bool IsTopmost(IntPtr window) {
+            return window != IntPtr.Zero && (GetWindowLongPtr(window, GWL_EXSTYLE).ToInt64() & WS_EX_TOPMOST) != 0;
+        }
+
+        public static bool SetTopmost(IntPtr window, bool enabled) {
+            if (window == IntPtr.Zero || !IsWindowVisible(window)) return false;
+            uint flags = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE;
+            IntPtr position = enabled ? HWND_TOPMOST : HWND_NOTOPMOST;
+            return SetWindowPos(window, position, 0, 0, 0, 0, flags) && IsTopmost(window) == enabled;
+        }
+
         public static bool ActivateWindow(IntPtr window) {
             if (window == IntPtr.Zero || !IsWindowVisible(window)) return false;
             if (IsIconic(window)) ShowWindowAsync(window, SW_RESTORE);
@@ -378,6 +393,23 @@ do {
 } while ([DateTime]::UtcNow -lt $windowDeadline)
 if ($mainWindow -eq [IntPtr]::Zero) {
     Write-Failure -Status 'desktop_window_not_ready' -Reason 'ChatGPT Desktop did not expose one full application window.' -Opened $desktopLaunched
+    return
+}
+if ($Mode -in @('pin', 'unpin')) {
+    $shouldPin = $Mode -eq 'pin'
+    if (-not [CogentSpec.ChatGptDesktopUiNative]::SetTopmost($mainWindow, $shouldPin)) {
+        Write-Failure -Status 'desktop_pin_failed' -Reason $(if ($shouldPin) { 'Windows could not keep the main ChatGPT Desktop window visible above the browser.' } else { 'Windows could not return the main ChatGPT Desktop window to normal ordering.' }) -Opened $true
+        return
+    }
+    Write-CompactJson ([ordered]@{
+        status = if ($shouldPin) { 'pinned' } else { 'unpinned' }
+        opened = $true
+        publisherVerified = $true
+        pinned = [CogentSpec.ChatGptDesktopUiNative]::IsTopmost($mainWindow)
+        focusChanged = $false
+        moved = $false
+        resized = $false
+    })
     return
 }
 if (-not [CogentSpec.ChatGptDesktopUiNative]::ActivateWindow($mainWindow)) {

@@ -453,6 +453,16 @@ if ([string]$connection.status -eq 'execution_permission_required') {
     exit 0
 }
 if ([string]$connection.status -ne 'connected') {
+    $connectionReason = if ($connection.reason) { [string]$connection.reason } else { 'desktop_bridge_not_installed' }
+    $recoveryExperience = if ($Experience -eq 'split-screen') { 'split-screen' } else { 'standard' }
+    $recoveryUrl = "https://cogentspec.com/install?mode=reconnect&experience=$([Uri]::EscapeDataString($recoveryExperience))"
+    $retryCommand = if ($Experience -eq 'split-screen' -and $Surface -eq 'chatgpt') { '$gptsnap' } else { '$cogentspec' }
+    $userMessage = switch ($connectionReason) {
+        'legal_update_required' { 'Sign in to CogentSpec and confirm the current terms for this computer. The reconnect page will then prepare the required connection step.' }
+        'installation_replaced_revoked_or_inactive' { 'CogentSpec needs to reconnect this computer. Open the guided reconnect page; your projects and website account are unaffected.' }
+        'legacy_connection_not_bound_to_installation' { 'CogentSpec needs to update this computer to the current secure connection. Open the guided reconnect page to continue.' }
+        default { 'CogentSpec needs to connect this computer. Open the guided reconnect page to continue.' }
+    }
     Write-CompactJson ([ordered]@{
         status = 'signed_out'
         contextKey = $resolvedContext
@@ -461,7 +471,12 @@ if ([string]$connection.status -ne 'connected') {
         webWorkspaceUrl = $webWorkspaceUrl
         chatgptWorkspaceUrl = $chatgptWorkspaceUrl
         browserOpened = $false
-        reason = if ($connection.reason) { [string]$connection.reason } else { 'desktop_bridge_not_installed' }
+        reason = $connectionReason
+        recoveryRequired = $true
+        recoveryUrl = $recoveryUrl
+        recoveryExperience = $recoveryExperience
+        retryCommand = $retryCommand
+        userMessage = $userMessage
         launcherElapsedMs = [int]$launcherTimer.ElapsedMilliseconds
     })
     return

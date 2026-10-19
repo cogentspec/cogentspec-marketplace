@@ -96,6 +96,7 @@ function Invoke-ActionHelper($Request) {
         'preview_project' { 'generate-project-preview.ps1' }
         'open_chatgpt_popup' { 'open-chatgpt-popup.ps1' }
         'set_chatgpt_popup_topmost' { 'open-chatgpt-popup.ps1' }
+        'set_chatgpt_desktop_topmost' { 'open-chatgpt-desktop-ui.ps1' }
         'refresh_project_git' { 'inspect-project-git.ps1' }
         'save_project_git' { 'save-project-version.ps1' }
         'restore_project_version' { 'restore-project-version.ps1' }
@@ -137,6 +138,14 @@ function Invoke-ActionHelper($Request) {
             }
             $arguments += @('-Mode', $pinMode)
         }
+        'set_chatgpt_desktop_topmost' {
+            $pinMode = switch ([string]$Request.targetRequestId) {
+                'chatgpt-desktop-main:pinned' { 'pin' }
+                'chatgpt-desktop-main:unpinned' { 'unpin' }
+                default { throw 'The main ChatGPT Desktop pin request is invalid.' }
+            }
+            $arguments += @('-Mode', $pinMode)
+        }
         'refresh_project_git' { $arguments += @('-RequestId', [string]$Request.targetRequestId, '-ContextKey', $ContextKey) }
         'save_project_git' { $arguments += @('-RequestId', [string]$Request.targetRequestId, '-ContextKey', $ContextKey) }
         'restore_project_version' { $arguments += @('-RequestId', [string]$Request.targetRequestId, '-ContextKey', $ContextKey) }
@@ -156,6 +165,9 @@ function Invoke-ActionHelper($Request) {
         'open_chatgpt_popup' { @('opened') }
         'set_chatgpt_popup_topmost' {
             if ([string]$Request.targetRequestId -eq 'chatgpt-desktop-popup:pinned') { @('pinned') } else { @('unpinned') }
+        }
+        'set_chatgpt_desktop_topmost' {
+            if ([string]$Request.targetRequestId -eq 'chatgpt-desktop-main:pinned') { @('pinned') } else { @('unpinned') }
         }
         'refresh_project_git' { @('refreshed') }
         'save_project_git' { @('saved') }
@@ -236,6 +248,9 @@ try {
                     }
                     'set_chatgpt_popup_topmost' {
                         if ([string]$result.status -eq 'pinned') { 'ChatGPT popout pinned above other windows.' } else { 'ChatGPT popout returned to normal window ordering.' }
+                    }
+                    'set_chatgpt_desktop_topmost' {
+                        if ([string]$result.status -eq 'pinned') { 'Main ChatGPT Desktop window will stay visible above the browser.' } else { 'Main ChatGPT Desktop window returned to normal window ordering.' }
                     }
                     'refresh_project_git' { 'Project check completed.' }
                     'save_project_git' { 'Version saved on this computer.' }
