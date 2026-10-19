@@ -23,6 +23,7 @@ function Invoke-InstallerFixture {
         [Parameter(Mandatory = $true)][string]$InstallerPath,
         [string]$Reference = '',
         [switch]$UpdateOnly,
+        [switch]$DeferConnectionStartup,
         [switch]$ValidateOnly,
         [int]$TimeoutSeconds = 120
     )
@@ -35,6 +36,7 @@ function Invoke-InstallerFixture {
     )
     if ($Reference) { $arguments += @('-InstallationRequest', $Reference) }
     if ($UpdateOnly) { $arguments += '-UpdateOnly' }
+    if ($DeferConnectionStartup) { $arguments += '-DeferConnectionStartup' }
     if ($ValidateOnly) { $arguments += '-ValidateOnly' }
     $runTimer = [Diagnostics.Stopwatch]::StartNew()
     $output = @(& $PowerShellPath @arguments 2>&1)
@@ -241,6 +243,13 @@ public static class GitFixture
     Assert-InstallerTest (-not [bool]$update.claimAttempted) 'The update fixture attempted an account claim.'
     Assert-InstallerTest ($update.accountRequestConsumed -eq $false) 'The update fixture did not prove that no account request was consumed.'
     $updateStageNames = @($update.completedStages | ForEach-Object { [string]$_.stage })
+    $deferredRun = Invoke-InstallerFixture -PowerShellPath $powerShellPath -InstallerPath $installerPath -UpdateOnly -DeferConnectionStartup
+    $deferred = $deferredRun.result
+    Assert-InstallerTest ($deferredRun.exitCode -eq 0 -and $deferred.status -eq 'updated') 'GPTSnap package-only update failed.'
+    Assert-InstallerTest ($deferred.connectionStartupDeferred -and -not $deferred.popoutBridgeReady -and -not $deferred.desktopUiBridgeReady -and -not $deferred.projectDataConnectionReady) 'Deferred update falsely claimed connection readiness.'
+    Assert-InstallerTest ($deferred.credentialPreserved -and -not $deferred.claimAttempted -and $deferred.accountRequestConsumed -eq $false) 'Deferred update changed account authorization.'
+    $deferredStages = @($deferred.completedStages | ForEach-Object { [string]$_.stage })
+    Assert-InstallerTest ($deferredStages -contains 'connection_startup_deferred' -and $deferredStages -notcontains 'secure_project_data_connection' -and $deferredStages -notcontains 'standalone_popout_bridge' -and $deferredStages -notcontains 'desktop_ui_bridge') 'Deferred update started a connection service.'
     Assert-InstallerTest ($updateStageNames -contains 'superseded_bridge_cleanup') 'The update fixture did not evidence superseded Bridge cleanup.'
     Assert-InstallerTest ($updateStageNames -contains 'standalone_popout_bridge') 'The update fixture did not evidence standalone Popout Bridge startup.'
     Assert-InstallerTest ($updateStageNames -contains 'desktop_ui_bridge') 'The update fixture did not evidence Desktop UI Bridge startup.'

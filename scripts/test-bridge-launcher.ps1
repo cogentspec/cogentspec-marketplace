@@ -47,8 +47,14 @@ param(
     [string]$Surface,
     [string]$ContextKey,
     [switch]$WorkspaceGrant,
+    [switch]$BrowserApproval,
     [int]$RequestTimeoutSeconds
 )
+if ($Mode -eq 'start' -and $BrowserApproval -and $ContextKey -match '^ctx-[a-f0-9]{64}$' -and $RequestTimeoutSeconds -eq 6) {
+    Add-Content -LiteralPath (Join-Path $PSScriptRoot 'approval-started.txt') -Value 'start'
+    [ordered]@{ status = 'approval_required'; approvalUrl = 'https://cogentspec.com/activate?code=TEST-CODE&experience=split-screen'; expiresAt = [DateTimeOffset]::UtcNow.AddMinutes(10).ToString('o'); pollAfterSeconds = 5 } | ConvertTo-Json -Compress
+    return
+}
 if ($Mode -ne 'status' -or -not $WorkspaceGrant -or $RequestTimeoutSeconds -ne 6) {
     throw 'The launcher did not make the bounded direct status request.'
 }
@@ -158,6 +164,15 @@ Start-Sleep -Milliseconds 5500
     Assert-BridgeLauncherTest ($signedOut.reason -eq 'desktop_bridge_not_installed') 'A signed-out response without an optional machine reason was not normalized.'
     Assert-BridgeLauncherTest ($signedOut.recoveryRequired -and $signedOut.recoveryUrl -eq 'https://cogentspec.com/install?mode=reconnect&experience=standard' -and $signedOut.retryCommand -eq '$cogentspec') 'The signed-out fixture did not return the guided reconnect contract.'
     Assert-BridgeLauncherTest (-not (Test-Path -LiteralPath (Join-Path $fixtureScripts 'directory-called.txt'))) 'The launcher touched a folder before authentication.'
+    $snapApproval = (& $fixtureLauncher -ContextKey $contextKey -Surface chatgpt -Experience split-screen) | ConvertFrom-Json
+    Assert-BridgeLauncherTest ($snapApproval.status -eq 'approval_required' -and $snapApproval.approvalProtocol -eq 'cogentspec-gptsnap-approval-v1') 'GPTSnap did not start browser approval.'
+    Assert-BridgeLauncherTest ($snapApproval.contextKey -eq $contextKey -and $snapApproval.approvalUrl -eq 'https://cogentspec.com/activate?code=TEST-CODE&experience=split-screen') 'GPTSnap approval lost its context or destination.'
+    $expectedApprovalNavigation = 'await gptPopTab.goto(' + (ConvertTo-Json -InputObject ([string]$snapApproval.approvalUrl) -Compress) + ');'
+    Assert-BridgeLauncherTest ($snapApproval.browserNavigationCode -eq $expectedApprovalNavigation) 'GPTSnap did not return the exact external-tab approval navigation.'
+    Assert-BridgeLauncherTest (-not (Test-Path -LiteralPath (Join-Path $fixtureScripts 'directory-called.txt'))) 'GPTSnap started project work before approval.'
+    $incompleteResume = (& $fixtureLauncher -ContextKey $contextKey -Surface chatgpt -Experience split-screen -ResumeApproval) | ConvertFrom-Json
+    Assert-BridgeLauncherTest ($incompleteResume.status -eq 'connection_required') 'An unapproved resume did not fail closed.'
+    Assert-BridgeLauncherTest (@(Get-Content -LiteralPath (Join-Path $fixtureScripts 'approval-started.txt')).Count -eq 1) 'Resume created another approval request.'
     Remove-Item -LiteralPath (Join-Path $fixtureScripts 'signed-out.flag')
     Set-Content -LiteralPath (Join-Path $fixtureScripts 'directory-block.flag') -Value 'blocked'
     $blockedDirectory = (& $fixtureLauncher -ContextKey $contextKey -Surface chatgpt -Experience web) | ConvertFrom-Json

@@ -6,7 +6,9 @@ param(
     [string]$Surface = 'chatgpt',
 
     [ValidateSet('legacy', 'popout', 'desktop-ui', 'web', 'split-screen')]
-    [string]$Experience = 'legacy'
+    [string]$Experience = 'legacy',
+
+    [switch]$ResumeApproval
 )
 
 Set-StrictMode -Version Latest
@@ -453,6 +455,34 @@ if ([string]$connection.status -eq 'execution_permission_required') {
     exit 0
 }
 if ([string]$connection.status -ne 'connected') {
+    if ($Surface -eq 'chatgpt' -and $Experience -eq 'split-screen') {
+        if (-not $ResumeApproval) {
+            $approval = (& $connectionScript -Mode start -Surface $Surface -ContextKey $resolvedContext -BrowserApproval -RequestTimeoutSeconds 6) | ConvertFrom-Json
+            if ($approval.status -ne 'approval_required') {
+                Write-CompactJson $approval
+                return
+            }
+            $approvalUri = [Uri][string]$approval.approvalUrl
+            if ($approvalUri.GetLeftPart([UriPartial]::Authority) -cne 'https://cogentspec.com' -or $approvalUri.AbsolutePath -cne '/activate') {
+                throw 'The GPTSnap approval destination is invalid.'
+            }
+            Write-CompactJson ([ordered]@{
+                status = 'approval_required'
+                contextKey = $resolvedContext
+                approvalUrl = [string]$approval.approvalUrl
+                expiresAt = ([DateTimeOffset]$approval.expiresAt).ToString('o')
+                pollAfterSeconds = [int]$approval.pollAfterSeconds
+                approvalProtocol = 'cogentspec-gptsnap-approval-v1'
+                browserNavigationCode = 'await gptPopTab.goto(' + (ConvertTo-Json -InputObject ([string]$approval.approvalUrl) -Compress) + ');'
+                userMessage = 'Approve this computer in the CogentSpec browser page. GPTSnap will then finish connecting automatically; no installer prompt or repeated command is needed.'
+                browserOpened = $false
+                launcherElapsedMs = [int]$launcherTimer.ElapsedMilliseconds
+            })
+            return
+        }
+        Write-CompactJson ([ordered]@{ status = 'connection_required'; userMessage = 'The computer approval did not create a usable connection. Your projects are unchanged.' })
+        return
+    }
     $connectionReason = if ($connection.PSObject.Properties['reason'] -and [string]$connection.reason) { [string]$connection.reason } else { 'desktop_bridge_not_installed' }
     $recoveryExperience = if ($Experience -eq 'split-screen') { 'split-screen' } else { 'standard' }
     $recoveryUrl = "https://cogentspec.com/install?mode=reconnect&experience=$([Uri]::EscapeDataString($recoveryExperience))"

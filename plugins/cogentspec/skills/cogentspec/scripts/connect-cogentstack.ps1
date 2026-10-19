@@ -11,6 +11,8 @@ param(
 
     [switch]$WorkspaceGrant,
 
+    [switch]$BrowserApproval,
+
     [ValidateRange(3, 20)]
     [int]$RequestTimeoutSeconds = 20
 )
@@ -37,6 +39,13 @@ $serviceUrl = 'https://cogentspec.com'
 $stateRoot = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'CogentSpec'
 $pendingPath = Join-Path $stateRoot 'desktop-authorization.json'
 $credentialPath = Join-Path $stateRoot 'desktop-credential.json'
+$snapPendingPath = Join-Path $stateRoot 'gptsnap-authorization.json'
+if ($BrowserApproval) {
+    if ($Surface -ne 'chatgpt' -or $ContextKey -notmatch '^ctx-[a-f0-9]{64}$' -or $Mode -notin @('start', 'complete')) {
+        throw 'GPTSnap approval requires its original isolated context.'
+    }
+    $pendingPath = $snapPendingPath
+}
 
 function Protect-CogentSpecValue([string]$Value) {
     $bytes = [Text.Encoding]::UTF8.GetBytes($Value)
@@ -229,6 +238,17 @@ if ($Mode -eq 'claim') {
 }
 
 if ($Mode -eq 'start') {
+    if ($BrowserApproval -and (Test-Path -LiteralPath $pendingPath -PathType Leaf)) {
+        $existing = Get-Content -Raw -LiteralPath $pendingPath | ConvertFrom-Json
+        if ($existing.contextKey -ne $ContextKey -or $existing.surface -ne $Surface) {
+            Write-CompactJson ([ordered]@{ status = 'approval_context_conflict'; userMessage = 'Another workspace is waiting for computer approval. Finish or cancel that request first.' })
+            return
+        }
+        if ([DateTimeOffset]$existing.expiresAt -gt [DateTimeOffset]::UtcNow) {
+            Write-CompactJson ([ordered]@{ status = 'approval_required'; approvalUrl = "$serviceUrl/activate?code=$([Uri]::EscapeDataString([string]$existing.userCode))&experience=split-screen"; expiresAt = $existing.expiresAt; pollAfterSeconds = 5; requestReused = $true })
+            return
+        }
+    }
     $requestBody = @{ deviceName = 'ChatGPT Desktop on Windows' } | ConvertTo-Json -Compress
     $authorization = Invoke-RestMethod `
         -Method Post `
@@ -241,10 +261,20 @@ if ($Mode -eq 'start') {
     [ordered]@{
         deviceCode = Protect-CogentSpecValue ([string]$authorization.deviceCode)
         userCode = [string]$authorization.userCode
-        expiresAt = [string]$authorization.expiresAt
+        expiresAt = ([DateTimeOffset]$authorization.expiresAt).ToString('o')
         intervalSeconds = [int]$authorization.intervalSeconds
+        contextKey = $ContextKey
+        surface = $Surface
     } | ConvertTo-Json | Set-Content -LiteralPath $pendingPath -Encoding UTF8
 
+    if ($BrowserApproval) {
+        $approvalUri = [Uri][string]$authorization.verificationUriComplete
+        if ($approvalUri.GetLeftPart([UriPartial]::Authority) -cne $serviceUrl -or $approvalUri.AbsolutePath -cne '/activate') {
+            throw 'CogentSpec returned an invalid approval destination.'
+        }
+        Write-CompactJson ([ordered]@{ status = 'approval_required'; approvalUrl = "$($approvalUri.AbsoluteUri)&experience=split-screen"; expiresAt = [string]$authorization.expiresAt; pollAfterSeconds = [int]$authorization.intervalSeconds; requestReused = $false })
+        return
+    }
     Start-Process ([string]$authorization.verificationUriComplete)
     Write-CompactJson ([ordered]@{
         status = 'approval_required'
@@ -255,13 +285,25 @@ if ($Mode -eq 'start') {
 }
 
 if (-not (Test-Path -LiteralPath $pendingPath)) {
+    if ($BrowserApproval) {
+        Write-CompactJson ([ordered]@{ status = 'not_started'; userMessage = 'There is no pending GPTSnap computer approval to continue.' })
+        return
+    }
     Write-CompactJson ([ordered]@{ status = 'not_started' })
     return
 }
 
 $pending = Get-Content -Raw -LiteralPath $pendingPath | ConvertFrom-Json
-if ([DateTimeOffset]::Parse([string]$pending.expiresAt) -le [DateTimeOffset]::UtcNow) {
+if ($BrowserApproval -and ($pending.contextKey -ne $ContextKey -or $pending.surface -ne $Surface)) {
+    Write-CompactJson ([ordered]@{ status = 'approval_context_conflict'; userMessage = 'The pending approval belongs to another workspace.' })
+    return
+}
+if ([DateTimeOffset]$pending.expiresAt -le [DateTimeOffset]::UtcNow) {
     Remove-Item -LiteralPath $pendingPath -Force
+    if ($BrowserApproval) {
+        Write-CompactJson ([ordered]@{ status = 'expired'; userMessage = 'The computer approval expired before completion. Your projects are unchanged.' })
+        return
+    }
     Write-CompactJson ([ordered]@{ status = 'expired' })
     return
 }
@@ -277,7 +319,12 @@ try {
         -Body $tokenBody `
         -TimeoutSec $RequestTimeoutSeconds
 } catch {
-    $statusCode = [int]$_.Exception.Response.StatusCode
+    $statusCode = if ($_.Exception.Response) { [int]$_.Exception.Response.StatusCode } else { 0 }
+    if ($BrowserApproval -and $statusCode -in @(401, 403, 410, 428)) {
+        $approvalStatus = if ($statusCode -eq 410) { 'expired' } elseif ($statusCode -eq 428) { 'legal_acceptance_required' } else { 'approval_denied' }
+        Write-CompactJson ([ordered]@{ status = $approvalStatus; userMessage = 'Computer approval could not be completed. Check the CogentSpec approval page; your projects are unchanged.' })
+        return
+    }
     if ($statusCode -eq 410) {
         Remove-Item -LiteralPath $pendingPath -Force
         Write-CompactJson ([ordered]@{ status = 'expired' })
@@ -308,5 +355,5 @@ Write-CompactJson ([ordered]@{
     plan = [string]$result.subscriber.plan
     replacedExistingDevice = [bool]$result.replacedExistingDevice
     browserAuthorizationCompleted = $true
-    userMessage = 'CogentSpec Desktop authorization is complete. Run the requested workspace command again.'
+    userMessage = if ($BrowserApproval) { 'Computer approval is complete. Continue the current GPTSnap connection.' } else { 'CogentSpec Desktop authorization is complete. Run the requested workspace command again.' }
 })

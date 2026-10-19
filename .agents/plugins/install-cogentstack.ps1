@@ -9,6 +9,8 @@ param(
 
     [switch]$UpdateOnly,
 
+    [switch]$DeferConnectionStartup,
+
     [switch]$ValidateOnly
 )
 
@@ -231,6 +233,7 @@ function Test-StringSetEqual {
 }
 
 try {
+    if ($DeferConnectionStartup -and -not $UpdateOnly) { throw 'Deferred connection startup is available only for a package update.' }
     if ($UpdateOnly) {
         if ($privateInstallationRequest) { throw 'Routine updates must not receive an account-bound installation request.' }
     } elseif ($privateInstallationRequest -notmatch '^cgb_[A-Za-z0-9_-]{40,}$') {
@@ -442,7 +445,7 @@ try {
     Complete-InstallStage
 
     $projectDataConnectionReady = $false
-    if (-not $ValidateOnly) {
+    if (-not $ValidateOnly -and -not $DeferConnectionStartup) {
         Set-InstallStage -Name 'secure_project_data_connection'
         $mcpList = Invoke-BoundedNative -FilePath $script:codexPath -Arguments @('mcp', 'list') -Operation 'secure project-data connection inspection'
         $mcpLine = @($mcpList -split "`r?`n" | Where-Object { $_ -match '^\s*cogentspec\s+https://cogentspec\.com/mcp\s+' } | Select-Object -Last 1)
@@ -467,6 +470,7 @@ try {
         }
         Complete-InstallStage
 
+        if (-not $DeferConnectionStartup) {
         Set-InstallStage -Name 'standalone_popout_bridge'
         $popoutBridgeStart = Join-Path $installedPath 'skills\cogentstack\scripts\start-cogentspec-popout-bridge.ps1'
         $popoutBridgeResult = Invoke-BoundedInstallerHelper -ScriptPath $popoutBridgeStart -Operation 'Standalone Popout Bridge startup'
@@ -482,6 +486,10 @@ try {
             throw 'Desktop UI Bridge did not become ready after the update.'
         }
         Complete-InstallStage
+        } else {
+            Set-InstallStage -Name 'connection_startup_deferred'
+            Complete-InstallStage
+        }
 
         [ordered]@{
             protocol = 'trusted-marketplace-update-v1'
@@ -500,8 +508,9 @@ try {
             previousPackageReplaced = $true
             packageRuntimeCleared = $true
             workerStateCleared = $true
-            popoutBridgeReady = $true
-            desktopUiBridgeReady = $true
+            popoutBridgeReady = -not $DeferConnectionStartup
+            desktopUiBridgeReady = -not $DeferConnectionStartup
+            connectionStartupDeferred = [bool]$DeferConnectionStartup
             workersStopped = [int]$resetResult.workersStopped
             continueCurrentTask = $true
             fastUpdatePath = $true
