@@ -26,7 +26,7 @@ try {
             Assert-Approval ($TimeoutSec -eq 6) 'Unbounded approval HTTP request.'
             if ($Uri -eq 'https://cogentspec.com/api/device-authorization') {
                 $script:starts++
-                return [pscustomobject]@{ deviceCode = 'cgd_fixture_only'; userCode = 'TEST-CODE'; verificationUriComplete = 'https://cogentspec.com/activate?code=TEST-CODE'; expiresAt = [DateTimeOffset]::UtcNow.AddMinutes(10).ToString('o'); intervalSeconds = 5 }
+                return [pscustomobject]@{ deviceCode = 'cgd_fixture_only'; userCode = 'TEST-CODE'; verificationUriComplete = 'https://cogentspec.com/activate?code=TEST-CODE'; expiresAt = [DateTime]::UtcNow.AddMinutes(10); intervalSeconds = 5 }
             }
             if ($Uri -eq 'https://cogentspec.com/api/device-authorization/token') {
                 $script:polls++
@@ -38,6 +38,7 @@ try {
         }
         $start = & $connector -Mode start -BrowserApproval -ContextKey $contextA -Surface chatgpt -RequestTimeoutSeconds 6 | ConvertFrom-Json
         Assert-Approval ($start.status -eq 'approval_required' -and $start.approvalUrl -eq 'https://cogentspec.com/activate?code=TEST-CODE&experience=split-screen') 'Start did not prepare browser approval.'
+        Assert-Approval (([DateTimeOffset]$start.expiresAt).ToUniversalTime() -gt [DateTimeOffset]::UtcNow.AddMinutes(9)) 'Approval expiry lost its timezone during PowerShell date conversion.'
         $repeat = & $connector -Mode start -BrowserApproval -ContextKey $contextA -Surface chatgpt -RequestTimeoutSeconds 6 | ConvertFrom-Json
         Assert-Approval ($repeat.requestReused -and $script:starts -eq 1) 'Repeated command created another server request.'
         $conflict = & $connector -Mode start -BrowserApproval -ContextKey $contextB -Surface chatgpt -RequestTimeoutSeconds 6 | ConvertFrom-Json

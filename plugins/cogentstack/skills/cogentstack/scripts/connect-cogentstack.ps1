@@ -272,7 +272,7 @@ if ($Mode -eq 'start') {
         if ($approvalUri.GetLeftPart([UriPartial]::Authority) -cne $serviceUrl -or $approvalUri.AbsolutePath -cne '/activate') {
             throw 'CogentSpec returned an invalid approval destination.'
         }
-        Write-CompactJson ([ordered]@{ status = 'approval_required'; approvalUrl = "$($approvalUri.AbsoluteUri)&experience=split-screen"; expiresAt = [string]$authorization.expiresAt; pollAfterSeconds = [int]$authorization.intervalSeconds; requestReused = $false })
+        Write-CompactJson ([ordered]@{ status = 'approval_required'; approvalUrl = "$($approvalUri.AbsoluteUri)&experience=split-screen"; expiresAt = ([DateTimeOffset]$authorization.expiresAt).ToString('o'); pollAfterSeconds = [int]$authorization.intervalSeconds; requestReused = $false })
         return
     }
     Start-Process ([string]$authorization.verificationUriComplete)
