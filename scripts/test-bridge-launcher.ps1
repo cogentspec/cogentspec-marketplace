@@ -54,7 +54,7 @@ if ($Mode -ne 'status' -or -not $WorkspaceGrant -or $RequestTimeoutSeconds -ne 6
 }
 [string]$PID | Set-Content -LiteralPath $env:COGENTSPEC_LAUNCHER_TEST_CONNECTOR_PROCESS_PATH -Encoding ascii
 if (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'signed-out.flag')) {
-    [ordered]@{ status = 'not_installed'; reason = 'fixture_signed_out' } | ConvertTo-Json -Compress
+    [ordered]@{ status = 'not_installed' } | ConvertTo-Json -Compress
     return
 }
 [ordered]@{
@@ -155,6 +155,8 @@ Start-Sleep -Milliseconds 5500
     Set-Content -LiteralPath (Join-Path $fixtureScripts 'signed-out.flag') -Value 'signed out'
     $signedOut = (& $fixtureLauncher -ContextKey $contextKey -Surface chatgpt -Experience web) | ConvertFrom-Json
     Assert-BridgeLauncherTest ($signedOut.status -eq 'signed_out') 'The signed-out fixture did not stop.'
+    Assert-BridgeLauncherTest ($signedOut.reason -eq 'desktop_bridge_not_installed') 'A signed-out response without an optional machine reason was not normalized.'
+    Assert-BridgeLauncherTest ($signedOut.recoveryRequired -and $signedOut.recoveryUrl -eq 'https://cogentspec.com/install?mode=reconnect&experience=standard' -and $signedOut.retryCommand -eq '$cogentspec') 'The signed-out fixture did not return the guided reconnect contract.'
     Assert-BridgeLauncherTest (-not (Test-Path -LiteralPath (Join-Path $fixtureScripts 'directory-called.txt'))) 'The launcher touched a folder before authentication.'
     Remove-Item -LiteralPath (Join-Path $fixtureScripts 'signed-out.flag')
     Set-Content -LiteralPath (Join-Path $fixtureScripts 'directory-block.flag') -Value 'blocked'

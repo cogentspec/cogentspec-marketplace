@@ -453,7 +453,7 @@ if ([string]$connection.status -eq 'execution_permission_required') {
     exit 0
 }
 if ([string]$connection.status -ne 'connected') {
-    $connectionReason = if ($connection.reason) { [string]$connection.reason } else { 'desktop_bridge_not_installed' }
+    $connectionReason = if ($connection.PSObject.Properties['reason'] -and [string]$connection.reason) { [string]$connection.reason } else { 'desktop_bridge_not_installed' }
     $recoveryExperience = if ($Experience -eq 'split-screen') { 'split-screen' } else { 'standard' }
     $recoveryUrl = "https://cogentspec.com/install?mode=reconnect&experience=$([Uri]::EscapeDataString($recoveryExperience))"
     $retryCommand = if ($Experience -eq 'split-screen' -and $Surface -eq 'chatgpt') { '$gptsnap' } else { '$cogentspec' }
