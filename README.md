@@ -18,6 +18,16 @@ node scripts/validate-desktop-marketplace.mjs
 node scripts/validate-claude-marketplace.mjs
 ```
 
+Installer readiness regressions exercise both checked-in installers without an account claim:
+
+```powershell
+powershell.exe -NoProfile -File scripts/test-installer-workspace-readiness.ps1 -Live
+powershell.exe -NoProfile -File scripts/test-installer-v3.ps1 -PluginName cogentspec
+powershell.exe -NoProfile -File scripts/test-installer-v3.ps1 -PluginName cogentstack
+```
+
+The readiness tests reject redirects, login pages, unexpected origins, non-200 responses, and missing workspace markers. `-Live` additionally checks the public `https://cogentspec.app/stack` shell. The v3 integration tests use isolated local package/claim fixtures, not a real account-bound installation request.
+
 ## Claude Code Desktop
 
 The Claude plugin retains `$cogentstack` as the common invocation. It resolves the current Claude Code Desktop project's isolated logical CogentSpec context, starts or reuses the same background Desktop Bridge used by CogentSpec Web and Qwen Desktop, and returns the matching web URL. It does not open or inspect browser tabs, hide the Claude sidebar, resize windows, embed CogentSpec, or automate Claude's private interface.

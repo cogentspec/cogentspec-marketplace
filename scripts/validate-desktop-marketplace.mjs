@@ -121,6 +121,12 @@ for (const [name, installer, pluginPath] of [
   ["canonical", boundedInstaller, sourcePluginPath],
   ["compatibility", compatibilityInstaller, compatibilityPluginPath],
 ]) {
+  if (!installer.includes("$workspaceUrl = 'https://cogentspec.app/stack'")) {
+    fail(`the ${name} installer must probe the public .app workspace shell, not the signed-in .com portal`);
+  }
+  for (const guarantee of ["-MaximumRedirection 0", "if ([int]$response.StatusCode -ne 200)", "if ($finalUrl -ne $workspaceUrl)", "project-idea"]) {
+    if (!installer.includes(guarantee)) fail(`the ${name} workspace readiness check is missing ${guarantee}`);
+  }
   const allowlistBlock = installer.match(/\$allowedFiles\s*=\s*@\(([\s\S]*?)\n\s*\)/);
   if (!allowlistBlock) fail(`the ${name} bounded installer public-file allowlist could not be parsed`);
   const allowedPluginFiles = [...allowlistBlock[1].matchAll(/'([^']+)'/g)].map((match) => match[1]).sort();

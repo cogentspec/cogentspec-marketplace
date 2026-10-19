@@ -18,7 +18,8 @@ $ErrorActionPreference = 'Stop'
 $protocol = 'trusted-marketplace-v3'
 $marketplaceName = 'cogentstack'
 $marketplaceSource = 'https://github.com/cogentspec/cogentspec-marketplace.git'
-$workspaceUrl = 'https://cogentspec.com/stack'
+# Probe the public workspace shell; account-bound claims still use the protected .com service.
+$workspaceUrl = 'https://cogentspec.app/stack'
 $requiredSparsePaths = @('.agents/plugins', 'plugins/cogentstack')
 $timer = [Diagnostics.Stopwatch]::StartNew()
 # Reserve time for owned-process cleanup before the two-minute target.
