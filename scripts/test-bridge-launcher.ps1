@@ -241,6 +241,17 @@ Start-Sleep -Milliseconds 5500
     $state = Get-Content -Raw -LiteralPath $statePath | ConvertFrom-Json
     $runtimeRoot = Split-Path -Parent ([string]$state.watcherScript)
 
+    # Check the worker's actual runtime, not merely the installed plugin inventory.
+    $nativeVisibilityHelper = 'open-chatgpt-desktop-ui.ps1'
+    Assert-BridgeLauncherTest (Test-Path -LiteralPath (Join-Path $runtimeRoot $nativeVisibilityHelper) -PathType Leaf) 'The running Bridge runtime omitted the main-window visibility helper.'
+    Assert-BridgeLauncherTest ((Get-FileHash -LiteralPath (Join-Path $runtimeRoot $nativeVisibilityHelper)).Hash -ceq (Get-FileHash -LiteralPath (Join-Path $fixtureScripts $nativeVisibilityHelper)).Hash) 'The runtime visibility helper differs from the verified package.'
+    $workerSource = Get-Content -LiteralPath (Join-Path $repositoryRoot 'plugins/cogentspec/skills/cogentspec/scripts/watch-cogentstack-bridge.ps1') -Raw
+    $actionHelperNames = [regex]::Matches($workerSource, "'[a-z_]+'\s*\{\s*'([^']+\.ps1)'\s*\}") | ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique
+    Assert-BridgeLauncherTest ($actionHelperNames -contains $nativeVisibilityHelper) 'The worker action inventory did not include the main-window visibility helper.'
+    foreach ($actionHelperName in $actionHelperNames) {
+        Assert-BridgeLauncherTest (Test-Path -LiteralPath (Join-Path $runtimeRoot $actionHelperName) -PathType Leaf) ("The worker runtime omitted an action helper: $actionHelperName")
+    }
+
     foreach ($route in @(
         @{ Surface = 'chatgpt'; Experience = 'desktop-ui' },
         @{ Surface = 'chatgpt'; Experience = 'popout' },

@@ -441,6 +441,12 @@ $sourceScriptNames = @(
     'provision-project-credentials.mjs',
     'watch-cogentstack-bridge.ps1'
 )
+if ($Surface -eq 'chatgpt' -or (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'open-chatgpt-desktop-ui.ps1') -PathType Leaf)) {
+    # The worker resolves main-window visibility actions from this hashed runtime.
+    # Keep one runtime per package even when a Codex package serves a Claude context.
+    # Claude-only packages intentionally omit ChatGPT native window helpers.
+    $sourceScriptNames += 'open-chatgpt-desktop-ui.ps1'
+}
 if (-not (Test-Path -LiteralPath $connectionScript -PathType Leaf) -or @($sourceScriptNames | Where-Object { -not (Test-Path -LiteralPath (Join-Path $PSScriptRoot $_) -PathType Leaf) }).Count -gt 0) {
     throw 'Desktop Bridge is incomplete. Repair the CogentSpec installation.'
 }
