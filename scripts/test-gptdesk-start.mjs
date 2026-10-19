@@ -42,6 +42,9 @@ switch ([IO.Path]::GetFileName($PSCommandPath)) {
  'start-cogentstack-bridge.ps1' {
   if ($args.Count -ne 6 -or $args[0] -ne '-ContextKey' -or $args[1] -ne $context -or $args[2] -ne '-Surface' -or $args[3] -ne 'chatgpt' -or $args[4] -ne '-Experience' -or $args[5] -ne 'desktop-ui') { throw 'Wrong destination arguments' }
   if ($scenario -eq 'connection-required') { @{ status = 'connection_required'; userMessage = 'Fixture connection needs permission.' } | ConvertTo-Json -Compress; return }
+  if ($scenario -in @('licence_required', 'licence_verification_unavailable')) {
+    @{ status = $scenario; userMessage = 'Fixture access check stopped safely.'; workspaceUrl = 'PRIVATE_HANDOFF_DO_NOT_PRINT'; recoveryUrl = 'PRIVATE_HANDOFF_DO_NOT_PRINT' } | ConvertTo-Json -Compress; return
+  }
   $base = "https://cogentspec.app/stack?surface=chatgpt&context=$context&experience=desktop-ui"
   if ($scenario -eq 'wrong-origin') { $base = $base.Replace('cogentspec.app','cogentspec.app.evil.invalid') }
   if ($scenario -eq 'wrong-mode') { $base = $base.Replace('desktop-ui','popout') }
@@ -133,6 +136,12 @@ $result | ConvertTo-Json -Compress
       }
     } else {
       assert.notEqual(result.status, 'ready');
+      if (['licence_required', 'licence_verification_unavailable'].includes(scenario)) {
+        assert.equal(result.status, scenario);
+        assert.equal(result.userMessage, 'Fixture access check stopped safely.');
+        assert.equal(result.recoveryUrl, undefined);
+        assert.equal(lines.filter(line => line.endsWith('start-cogentstack-bridge.ps1')).length, 1);
+      }
       assert.equal(result.workspaceUrl, undefined);
       assert.ok(!runResult.stdout.includes('PRIVATE_HANDOFF_DO_NOT_PRINT'));
       assert.ok(lines.filter(line => line.endsWith('start-cogentstack-bridge.ps1')).length <= 1);
@@ -159,6 +168,7 @@ $result | ConvertTo-Json -Compress
 for (const plugin of Object.keys(versions)) {
   const results = [];
   const scenarios = ['current', 'confirmed', 'legacy-confirmed', 'unverified', 'offline', 'update', 'permission', 'unscoped', 'wrong-source', 'upgrade-failed', 'update-bad-contract', 'update-missing-contract', 'wrong-origin', 'wrong-mode', 'duplicate-mode', 'wrong-context', 'wrong-alias', 'already-opened', 'connection-required', 'malformed', 'stall', 'update-stall', 'resume-update', 'resume-wrong-version'];
+  scenarios.push('licence_required', 'licence_verification_unavailable');
   const selected = process.argv.slice(2);
   assert.ok(selected.every(scenario => scenarios.includes(scenario)), 'Unknown fixture scenario');
   for (const scenario of selected.length ? selected : scenarios) {

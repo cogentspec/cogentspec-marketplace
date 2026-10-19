@@ -71,6 +71,46 @@ function Write-CompactJson($Value) {
     $Value | ConvertTo-Json -Compress | Write-Output
 }
 
+function Get-CogentSpecAccessFailure($Failure, [switch]$UnknownForbiddenIsUnavailable) {
+    # Classify only explicit server denials. Never infer a missing licence from a failed check.
+    $responseProperty = $Failure.Exception.PSObject.Properties['Response']
+    $response = if ($responseProperty) { $responseProperty.Value } else { $null }
+    $statusCode = if ($response) { [int]$response.StatusCode } else { 0 }
+    $code = ''
+    if ($Failure.ErrorDetails -and $Failure.ErrorDetails.Message) {
+        try {
+            $body = $Failure.ErrorDetails.Message | ConvertFrom-Json
+            if ($body.PSObject.Properties['code']) { $code = [string]$body.code }
+        } catch { }
+    }
+    if (-not $code -and $response -and $response.PSObject.Methods['GetResponseStream']) {
+        try {
+            $reader = New-Object IO.StreamReader($response.GetResponseStream())
+            try { $body = $reader.ReadToEnd() | ConvertFrom-Json } finally { $reader.Dispose() }
+            if ($body.PSObject.Properties['code']) { $code = [string]$body.code }
+        } catch { }
+    }
+    if ($statusCode -eq 403 -and $code -in @('licence_required', 'subscription_inactive')) {
+        return [ordered]@{
+            status = 'licence_required'
+            reason = 'subscription_inactive'
+            userMessage = 'An active CogentSpec licence is required to use this Bridge command. Manage your licence in CogentSpec, or use the free Web Bridge.'
+            credentialPreserved = (Test-Path -LiteralPath $credentialPath)
+            browserOpened = $false
+        }
+    }
+    if ($statusCode -eq 0 -or $statusCode -eq 429 -or $statusCode -ge 500 -or ($statusCode -eq 403 -and $UnknownForbiddenIsUnavailable)) {
+        return [ordered]@{
+            status = 'licence_verification_unavailable'
+            reason = 'access_check_unavailable'
+            userMessage = 'CogentSpec could not verify licence access. Try again shortly. No connection or approval was started.'
+            credentialPreserved = (Test-Path -LiteralPath $credentialPath)
+            browserOpened = $false
+        }
+    }
+    return $null
+}
+
 function Save-CogentSpecCredential($Result) {
     if (-not $Result.token -or -not $Result.renewalToken -or -not $Result.deviceLeaseId) {
         throw 'CogentSpec returned an incomplete account-bound Desktop credential.'
@@ -123,6 +163,8 @@ if ($Mode -eq 'status') {
             }
             Write-CompactJson $statusResult
         } catch {
+            $accessFailure = Get-CogentSpecAccessFailure $_ -UnknownForbiddenIsUnavailable
+            if ($accessFailure) { Write-CompactJson $accessFailure; return }
             $statusCode = if ($_.Exception.Response) { [int]$_.Exception.Response.StatusCode } else { 0 }
             if ($statusCode -eq 401) {
                 $hasRenewal = $credential.PSObject.Properties.Name -contains 'renewalToken'
@@ -157,15 +199,17 @@ if ($Mode -eq 'status') {
                         Write-CompactJson $statusResult
                         return
                     } catch {
+                        $accessFailure = Get-CogentSpecAccessFailure $_ -UnknownForbiddenIsUnavailable
+                        if ($accessFailure) { Write-CompactJson $accessFailure; return }
                         $renewStatus = if ($_.Exception.Response) { [int]$_.Exception.Response.StatusCode } else { 0 }
                         if ($renewStatus -eq 428) {
                             Remove-Item -LiteralPath $credentialPath -Force
                             Write-CompactJson ([ordered]@{ status = 'signed_out'; reason = 'legal_update_required' })
                             return
                         }
-                        if ($renewStatus -eq 401 -or $renewStatus -eq 403) {
+                        if ($renewStatus -eq 401) {
                             Remove-Item -LiteralPath $credentialPath -Force
-                            Write-CompactJson ([ordered]@{ status = 'signed_out'; reason = 'installation_replaced_revoked_or_inactive' })
+                            Write-CompactJson ([ordered]@{ status = 'signed_out'; reason = 'installation_replaced_or_revoked' })
                             return
                         }
                         throw
@@ -319,6 +363,8 @@ try {
         -Body $tokenBody `
         -TimeoutSec $RequestTimeoutSeconds
 } catch {
+    $accessFailure = Get-CogentSpecAccessFailure $_
+    if ($accessFailure) { Write-CompactJson $accessFailure; return }
     $statusCode = if ($_.Exception.Response) { [int]$_.Exception.Response.StatusCode } else { 0 }
     if ($BrowserApproval -and $statusCode -in @(401, 403, 410, 428)) {
         $approvalStatus = if ($statusCode -eq 410) { 'expired' } elseif ($statusCode -eq 428) { 'legal_acceptance_required' } else { 'approval_denied' }

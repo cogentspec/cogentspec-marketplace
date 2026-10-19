@@ -5,6 +5,8 @@ description: Open the isolated CogentSpec workspace beside the main desktop chat
 
 # Open the CogentSpec GPT split-screen workspace
 
+If a helper returns `licence_required`, show its plain `userMessage` and stop: this account needs an active CogentSpec licence (an enabled, eligible owner licence counts). Do not start installation, reconnect, computer approval, another command, or a workspace open. Preserve the saved credential. If it returns `licence_verification_unavailable`, report that access could not be checked; do not claim the licence is missing or start approval. A missing credential alone does not prove a missing licence; retain the documented first-time account/device authorization flow only for genuinely unidentified or revoked connections.
+
 When an update is required, use the verified update installer with `-UpdateOnly -MarketplacePrepared -InstallerTimeoutSeconds 120 -DeferConnectionStartup`. Require its normal package integrity/cleanup guarantees and `connectionStartupDeferred: true`; the three connection-ready fields must be false, not fabricated. This allows an installed but disconnected computer to update before approval. Browser approval waiting is separate from the normal current-package connection budget.
 
 `$gptsnap` is the canonical command; `$gptpop` remains a compatibility alias. It uses the main desktop chat window beside a CogentSpec browser window in Windows split screen. Read `../cogentspec/SKILL.md` for the update, isolated context, privacy and account steps, then follow this flow instead of its generic Popout connection steps:

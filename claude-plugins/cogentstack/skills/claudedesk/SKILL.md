@@ -5,6 +5,8 @@ description: Connect the current isolated Claude Code Desktop project to its Cla
 
 # Open the CogentSpec Claude Desktop workspace
 
+If a helper returns `licence_required`, show its plain `userMessage` and stop: this account needs an active CogentSpec licence (an enabled, eligible owner licence counts). Do not start installation, reconnect, computer approval, another command, or a workspace open. Preserve the saved credential. If it returns `licence_verification_unavailable`, report that access could not be checked; do not claim the licence is missing or start approval. A missing credential alone does not prove a missing licence; retain the documented first-time account/device authorization flow only for genuinely unidentified or revoked connections.
+
 Read `../cogentstack/SKILL.md` and follow its project-context, privacy, account, and connection requirements for **Connect this Claude project**, with these destination-specific changes only:
 
 1. Invoke `../cogentstack/scripts/start-cogentstack-bridge.ps1 -ContextKey <resolved context> -Surface claude-desktop -Experience desktop` exactly once.

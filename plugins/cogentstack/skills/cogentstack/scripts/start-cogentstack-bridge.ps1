@@ -462,6 +462,10 @@ if ([string]$connection.status -eq 'execution_permission_required') {
     exit 0
 }
 if ([string]$connection.status -ne 'connected') {
+    if ([string]$connection.status -in @('licence_required', 'licence_verification_unavailable')) {
+        Write-CompactJson $connection
+        return
+    }
     if ($Surface -eq 'chatgpt' -and $Experience -eq 'split-screen') {
         if (-not $ResumeApproval) {
             $approval = (& $connectionScript -Mode start -Surface $Surface -ContextKey $resolvedContext -BrowserApproval -RequestTimeoutSeconds 6) | ConvertFrom-Json

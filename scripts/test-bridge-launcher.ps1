@@ -59,6 +59,11 @@ if ($Mode -ne 'status' -or -not $WorkspaceGrant -or $RequestTimeoutSeconds -ne 6
     throw 'The launcher did not make the bounded direct status request.'
 }
 [string]$PID | Set-Content -LiteralPath $env:COGENTSPEC_LAUNCHER_TEST_CONNECTOR_PROCESS_PATH -Encoding ascii
+if (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'access-failure.txt')) {
+    $failure = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot 'access-failure.txt')
+    [ordered]@{status = $failure.Trim(); userMessage = 'Fixture access check stopped safely.'; credentialPreserved = $true; browserOpened = $false} | ConvertTo-Json -Compress
+    return
+}
 if (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'signed-out.flag')) {
     [ordered]@{ status = 'not_installed' } | ConvertTo-Json -Compress
     return
@@ -158,6 +163,21 @@ Start-Sleep -Milliseconds 5500
     $env:COGENTSPEC_LAUNCHER_TEST_CONNECTOR_PROCESS_PATH = $connectorProcessPath
     $env:CODEX_THREAD_ID = $fixtureThreadId
     $fixtureLauncher = Join-Path $fixtureScripts 'start-cogentstack-bridge.ps1'
+    foreach ($failure in @('licence_required', 'licence_verification_unavailable')) {
+        Set-Content -LiteralPath (Join-Path $fixtureScripts 'access-failure.txt') -Value $failure
+        foreach ($surface in @('chatgpt', 'claude-desktop')) {
+            foreach ($experience in @('split-screen', 'desktop-ui', 'web')) {
+                $denied = (& $fixtureLauncher -ContextKey $contextKey -Surface $surface -Experience $experience) | ConvertFrom-Json
+                Assert-BridgeLauncherTest ($denied.status -eq $failure -and $denied.credentialPreserved) 'The launcher lost the specific access failure.'
+                Assert-BridgeLauncherTest (-not $denied.PSObject.Properties['workspaceUrl'] -and -not $denied.PSObject.Properties['recoveryUrl']) 'Access failure exposed an open or reconnect route.'
+                foreach ($forbidden in @('approval-started.txt', 'directory-called.txt', 'mcp-called.txt', 'popout-inspected.txt')) {
+                    Assert-BridgeLauncherTest (-not (Test-Path -LiteralPath (Join-Path $fixtureScripts $forbidden))) 'Access failure started a protected operation.'
+                }
+                Assert-BridgeLauncherTest (-not (Test-Path -LiteralPath $statePath)) 'Access failure started a Bridge worker.'
+            }
+        }
+    }
+    Remove-Item -LiteralPath (Join-Path $fixtureScripts 'access-failure.txt')
     Set-Content -LiteralPath (Join-Path $fixtureScripts 'signed-out.flag') -Value 'signed out'
     $signedOut = (& $fixtureLauncher -ContextKey $contextKey -Surface chatgpt -Experience web) | ConvertFrom-Json
     Assert-BridgeLauncherTest ($signedOut.status -eq 'signed_out') 'The signed-out fixture did not stop.'

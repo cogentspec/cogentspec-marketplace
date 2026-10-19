@@ -5,6 +5,8 @@ description: Open the isolated CogentSpec workspace beside the main Claude Deskt
 
 # Open the CogentSpec Claude split-screen workspace
 
+If a helper returns `licence_required`, show its plain `userMessage` and stop: this account needs an active CogentSpec licence (an enabled, eligible owner licence counts). Do not start installation, reconnect, computer approval, another command, or a workspace open. Preserve the saved credential. If it returns `licence_verification_unavailable`, report that access could not be checked; do not claim the licence is missing or start approval. A missing credential alone does not prove a missing licence; retain the documented first-time account/device authorization flow only for genuinely unidentified or revoked connections.
+
 `$claudesnap` connects the main Claude Desktop window beside an external CogentSpec browser; it does not create a Claude Popout. It uses the main Claude Desktop window beside a CogentSpec browser window in Windows split screen. Read `../cogentstack/SKILL.md` for shared isolated-context, privacy and account boundaries only. This explicit command replaces its generic link-only connection sequence. Use `${CLAUDE_PLUGIN_ROOT}` for bundled scripts and run them from the invoking Claude project directory. A normal Claude chat without plugin/local helper access cannot perform this connection.
 
 1. Run `${CLAUDE_PLUGIN_ROOT}\skills\cogentstack\scripts\project-context.ps1` exactly once and require an isolated context. If a package update was already verified, use only the refreshed plugin root.
