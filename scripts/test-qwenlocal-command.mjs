@@ -40,7 +40,7 @@ test('Windows command package validates before registration and rejects modified
     await fs.cp(root, fixture, { recursive: true });
     await fs.appendFile(path.join(fixture, 'scripts/qwen-runtime.mjs'), '\n// modified fixture\n');
     assert.throws(() => execFileSync('powershell.exe', ['-NoProfile', '-File', path.join(fixture, 'scripts/install-qwenlocal.ps1'), '-ValidateOnly'], { encoding: 'utf8', timeout: 20_000, stdio: 'pipe' }));
-  } finally { await fs.rm(fixture, { recursive: true, force: true }); }
+  } finally { await fs.rm(fixture, { recursive: true, force: true, maxRetries: 15, retryDelay: 100 }); }
 });
 test('all Windows command scripts parse without running registration, a handler or a model', { skip: process.platform !== 'win32' }, async () => {
   for (const relative of ['install-qwenlocal.ps1', 'prepare-qwen-runtime.ps1', 'start-qwenlocal.ps1', 'build-qwen-launcher.ps1']) {
