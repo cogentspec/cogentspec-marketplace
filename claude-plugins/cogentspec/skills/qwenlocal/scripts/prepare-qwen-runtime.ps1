@@ -57,7 +57,7 @@ function Get-CogentQwenNode([switch]$Prepare) {
 function Assert-CogentQwenPackage([string]$Root) {
     Assert-CogentQwenDirectPath $Root
     $manifest = Get-Content -LiteralPath (Join-Path $Root 'command.json') -Raw | ConvertFrom-Json
-    if ($manifest.schema -cne 'cogentspec-git-command-v1' -or $manifest.command -cne '$qwenlocal' -or $manifest.version -cne '1.1.1' -or $manifest.protocolVersion -cne '1.1.0' -or $manifest.source -cne 'https://github.com/cogentspec/cogentspec-marketplace.git') { throw 'Unrecognised Qwen command package.' }
+    if ($manifest.schema -cne 'cogentspec-git-command-v1' -or $manifest.command -cne '$qwenlocal' -or $manifest.version -cne '1.1.2' -or $manifest.protocolVersion -cne '1.1.0' -or $manifest.source -cne 'https://github.com/cogentspec/cogentspec-marketplace.git') { throw 'Unrecognised Qwen command package.' }
     $required = @('SKILL.md', 'scripts/install-qwenlocal.ps1', 'scripts/prepare-qwen-runtime.ps1', 'scripts/start-qwenlocal.ps1', 'scripts/qwen-runtime.mjs', 'scripts/build-qwen-launcher.ps1', 'scripts/qwen-windowless-launcher.cs')
     if (@($manifest.files.PSObject.Properties).Count -ne $required.Count) { throw 'The Qwen command manifest is incomplete.' }
     foreach ($relative in $required) {

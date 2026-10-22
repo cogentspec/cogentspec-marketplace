@@ -226,7 +226,32 @@ export async function createConnector({ project, context, port = 4318, verifyPla
       for await (const chunk of request) { size += chunk.length; if (size > 9_000_000) fail('Request too large.'); chunks.push(chunk); }
       const body = JSON.parse(Buffer.concat(chunks).toString('utf8'));
       if (request.url === '/ready') return send({ service: 'cogentspec-browser-project', version: connectorVersion,
-        ...(managed ? { command: '$qwenlocal', distribution: 'https://github.com/cogentspec/cogentspec-marketplace.git', commandVersion: '1.1.0' } : {}) });
+        ...(managed ? { command: '$qwenlocal', distribution: 'https://github.com/cogentspec/cogentspec-marketplace.git', commandVersion: '1.1.0',
+          pairingChallenge: hash(code),
+          ...(workspaceMode && workspacePlan ? { resumeProof: receipt({ instance, publicKey, targetPath: '', version: connectorVersion }) } : {}) } : {}) });
+      if (request.url === '/resume') {
+        // Public proof is not authority. Recovery requires a fresh online-verified
+        // grant for the SAME licensed owner and exact workspace. It never resumes
+        // project permissions or stores browser credentials across page reloads.
+        if (!workspaceMode || !workspacePlan || busy) return send({ error: 'This connector cannot resume the requested workspace.' }, 409);
+        busy = true;
+        try {
+          if (typeof body.token !== 'string' || consumed.has(hash(body.token))) fail('Request a fresh workspace recovery approval.');
+          const plan = await verifyRemote(body.token);
+          if (!plan || plan.instance !== instance || plan.publicKey !== publicKey || plan.operation !== 'workspace'
+            || plan.ownerId !== workspacePlan.ownerId || plan.context !== context || plan.context !== workspacePlan.context
+            || plan.targetPath !== '' || plan.bindingId !== '' || plan.requestId !== null
+            || !Number.isFinite(plan.expiresAt) || plan.expiresAt <= Date.now()) fail('Recovery approval does not match this owner, workspace or time window.');
+          if (consumed.size >= 1000) fail('Restart the connector to renew its operation limit.');
+          consumed.add(hash(body.token));
+          sessions.clear();
+          const token = randomBytes(32).toString('hex');
+          sessions.set(token, Date.now() + 60 * 60_000);
+          root = ''; connectedPlan = null;
+          return send({ token, proof: receipt({ instance, publicKey, targetPath: '', version: connectorVersion }),
+            receipt: receipt({ grantId: plan.grantId, instance, operation: 'workspace', result: { bridgeReady: true } }) });
+        } finally { busy = false; }
+      }
       if (request.url === '/pair') {
         if (paired || ++attempts > 10 || !equal(body.code, code)) return send({ error: 'Pairing code invalid or already used. Restart the connector for a fresh code.' }, 403);
         paired = true;
