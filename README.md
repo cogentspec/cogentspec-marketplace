@@ -44,12 +44,15 @@ registers a current-user `cogentspec-browser` handler. It does not use the legac
 native Qwen interface, install a model, add a sign-in task or open a firewall.
 
 Normal use is simply `$qwenlocal` in `https://cogentspec.app/qwen/local`. The
-installed handler claims a one-use, selected-project request from the fixed
-CogentSpec service and starts the quiet background connection. No terminal,
+installed handler claims a one-use workspace request from the fixed
+CogentSpec service and starts the quiet background Bridge before a project exists.
+Like ChatGPT and Claude, connect first, then select/create a project and fulfil
+only its approved actions. Model selection does not reset this workspace Bridge. No terminal,
 downloaded command file, manual pairing code or project refresh is part of the
 normal flow. Project grants and signed receipts still enforce the current
 account, exact folder and separately approved operation. Handoff dispatch or
-model discovery alone cannot claim a connected project.
+model discovery alone cannot claim a connected Bridge. A signed workspace grant
+and live account/context checks are required; folder and command access stay separate.
 
 Run `node --test scripts/test-qwenlocal-command.mjs` to verify package digests,
 Windows parsing, validation-before-registration and modified-file rejection.

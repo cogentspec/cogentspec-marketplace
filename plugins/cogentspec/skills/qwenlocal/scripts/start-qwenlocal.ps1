@@ -14,7 +14,7 @@ try {
     $node = Get-CogentQwenNode
     $reply = Invoke-RestMethod -Method Post -Uri 'https://cogentspec.app/api/qwen/command/claim' -MaximumRedirection 0 -TimeoutSec 10 -ContentType 'application/json' -Body (@{ticket=$ticket}|ConvertTo-Json -Compress)
     $ticket = ''; $Uri = ''
-    if ($reply.command -cne '$qwenlocal' -or $reply.source -cne $manifest.source -or $reply.version -cne $manifest.version -or $reply.context -cnotmatch '^ctx-[a-f0-9]{64}$' -or $reply.code -cnotmatch '^[a-f0-9]{32}$' -or $reply.project -cnotmatch '^[a-zA-Z]:\\' -or $reply.project.Length -gt 400) { throw 'The Qwen command request could not be verified.' }
+    if ($reply.command -cne '$qwenlocal' -or $reply.source -cne $manifest.source -or $reply.version -cne $manifest.version -or $reply.context -cnotmatch '^ctx-[a-f0-9]{64}$' -or $reply.code -cnotmatch '^[a-f0-9]{32}$' -or $reply.scope -cne 'workspace' -or $reply.project -cne '') { throw 'The Qwen command request could not be verified.' }
     $state = Join-Path $env:LOCALAPPDATA 'CogentSpec\browser-commands\state'
     Assert-CogentQwenDirectPath $state
     New-Item -ItemType Directory -Path $state -Force | Out-Null

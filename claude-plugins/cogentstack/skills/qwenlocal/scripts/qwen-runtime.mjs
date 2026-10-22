@@ -192,13 +192,14 @@ async function runTask(root, plan, signal) {
   });
 }
 
-export async function createConnector({ project, port = 4318, verifyPlan, code = randomBytes(16).toString('hex'), managed = false } = {}) {
-  const root = await validateProjectRoot(project);
+export async function createConnector({ project, context, port = 4318, verifyPlan, code = randomBytes(16).toString('hex'), managed = false } = {}) {
+  const workspaceMode = managed && project === '' && /^ctx-[a-f0-9]{64}$/.test(context);
+  let root = workspaceMode ? '' : await validateProjectRoot(project);
   const keys = generateKeyPairSync('ed25519');
   const publicKey = keys.publicKey.export({ type: 'spki', format: 'pem' }).toString();
   const instance = randomBytes(24).toString('hex');
   const sessions = new Map(), consumed = new Set();
-  let busy = false, attempts = 0, paired = false, connectedPlan = null;
+  let busy = false, attempts = 0, paired = false, connectedPlan = null, workspacePlan = null;
   const receipt = value => ({ value, signature: sign(null, Buffer.from(JSON.stringify(value)), keys.privateKey).toString('base64url') });
   const verifyRemote = verifyPlan || (async token => {
     const response = await fetch(verifier, { method: 'POST', redirect: 'error', signal: AbortSignal.timeout(10_000),
@@ -225,7 +226,7 @@ export async function createConnector({ project, port = 4318, verifyPlan, code =
       for await (const chunk of request) { size += chunk.length; if (size > 9_000_000) fail('Request too large.'); chunks.push(chunk); }
       const body = JSON.parse(Buffer.concat(chunks).toString('utf8'));
       if (request.url === '/ready') return send({ service: 'cogentspec-browser-project', version: connectorVersion,
-        ...(managed ? { command: '$qwenlocal', distribution: 'https://github.com/cogentspec/cogentspec-marketplace.git', commandVersion: '1.0.0' } : {}) });
+        ...(managed ? { command: '$qwenlocal', distribution: 'https://github.com/cogentspec/cogentspec-marketplace.git', commandVersion: '1.1.0' } : {}) });
       if (request.url === '/pair') {
         if (paired || ++attempts > 10 || !equal(body.code, code)) return send({ error: 'Pairing code invalid or already used. Restart the connector for a fresh code.' }, 403);
         paired = true;
@@ -243,37 +244,49 @@ export async function createConnector({ project, port = 4318, verifyPlan, code =
       if (request.url === '/status') {
         // Read-only liveness/ownership check. It cannot pair, write, run commands,
         // issue a grant or load a model. No source contents or session tokens leave.
-        if (!connectedPlan) return send({ connected: false });
+        const workspaceStatus = workspaceMode ? { bridgeConnected: Boolean(workspacePlan),
+          ...(workspacePlan ? { ownerId: workspacePlan.ownerId, context: workspacePlan.context } : {}) } : {};
+        if (!connectedPlan) return send({ ...workspaceStatus, connected: false });
         try { await ownedRoot(root, connectedPlan); }
-        catch { connectedPlan = null; return send({ connected: false }); }
+        catch { connectedPlan = null; return send({ ...workspaceStatus, connected: false }); }
         const { ownerId, context, bindingId } = connectedPlan;
-        return send({ connected: true, ownerId, context, bindingId, targetPath: root });
+        return send({ ...workspaceStatus, connected: true, ownerId, context, bindingId, targetPath: root });
       }
       if (request.url !== '/execute' || busy) return send({ error: 'Unknown operation or connector busy.' }, 409);
       busy = true;
       try {
         if (typeof body.token !== 'string' || consumed.has(hash(body.token))) fail('This approval was already used. Request a fresh approval.');
         const plan = await verifyRemote(body.token);
-        if (!plan || plan.instance !== instance || plan.publicKey !== publicKey || plan.targetPath !== root
+        if (!plan || plan.instance !== instance || plan.publicKey !== publicKey
           || !Number.isFinite(plan.expiresAt) || plan.expiresAt <= Date.now()) fail('Approval does not match this connector, project folder or time window.');
+        if (plan.operation === 'workspace') {
+          if (!workspaceMode || plan.context !== context || plan.targetPath !== '' || plan.bindingId !== '' || plan.requestId !== null
+            || workspacePlan && workspacePlan.ownerId !== plan.ownerId) fail('Invalid workspace-only connection approval.');
+          consumed.add(hash(body.token));
+          workspacePlan = { ownerId: plan.ownerId, context: plan.context };
+          return send({ receipt: receipt({ grantId: plan.grantId, instance, operation: 'workspace', result: { bridgeReady: true } }) });
+        }
+        if (workspaceMode && (!workspacePlan || plan.ownerId !== workspacePlan.ownerId || plan.context !== workspacePlan.context)) fail('Connect this workspace before approving project operations.');
+        const targetRoot = workspaceMode ? await validateProjectRoot(plan.targetPath) : root;
+        if (workspaceMode ? targetRoot !== root && !['folder', 'bind'].includes(plan.operation) : plan.targetPath !== root) fail('Approve the selected project folder before using its files.');
         consumed.add(hash(body.token));
         if (consumed.size > 1000) fail('Restart the connector to renew its operation limit.');
         let result;
         if (plan.operation === 'folder') {
-          await noLinks(root, true);
-          await fs.mkdir(root, { recursive: false }).catch(error => { if (error.code !== 'EEXIST') throw error; });
-          const entries = await fs.readdir(root);
-          if (entries.length) await ownedRoot(root, plan);
+          await noLinks(targetRoot, true);
+          await fs.mkdir(targetRoot, { recursive: false }).catch(error => { if (error.code !== 'EEXIST') throw error; });
+          const entries = await fs.readdir(targetRoot);
+          if (entries.length) await ownedRoot(targetRoot, plan);
           else {
-            await fs.mkdir(path.join(root, '.coge'));
-            await fs.writeFile(path.join(root, markerPath), JSON.stringify({ ownerId: plan.ownerId, context: plan.context, bindingId: plan.bindingId }), { flag: 'wx', mode: 0o600 });
+            await fs.mkdir(path.join(targetRoot, '.coge'));
+            await fs.writeFile(path.join(targetRoot, markerPath), JSON.stringify({ ownerId: plan.ownerId, context: plan.context, bindingId: plan.bindingId }), { flag: 'wx', mode: 0o600 });
           }
           result = { folderReady: true };
         } else if (plan.operation === 'bind') {
           // Explicit adoption is restricted by the hosted grant to the currently
           // selected, already-created account-owned project, never an arbitrary path.
-          await noLinks(root);
-          const marker = path.join(root, markerPath);
+          await noLinks(targetRoot);
+          const marker = path.join(targetRoot, markerPath);
           await noLinks(marker, true);
           let previous;
           try {
@@ -286,23 +299,23 @@ export async function createConnector({ project, port = 4318, verifyPlan, code =
           await fs.writeFile(marker, JSON.stringify({ ownerId: plan.ownerId, context: plan.context, bindingId: plan.bindingId }), { flag: previous ? 'w' : 'wx', mode: 0o600 });
           result = { projectBound: true };
         } else {
-          await ownedRoot(root, plan);
+          await ownedRoot(targetRoot, plan);
           if (plan.operation === 'foundation') {
             const checked = decodeFiles(body.files, true);
             if (hash(checked.map(f => `${f.path}\t${f.sha256}\n`).join('')) !== plan.artifactDigest) fail('Foundation artifact digest mismatch.');
-            result = { files: await applyFiles(root, body.files, { foundation: true }) };
+            result = { files: await applyFiles(targetRoot, body.files, { foundation: true }) };
           }
           else if (plan.operation === 'edit') {
             if (!Array.isArray(body.files) || JSON.stringify(body.files.map(({ path, sha256, beforeHash }) => ({ path, sha256, beforeHash }))) !== JSON.stringify(plan.files)) fail('File batch differs from the approved review.');
-            result = { files: await applyFiles(root, body.files) };
+            result = { files: await applyFiles(targetRoot, body.files) };
           } else if (plan.operation === 'inspect') {
-            const files = await inventory(root);
+            const files = await inventory(targetRoot);
             const selected = plan.paths || [];
             if (!Array.isArray(selected) || selected.length > 20 || selected.some(name => !files.some(f => f.path === name))) fail('Read approval is not in the safe inventory.');
             let total = 0;
             const contents = [];
             for (const name of selected) {
-              const full = path.join(root, name);
+              const full = path.join(targetRoot, name);
               await noLinks(full);
               const stat = await fs.lstat(full);
               if (!stat.isFile() || stat.nlink !== 1 || stat.size > 128_000) fail('Selected file changed after inventory.');
@@ -314,9 +327,10 @@ export async function createConnector({ project, port = 4318, verifyPlan, code =
           } else if (plan.operation === 'task') {
             const abort = new AbortController();
             response.on('close', () => { if (!response.writableEnded) abort.abort(); });
-            result = await runTask(root, plan, abort.signal);
+            result = await runTask(targetRoot, plan, abort.signal);
           } else fail('Unsupported connector operation.');
         }
+        root = targetRoot;
         connectedPlan = { ownerId: plan.ownerId, context: plan.context, bindingId: plan.bindingId };
         return send({ receipt: receipt({ grantId: plan.grantId, instance, operation: plan.operation, result }) });
       } finally { busy = false; }
@@ -346,7 +360,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.ar
       if (!process.env.LOCALAPPDATA || path.dirname(configPath) !== allowed || !/^[a-f0-9]{32}\.json$/.test(path.basename(configPath))) fail('Invalid managed command configuration location.');
       await fs.unlink(configPath);
     }
-    options = { project: data.project, code: data.code, managed: data.managed === true };
+    options = { project: data.project, context: data.context, code: data.code, managed: data.managed === true };
   } else if (process.argv[2] === '--project') options = { project: process.argv[3] };
   else fail('Unsupported browser connector option.');
   const connector = await createConnector(options);

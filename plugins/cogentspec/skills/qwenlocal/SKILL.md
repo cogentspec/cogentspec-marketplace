@@ -19,11 +19,15 @@ Normal use happens in `https://cogentspec.app/qwen/local`: the user sends
 `$qwenlocal`, and the website hands a one-use request to this installed command.
 `scripts/start-qwenlocal.ps1 -Uri <issued handoff>` claims it through the fixed
 CogentSpec service, verifies the installed Git package and starts its quiet,
-project-scoped background connection. Never construct a handoff or filesystem
+workspace-scoped background connection, even before a project is selected. Never construct a handoff or filesystem
 path from conversation text, copy a ticket into chat, or reuse an expired ticket.
 
 The hosted current project and signed operation grants remain authoritative.
-Starting the command is not folder approval or proof of a connected project.
-Report connected only after the workspace verifies the exact folder and LED.
+Starting the command is not folder approval or proof of a connected Bridge.
+Follow the ChatGPT/Claude order: connect and verify this workspace first, then
+select or create a project and execute only its server-approved actions.
+Report Bridge connected only after licensed workspace presence and the LED are
+verified. No selected project is required for this connection. Folder access
+remains separate and requires its exact protected approval.
 Project writes, build tasks, Git operations and remote model use retain their
 separate approvals. Source delivery from Git does not grant execution authority.
