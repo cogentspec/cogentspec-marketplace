@@ -1,0 +1,13 @@
+{
+  "schema": "cogentspec-git-command-v1",
+  "command": "$qwenlocal",
+  "version": "1.0.0",
+  "source": "https://github.com/cogentspec/cogentspec-marketplace.git",
+  "files": {
+    "SKILL.md": "c6fe648cc203bb2e268a31ae33dc473eee6a9e1d2a63aee5907708cd0a3d9505",
+    "scripts/install-qwenlocal.ps1": "0fb43bee6ff1ab5cf659a6463e8470dfbe0524ee8a190b72abc5fbf9c3da5b3c",
+    "scripts/prepare-qwen-runtime.ps1": "48c52f5535cdb9ea50d20fff0dabab98488747e70fd98622f2bd72e95323fbe7",
+    "scripts/start-qwenlocal.ps1": "4acc8a2d619c987ea11ca57a63c8be54cb044c6c4d0ca6a85ac0efe69a528229",
+    "scripts/qwen-runtime.mjs": "7252abba60b8a37b4953066c13ef2a599c26eef580582f1e56d09fa7c4c67ee7"
+  }
+}

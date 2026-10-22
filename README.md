@@ -34,7 +34,27 @@ The Claude plugin retains `$cogentstack` as the common invocation. It resolves t
 
 The explicit `$claudeweb` skill prepares the ordinary Web destination through a dedicated validated launcher. Where approved browser control is available it delivers the one-use handoff to the intended CogentSpec workspace tab; otherwise it returns one recovery link. It reports connected only after the workspace LED and project library are verified. This requires the installed plugin and local helper access; a plain Claude-in-Chrome chat is not itself a local Bridge executor. `$claudedesk` and the general connection command retain their separate link-based flows.
 
-## ChatGPT and Codex Desktop
+## Qwen browser command
+
+The `qwenlocal` skill is shipped in the same trusted Git package as the other
+CogentSpec commands. For the current browser workspace, one-time setup runs its
+`scripts/install-qwenlocal.ps1 -RegisterBrowserCommand` from the verified package.
+That prepares the official checksum/publisher-verified Node/npm runtime and
+registers a current-user `cogentspec-browser` handler. It does not use the legacy
+native Qwen interface, install a model, add a sign-in task or open a firewall.
+
+Normal use is simply `$qwenlocal` in `https://cogentspec.app/qwen/local`. The
+installed handler claims a one-use, selected-project request from the fixed
+CogentSpec service and starts the quiet background connection. No terminal,
+downloaded command file, manual pairing code or project refresh is part of the
+normal flow. Project grants and signed receipts still enforce the current
+account, exact folder and separately approved operation. Handoff dispatch or
+model discovery alone cannot claim a connected project.
+
+Run `node --test scripts/test-qwenlocal-command.mjs` to verify package digests,
+Windows parsing, validation-before-registration and modified-file rejection.
+
+## ChatGPT and Codex Desktop commands
 
 The Codex plugin is installed from the Git-backed `.agents/plugins/` marketplace and retains `$cogentstack` as the common invocation. It resolves the current AI Project's isolated logical CogentSpec context, starts or reuses one background Desktop Bridge for that context, and returns the matching CogentSpec Web URL. It does not open or select browser tabs, inspect browser profiles, hide sidebars, resize windows, or embed CogentSpec into every AI Project.
 
