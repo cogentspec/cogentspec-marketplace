@@ -228,7 +228,11 @@ export async function createConnector({ project, context, port = 4318, verifyPla
       if (request.url === '/ready') return send({ service: 'cogentspec-browser-project', version: connectorVersion,
         ...(managed ? { command: '$qwenlocal', distribution: 'https://github.com/cogentspec/cogentspec-marketplace.git', commandVersion: '1.1.0',
           pairingChallenge: hash(code),
-          ...(workspaceMode && workspacePlan ? { resumeProof: receipt({ instance, publicKey, targetPath: '', version: connectorVersion }) } : {}) } : {}) });
+          ...(workspaceMode && workspacePlan?.recoveryCertificate && /^[a-f0-9]{32}$/.test(body.challenge) ? {
+            resumeProof: receipt({ instance, publicKey, targetPath: '', version: connectorVersion }),
+            recovery: { certificate: workspacePlan.recoveryCertificate, challenge: body.challenge,
+              signature: receipt({ certificate: workspacePlan.recoveryCertificate, challenge: body.challenge }).signature },
+          } : {}) } : {}) });
       if (request.url === '/resume') {
         // Public proof is not authority. Recovery requires a fresh online-verified
         // grant for the SAME licensed owner and exact workspace. It never resumes
@@ -248,6 +252,7 @@ export async function createConnector({ project, context, port = 4318, verifyPla
           const token = randomBytes(32).toString('hex');
           sessions.set(token, Date.now() + 60 * 60_000);
           root = ''; connectedPlan = null;
+          workspacePlan.recoveryCertificate = plan.recoveryCertificate;
           return send({ token, proof: receipt({ instance, publicKey, targetPath: '', version: connectorVersion }),
             receipt: receipt({ grantId: plan.grantId, instance, operation: 'workspace', result: { bridgeReady: true } }) });
         } finally { busy = false; }
@@ -288,7 +293,7 @@ export async function createConnector({ project, context, port = 4318, verifyPla
           if (!workspaceMode || plan.context !== context || plan.targetPath !== '' || plan.bindingId !== '' || plan.requestId !== null
             || workspacePlan && workspacePlan.ownerId !== plan.ownerId) fail('Invalid workspace-only connection approval.');
           consumed.add(hash(body.token));
-          workspacePlan = { ownerId: plan.ownerId, context: plan.context };
+          workspacePlan = { ownerId: plan.ownerId, context: plan.context, recoveryCertificate: plan.recoveryCertificate };
           return send({ receipt: receipt({ grantId: plan.grantId, instance, operation: 'workspace', result: { bridgeReady: true } }) });
         }
         if (workspaceMode && (!workspacePlan || plan.ownerId !== workspacePlan.ownerId || plan.context !== workspacePlan.context)) fail('Connect this workspace before approving project operations.');
