@@ -11,6 +11,10 @@ Use the command shipped in the trusted CogentSpec marketplace package at
 For an explicit setup request, run `scripts/install-qwenlocal.ps1
 -RegisterBrowserCommand` from the verified package. This prepares the official
 Node/npm runtime and registers the current user's `cogentspec-browser` handler.
+The handler is a locally compiled Windows GUI launcher; it starts the verified
+PowerShell supervisor and runtime with no console. Package 1.1.1 retains browser
+protocol 1.1.0, so the website does not require a protocol update. Never replace
+this handler with a direct console executable or weaken execution policy.
 It does not launch the legacy Desktop interface, install models, change a
 firewall, create a sign-in task or request an account credential. Preserve an
 existing unrelated protocol handler and fail closed on linked or modified files.

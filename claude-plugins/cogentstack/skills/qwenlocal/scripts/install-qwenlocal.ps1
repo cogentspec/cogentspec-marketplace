@@ -18,20 +18,35 @@ if (Test-Path -LiteralPath $registry) {
     $existingCommand = (Get-Item -LiteralPath "$registry\shell\open\command" -ErrorAction Stop).GetValue('')
     if ($existing -cne 'URL:CogentSpec browser commands' -or -not $existingCommand.Contains($root)) { throw 'An unrelated browser protocol registration exists. It was not replaced.' }
 }
-if (Test-Path -LiteralPath $destination) { $null = Assert-CogentQwenPackage $destination }
+if (Test-Path -LiteralPath $destination) { $null = Assert-CogentQwenPackage $destination; $null = Assert-CogentQwenLauncher $destination }
 else {
     New-Item -ItemType Directory -Path $root -Force | Out-Null
     $stage = Join-Path $root ('staging-' + [Guid]::NewGuid().ToString('N'))
     New-Item -ItemType Directory -Path (Join-Path $stage 'scripts') -Force | Out-Null
     foreach ($relative in @('command.json') + @($manifest.files.PSObject.Properties.Name)) { Copy-Item -LiteralPath (Join-Path $sourceRoot $relative) -Destination (Join-Path $stage $relative) }
     $null = Assert-CogentQwenPackage $stage
+    $compiler = New-Object Diagnostics.ProcessStartInfo
+    $compiler.FileName = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    $compiler.Arguments = '-NoProfile -NonInteractive -File "' + (Join-Path $stage 'scripts\build-qwen-launcher.ps1') + '"'
+    $compiler.UseShellExecute = $false
+    $compiler.CreateNoWindow = $true
+    $compiler.RedirectStandardOutput = $true
+    $compiler.RedirectStandardError = $true
+    $process = [Diagnostics.Process]::Start($compiler)
+    try {
+        $stdout = $process.StandardOutput.ReadToEndAsync()
+        $stderr = $process.StandardError.ReadToEndAsync()
+        if (-not $process.WaitForExit(30000)) { $process.Kill(); throw 'Windowless launcher compilation timed out.' }
+        if ($process.ExitCode -ne 0) { throw 'Windowless launcher compilation failed. Browser registration was not changed.' }
+        $null = $stdout.GetAwaiter().GetResult(); $null = $stderr.GetAwaiter().GetResult()
+    } finally { $process.Dispose() }
+    $null = Assert-CogentQwenLauncher $stage
     Move-Item -LiteralPath $stage -Destination $destination
 }
-$powershell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
-$entrypoint = Join-Path $destination 'scripts\start-qwenlocal.ps1'
-$command = '"' + $powershell + '" -NoProfile -WindowStyle Hidden -File "' + $entrypoint + '" -Uri "%1"'
+$launcher = Assert-CogentQwenLauncher $destination
+$command = '"' + $launcher + '" "%1"'
 New-Item -Path "$registry\shell\open\command" -Force | Out-Null
 Set-Item -LiteralPath $registry -Value 'URL:CogentSpec browser commands'
 New-ItemProperty -LiteralPath $registry -Name 'URL Protocol' -Value '' -PropertyType String -Force | Out-Null
 Set-Item -LiteralPath "$registry\shell\open\command" -Value $command
-[ordered]@{status='installed';command='$qwenlocal';source=$manifest.source;version=$manifest.version;browserCommandRegistered=$true;runtimeReady=$true;legacyDesktopUsed=$false}|ConvertTo-Json -Compress
+[ordered]@{status='installed';command='$qwenlocal';source=$manifest.source;version=$manifest.version;protocolVersion=$manifest.protocolVersion;windowlessLauncher=$true;browserCommandRegistered=$true;runtimeReady=$true;legacyDesktopUsed=$false}|ConvertTo-Json -Compress

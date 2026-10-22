@@ -57,8 +57,8 @@ function Get-CogentQwenNode([switch]$Prepare) {
 function Assert-CogentQwenPackage([string]$Root) {
     Assert-CogentQwenDirectPath $Root
     $manifest = Get-Content -LiteralPath (Join-Path $Root 'command.json') -Raw | ConvertFrom-Json
-    if ($manifest.schema -cne 'cogentspec-git-command-v1' -or $manifest.command -cne '$qwenlocal' -or $manifest.version -cne '1.1.0' -or $manifest.source -cne 'https://github.com/cogentspec/cogentspec-marketplace.git') { throw 'Unrecognised Qwen command package.' }
-    $required = @('SKILL.md', 'scripts/install-qwenlocal.ps1', 'scripts/prepare-qwen-runtime.ps1', 'scripts/start-qwenlocal.ps1', 'scripts/qwen-runtime.mjs')
+    if ($manifest.schema -cne 'cogentspec-git-command-v1' -or $manifest.command -cne '$qwenlocal' -or $manifest.version -cne '1.1.1' -or $manifest.protocolVersion -cne '1.1.0' -or $manifest.source -cne 'https://github.com/cogentspec/cogentspec-marketplace.git') { throw 'Unrecognised Qwen command package.' }
+    $required = @('SKILL.md', 'scripts/install-qwenlocal.ps1', 'scripts/prepare-qwen-runtime.ps1', 'scripts/start-qwenlocal.ps1', 'scripts/qwen-runtime.mjs', 'scripts/build-qwen-launcher.ps1', 'scripts/qwen-windowless-launcher.cs')
     if (@($manifest.files.PSObject.Properties).Count -ne $required.Count) { throw 'The Qwen command manifest is incomplete.' }
     foreach ($relative in $required) {
         $entry = $manifest.files.PSObject.Properties[$relative]
@@ -68,4 +68,43 @@ function Assert-CogentQwenPackage([string]$Root) {
         if ((Get-CogentQwenHash $full -Text) -cne $entry.Value) { throw 'The installed Qwen command was modified. Update it through the trusted marketplace.' }
     }
     return $manifest
+}
+function Assert-CogentQwenLauncher([string]$Root) {
+    $executable = Join-Path $Root 'CogentSpec-Qwen-Launcher.exe'
+    $receiptPath = Join-Path $Root 'launcher-integrity.json'
+    Assert-CogentQwenDirectPath $executable
+    Assert-CogentQwenDirectPath $receiptPath
+    $receipt = Get-Content -LiteralPath $receiptPath -Raw | ConvertFrom-Json
+    if ($receipt.sourceSha256 -cne (Get-CogentQwenHash (Join-Path $Root 'scripts/qwen-windowless-launcher.cs') -Text) -or $receipt.executableSha256 -cne (Get-CogentQwenHash $executable)) { throw 'The installed windowless launcher was modified.' }
+    $bytes = [IO.File]::ReadAllBytes($executable)
+    $pe = [BitConverter]::ToInt32($bytes, 60)
+    if ($pe -lt 64 -or $pe + 94 -gt $bytes.Length -or [BitConverter]::ToUInt32($bytes, $pe) -ne 17744 -or [BitConverter]::ToUInt16($bytes, $pe + 92) -ne 2) { throw 'A Windows GUI-subsystem launcher is required; console output was refused.' }
+    return $executable
+}
+function Start-CogentQwenRuntime([string]$Node, [string]$Module, [string]$Config, [string]$OutputPath, [string]$ErrorPath) {
+    # This quiet supervisor drains both runtime streams concurrently; neither
+    # Windows PowerShell nor the Node worker receives a console window.
+    $info = New-Object Diagnostics.ProcessStartInfo
+    $info.FileName = $Node
+    $info.Arguments = '"' + $Module + '" --launch-config "' + $Config + '"'
+    $info.UseShellExecute = $false
+    $info.CreateNoWindow = $true
+    $info.RedirectStandardOutput = $true
+    $info.RedirectStandardError = $true
+    $output = $null; $errors = $null; $worker = $null
+    try {
+        $output = [IO.File]::Open($OutputPath, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::Read)
+        $errors = [IO.File]::Open($ErrorPath, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::Read)
+        $worker = [Diagnostics.Process]::Start($info)
+        $copyOutput = $worker.StandardOutput.BaseStream.CopyToAsync($output)
+        $copyErrors = $worker.StandardError.BaseStream.CopyToAsync($errors)
+        $worker.WaitForExit()
+        $copyOutput.GetAwaiter().GetResult()
+        $copyErrors.GetAwaiter().GetResult()
+        if ($worker.ExitCode -ne 0) { throw 'The background Qwen runtime stopped. Review Qwen setup.' }
+    } finally {
+        if ($worker) { $worker.Dispose() }
+        if ($output) { $output.Dispose() }
+        if ($errors) { $errors.Dispose() }
+    }
 }

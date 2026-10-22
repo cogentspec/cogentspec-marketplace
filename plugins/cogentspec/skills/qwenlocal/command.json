@@ -1,13 +1,16 @@
 {
   "schema": "cogentspec-git-command-v1",
   "command": "$qwenlocal",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "source": "https://github.com/cogentspec/cogentspec-marketplace.git",
   "files": {
-    "SKILL.md": "18ef23448f0e5c3ca6a867847d844715a3dc769c006c62e151c96f9645b5bd71",
-    "scripts/install-qwenlocal.ps1": "0fb43bee6ff1ab5cf659a6463e8470dfbe0524ee8a190b72abc5fbf9c3da5b3c",
-    "scripts/prepare-qwen-runtime.ps1": "125a016f23f78f58ad84942e194f65b741814afff282a9449500dab0f17728df",
-    "scripts/start-qwenlocal.ps1": "082883eb2d977162ffb9dbc0be7ead138bec86e84cd21b5c51a35c76628fe20a",
-    "scripts/qwen-runtime.mjs": "d0198d50221c09228fb100a8d42d651620e47498cf940bb508943b9ceb736d07"
-  }
+    "SKILL.md": "16fbc25db5bdd09d116a296dead57909e65b39d99209521986d35be7341165e5",
+    "scripts/install-qwenlocal.ps1": "d3157254b5779694e827f7acbd18e2643728f386841bb9f879e45bdd1f41e0c1",
+    "scripts/prepare-qwen-runtime.ps1": "37aacbc1b05e8381c6f4cf76dbe1a4fbb27941a1d5926607df445c3e76e4eb64",
+    "scripts/start-qwenlocal.ps1": "93064ff6d672b2a6f745a728cdae0a7f874313fbf7bf22adcf77b9157dfbd540",
+    "scripts/qwen-runtime.mjs": "d0198d50221c09228fb100a8d42d651620e47498cf940bb508943b9ceb736d07",
+    "scripts/build-qwen-launcher.ps1": "f6ad341f0bb2d544b53832fc5169f6471a19ca236fbb7a77629742bc352a163f",
+    "scripts/qwen-windowless-launcher.cs": "be8db7f40eadd8aea49e889501522f0e7310f5b8ce8f4c5d70604ac9004dfb6e"
+  },
+  "protocolVersion": "1.1.0"
 }

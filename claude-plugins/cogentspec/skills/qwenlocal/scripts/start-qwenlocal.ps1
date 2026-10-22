@@ -14,7 +14,7 @@ try {
     $node = Get-CogentQwenNode
     $reply = Invoke-RestMethod -Method Post -Uri 'https://cogentspec.app/api/qwen/command/claim' -MaximumRedirection 0 -TimeoutSec 10 -ContentType 'application/json' -Body (@{ticket=$ticket}|ConvertTo-Json -Compress)
     $ticket = ''; $Uri = ''
-    if ($reply.command -cne '$qwenlocal' -or $reply.source -cne $manifest.source -or $reply.version -cne $manifest.version -or $reply.context -cnotmatch '^ctx-[a-f0-9]{64}$' -or $reply.code -cnotmatch '^[a-f0-9]{32}$' -or $reply.scope -cne 'workspace' -or $reply.project -cne '') { throw 'The Qwen command request could not be verified.' }
+    if ($reply.command -cne '$qwenlocal' -or $reply.source -cne $manifest.source -or $reply.version -cne $manifest.protocolVersion -or $reply.context -cnotmatch '^ctx-[a-f0-9]{64}$' -or $reply.code -cnotmatch '^[a-f0-9]{32}$' -or $reply.scope -cne 'workspace' -or $reply.project -cne '') { throw 'The Qwen command request could not be verified.' }
     $state = Join-Path $env:LOCALAPPDATA 'CogentSpec\browser-commands\state'
     Assert-CogentQwenDirectPath $state
     New-Item -ItemType Directory -Path $state -Force | Out-Null
@@ -25,8 +25,7 @@ try {
     $module = Join-Path $PSScriptRoot 'qwen-runtime.mjs'
     # Ticket/code are never command-line arguments or log output. The native
     # process consumes and deletes its one-use configuration before listening.
-    $arguments = @(('"' + $module + '"'), '--launch-config', ('"' + $config + '"'))
-    Start-Process -FilePath $node -ArgumentList $arguments -WindowStyle Hidden -RedirectStandardOutput (Join-Path $state ($id + '.out.log')) -RedirectStandardError (Join-Path $state ($id + '.error.log')) | Out-Null
+    Start-CogentQwenRuntime -Node $node -Module $module -Config $config -OutputPath (Join-Path $state ($id + '.out.log')) -ErrorPath (Join-Path $state ($id + '.error.log'))
 } catch {
     # No credentials, handoff URI, project source or raw network errors in logs.
     Write-Error 'Qwen could not connect. Return to Qwen setup to check its installed browser command.' -ErrorAction Continue

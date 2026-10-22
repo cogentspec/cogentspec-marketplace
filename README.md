@@ -43,6 +43,11 @@ That prepares the official checksum/publisher-verified Node/npm runtime and
 registers a current-user `cogentspec-browser` handler. It does not use the legacy
 native Qwen interface, install a model, add a sign-in task or open a firewall.
 
+Command package 1.1.1 registers a locally compiled, hash-checked Windows GUI
+launcher instead of a console executable. The verified PowerShell supervisor
+and Node worker start without a console window. The browser protocol remains
+1.1.0; package updates do not imply a protocol or native Desktop release.
+
 Normal use is simply `$qwenlocal` in `https://cogentspec.app/qwen/local`. The
 installed handler claims a one-use workspace request from the fixed
 CogentSpec service and starts the quiet background Bridge before a project exists.
@@ -55,7 +60,8 @@ model discovery alone cannot claim a connected Bridge. A signed workspace grant
 and live account/context checks are required; folder and command access stay separate.
 
 Run `node --test scripts/test-qwenlocal-command.mjs` to verify package digests,
-Windows parsing, validation-before-registration and modified-file rejection.
+Windows parsing, validation-before-registration, modified-file rejection and
+native GUI/child-process no-console acceptance with isolated fixtures.
 
 ## ChatGPT and Codex Desktop commands
 
