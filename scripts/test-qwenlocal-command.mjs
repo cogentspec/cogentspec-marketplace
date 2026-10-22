@@ -105,5 +105,5 @@ Start-CogentQwenRuntime -Node ${quoted(probe)} -Module 'unused-fixture' -Config 
     const check = path.join(fixture, 'check-tamper.ps1');
     await fs.writeFile(check, `. ${quoted(path.join(fixture, 'scripts/prepare-qwen-runtime.ps1'))}\nAssert-CogentQwenLauncher ${quoted(fixture)}\n`);
     assert.throws(() => ps(check), 'A modified generated launcher must not be reused');
-  } finally { await fs.rm(fixture, { recursive: true, force: true }); }
+  } finally { await fs.rm(fixture, { recursive: true, force: true, maxRetries: 15, retryDelay: 100 }); }
 });
