@@ -1,10 +1,12 @@
 import { spawn } from 'node:child_process';
+import { platform } from 'node:os';
 import { isAbsolute, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 // Transport only: the only permitted browser capability is opening one exact URL.
 // No DOM, page evaluation, selectors, screenshots, library queries or UI probes.
-export async function connectGptSnap({ cwd, openWorkspace, resumeApproval, spawnCommand = spawn } = {}) {
+export async function connectGptSnap({ cwd, openWorkspace, resumeApproval, spawnCommand = spawn,
+  systemDirectory = 'C:\\Windows\\System32' } = {}) {
   if (!cwd || !isAbsolute(cwd)) return { status: 'failed', userMessage: 'GPTSnap needs the invoking workspace directory.' };
   const started = Date.now();
   const helper = join(dirname(fileURLToPath(import.meta.url)), 'start-gptsnap.ps1');
@@ -13,7 +15,9 @@ export async function connectGptSnap({ cwd, openWorkspace, resumeApproval, spawn
   if (resumeApproval) args.push('-ResumeApproval', '-ContextKey', resumeApproval.contextKey);
   let child;
   try {
-    child = spawnCommand(join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
+    // Browser hosts need not expose process/env. Use an absolute system binary,
+    // never a workspace/PATH lookup; non-default Windows installs can supply theirs.
+    child = spawnCommand(join(systemDirectory, 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
       args, { cwd, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
   } catch { return { status: 'failed', userMessage: 'GPTSnap could not start.' }; }
   return new Promise(resolve => {
@@ -22,8 +26,8 @@ export async function connectGptSnap({ cwd, openWorkspace, resumeApproval, spawn
     const abortOwned = () => {
       if (child.exitCode != null || child.killed) return;
       // Stop only this command's process tree, never a shared worker by name.
-      if (process.platform === 'win32' && Number.isInteger(child.pid)) {
-        const killer = spawn(join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'taskkill.exe'),
+      if (platform() === 'win32' && Number.isInteger(child.pid)) {
+        const killer = spawn(join(systemDirectory, 'taskkill.exe'),
           ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
         killer.on('error', () => { try { child.kill(); } catch {} });
       } else { try { child.kill(); } catch {} }

@@ -78,3 +78,15 @@ test('without an opening capability, return an unconsumed recovery link, never c
   assert.equal(result.status, 'ready');
   assert.equal(result.workspaceUrl, url);
 });
+
+test('approved host runtimes need no ambient process global', async () => {
+  const ambient = globalThis.process;
+  const cwd = ambient.cwd();
+  let spawned = 0;
+  try {
+    delete globalThis.process;
+    const result = await connectGptSnap({ cwd, ...fakeCommand([ready, confirmed], () => spawned++), openWorkspace: async () => {} });
+    assert.equal(spawned, 1);
+    assert.equal(result.status, 'connected');
+  } finally { globalThis.process = ambient; }
+});
