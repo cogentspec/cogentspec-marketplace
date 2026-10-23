@@ -20,16 +20,6 @@ $installerVerified = $false
 $timedOut = $false
 $browserOpened = $false
 
-function Open-GptSnapBrowser([Uri]$Destination) {
-    # The installed command owns this handoff. Windows chooses its configured
-    # external browser; no tab, profile, window or interface discovery is needed.
-    $info = [Diagnostics.ProcessStartInfo]::new()
-    $info.FileName = $Destination.AbsoluteUri
-    $info.UseShellExecute = $true
-    $opened = [Diagnostics.Process]::Start($info)
-    if ($null -ne $opened) { $opened.Dispose() }
-}
-
 function Request-GptSnapReuse([string]$Code, [string]$Context) {
     # Use the installing user's existing credential only at the fixed protected
     # endpoint. No browser discovery, credentials rotation or shared-helper change.
@@ -274,17 +264,11 @@ try {
         if (-not (Safe-Origin $uri 'cogentspec.com' '/activate') -or $uri.Fragment -or
             $query.Count -ne 2 -or -not $query.code -or $query.experience -cne 'split-screen' -or
             $expiry -le [DateTimeOffset]::UtcNow -or [int]$result.pollAfterSeconds -lt 5) { throw 'invalid_approval' }
-        if (-not $PrepareOnly) {
-            $stage = 'browser_approval_handoff'
-            [void](Remaining)
-            Open-GptSnapBrowser $uri
-            $browserOpened = $true
-        }
         $approvalResult = [pscustomobject]@{
             status = 'approval_required'; contextKey = $resolvedContext
             approvalProtocol = 'cogentspec-gptsnap-approval-v1'
             expiresAt = $expiry.ToString('o'); pollAfterSeconds = [int]$result.pollAfterSeconds
-            browserOpened = $browserOpened; browserHandoff = 'windows-default-browser'; refreshedPluginPath = $pluginRoot
+            browserOpened = $false; browserHandoff = 'existing-workspace-only'; refreshedPluginPath = $pluginRoot
             userMessage = 'Approve this computer in CogentSpec to finish connecting GPTSnap.'
         }
         if ($PrepareOnly) {
@@ -332,34 +316,17 @@ try {
             browserReused = $true; browserHandoff = 'authenticated-workspace-reuse'; contextKey = $resolvedContext;
             acknowledgementVerified = $true; userMessage = 'GPTSnap connected.' }); return
     }
-    # Only an explicit, authenticated absence permits opening. Ambiguous, busy,
-    # offline or malformed replies never fall back to a duplicate work area.
-    if ((Value $reuse 'status') -cne 'open_required' -or (Value $reuse 'acknowledgementVerified') -cne $false) {
+    # Missing registration is not permission to open another tab. Fail closed
+    # even against an older service that still returns open_required.
+    if ((Value $reuse 'status') -notin @('owner_unavailable', 'owner_changed', 'busy', 'open_required') -or
+        (Value $reuse 'acknowledgementVerified') -cne $false) {
         throw 'workspace_reuse_unavailable'
     }
-    $stage = 'browser_handoff'
-    $handoffStarted = [int]$timer.ElapsedMilliseconds
-    [void](Remaining)
-    Open-GptSnapBrowser $uri
-    $browserOpened = $true
-    [void](Remaining)
-    $stages.Add([ordered]@{stage = 'browser_handoff'; durationMs = [int]$timer.ElapsedMilliseconds - $handoffStarted})
-    $acknowledgement = Run-Helper (Join-Path $coreScripts 'connect-cogentstack.ps1') @(
-        '-Mode', 'workspace-status', '-ContextKey', $resolvedContext, '-Surface', 'chatgpt',
-        '-WorkspaceCode', $workspaceCode, '-RequestTimeoutSeconds', '10'
-    ) 'workspace_acknowledgement'
-    if ((Value $acknowledgement 'protocol') -ceq 'cogentspec-workspace-connection-v1' -and
-        (Value $acknowledgement 'status') -ceq 'connected' -and
-        (Value $acknowledgement 'contextKey') -ceq $resolvedContext -and
-        (Value $acknowledgement 'surface') -ceq 'chatgpt' -and
-        (Value $acknowledgement 'experience') -ceq 'split-screen' -and
-        (Value $acknowledgement 'acknowledgementVerified') -ceq $true) {
-        Finish ([pscustomobject]@{ status = 'connected'; workspaceConnected = $true; browserOpened = $true; browserReused = $false; browserHandoff = 'windows-default-browser';
-            contextKey = $resolvedContext; acknowledgementVerified = $true; userMessage = 'GPTSnap connected.' })
-    } else {
-        Finish ([pscustomobject]@{ status = 'not_connected'; workspaceConnected = $false; browserOpened = $true; browserHandoff = 'windows-default-browser';
-            userMessage = 'The workspace opened, but GPTSnap could not confirm its connection. Nothing was retried.' })
-    }
+    Finish ([pscustomobject]@{ status = 'not_connected'; workspaceConnected = $false; browserOpened = $false;
+        browserHandoff = 'existing-workspace-only'; acknowledgementVerified = $false;
+        userMessage = if ((Value $reuse 'status') -ceq 'owner_changed') { 'Bridge ownership changed during connection. No other work area was opened. Run GPTSnap again when the transfer is complete.' }
+          elseif ((Value $reuse 'status') -ceq 'busy') { 'A connection request is already in progress. No other work area was opened.' }
+          else { 'GPTSnap could not reach the registered work area. Check its connection in your existing CogentSpec tab. No other work area was opened.' } })
 } catch {
     Finish ([pscustomobject]@{
         status = 'failed'; failureStage = $stage; workflowTimedOut = $timedOut; browserOpened = $browserOpened

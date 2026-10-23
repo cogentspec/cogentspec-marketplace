@@ -3,7 +3,7 @@ import { platform } from 'node:os';
 import { isAbsolute, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-// Process adapter only. The installed PowerShell command owns browser opening;
+// Process adapter only. The installed command reconnects an existing workspace;
 // no browser object, tab discovery or URL-opening callback is used.
 export async function connectGptSnap({ cwd, resumeApproval, spawnCommand = spawn,
   systemDirectory = 'C:\\Windows\\System32' } = {}) {
@@ -53,13 +53,12 @@ export async function connectGptSnap({ cwd, resumeApproval, spawnCommand = spawn
         }
         if (value.status === 'connected') {
           const reused = value.browserHandoff === 'authenticated-workspace-reuse' && value.browserReused === true && value.browserOpened === false;
-          const opened = value.browserHandoff === 'windows-default-browser' && value.browserOpened === true && value.browserReused !== true;
-          if (!/^ctx-[a-f0-9]{64}$/.test(value.contextKey) || (!reused && !opened) || value.workspaceConnected !== true
+          if (!/^ctx-[a-f0-9]{64}$/.test(value.contextKey) || !reused || value.workspaceConnected !== true
             || value.acknowledgementVerified !== true) throw new Error('Unverified connection');
           finish({status:'connected',userMessage:'GPTSnap connected.',elapsedMs:Date.now()-started});
         } else if (value.status === 'approval_required') {
-          if (value.approvalProtocol !== 'cogentspec-gptsnap-approval-v1' || value.browserOpened !== true
-            || value.browserHandoff !== 'windows-default-browser' || value.approvalUrl || value.browserNavigationCode
+          if (value.approvalProtocol !== 'cogentspec-gptsnap-approval-v1' || value.browserOpened !== false
+            || value.browserHandoff !== 'existing-workspace-only' || value.approvalUrl || value.browserNavigationCode
             || !/^ctx-[a-f0-9]{64}$/.test(value.contextKey) || !(Date.parse(value.expiresAt)>Date.now())
             || value.pollAfterSeconds<5) throw new Error('Invalid approval');
           finish({status:'approval_required',userMessage:value.userMessage,contextKey:value.contextKey,

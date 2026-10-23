@@ -5,97 +5,60 @@ import { tmpdir } from 'node:os';
 import { pathToFileURL } from 'node:url';
 import { spawn } from 'node:child_process';
 
-const repository = resolve(import.meta.dirname, '..');
-const context = 'ctx-' + 'a'.repeat(64);
-const url = `https://cogentspec.app/stack?surface=chatgpt&context=${context}&experience=split-screen&open=web&nav=${'b'.repeat(32)}#desktop-web=cgw_${'c'.repeat(40)}`;
-for (const plugin of ['cogentspec', 'cogentstack']) {
-  for (const scenario of ['connected', 'reused', 'reuse-busy', 'reuse-offline', 'reuse-wrong-context', 'reuse-unverified', 'absent', 'wrong-context', 'unverified', 'failed-open', 'unsafe-destination', 'approval', 'unsafe-approval', 'resume']) {
-    const root = await mkdtemp(join(tmpdir(), 'gptsnap handshake fixture '));
-    assert.equal(resolve(root, '..'), resolve(tmpdir()));
+const repository=resolve(import.meta.dirname,'..'),context='ctx-'+'a'.repeat(64);
+const url=`https://cogentspec.app/stack?surface=chatgpt&context=${context}&experience=split-screen&open=web&nav=${'b'.repeat(32)}#desktop-web=cgw_${'c'.repeat(40)}`;
+for(const plugin of ['cogentspec','cogentstack']) {
+  for(const scenario of ['reused','owner_unavailable','owner_changed','busy','offline','wrong-context','unverified','open_required','unsafe-destination','approval','unsafe-approval','resume']) {
+    const root=await mkdtemp(join(tmpdir(),'gptsnap existing workspace fixture '));
     try {
-      const skill = join(root, 'skills', 'gptsnap', 'scripts');
-      const core = join(root, 'skills', plugin, 'scripts');
-      await mkdir(skill, { recursive: true }); await mkdir(core, { recursive: true });
-      await mkdir(join(root, '.codex-plugin'));
-      await writeFile(join(root, '.codex-plugin', 'plugin.json'), JSON.stringify({ name: plugin, version: '0.6.166' }));
-      const trace = join(root, 'trace.txt');
-      const prefix = `Add-Content -LiteralPath '${trace.replaceAll("'", "''")}' -Value ([IO.Path]::GetFileName($PSCommandPath))\n`;
-      const approvalUrl = 'https://cogentspec.com/activate?code=TEST-CODE&experience=split-screen';
-      const expectedUrl = scenario === 'approval' ? approvalUrl : url;
-      for (const file of ['start-gptsnap.ps1', 'gptsnap-client.mjs']) {
-        let source = await readFile(join(repository, 'plugins', plugin, 'skills', 'gptsnap', 'scripts', file), 'utf8');
-        if (file === 'start-gptsnap.ps1') {
-          assert.ok(source.includes('function Open-GptSnapBrowser('));
-          // Only the private fixture replaces the OS boundary; the real source
-          // still validates the complete destination before this function runs.
-          source = source.replace('function Open-GptSnapBrowser(', 'function FixtureUnusedNativeBrowser(');
-          source = source.replace('function Request-GptSnapReuse(', 'function FixtureUnusedReuse(');
-          source = source.replace('function Value(', `function Request-GptSnapReuse([string]$Code, [string]$Context) {
-            Add-Content -LiteralPath '${trace.replaceAll("'", "''")}' -Value 'workspace-reuse'
-            if ($Code -cne 'cgw_${'c'.repeat(40)}' -or $Context -cne '${context}') {throw 'Wrong reuse binding'}
-            ${scenario === 'reuse-offline' ? "throw 'Offline'" : ''}
+      const skill=join(root,'skills','gptsnap','scripts'),core=join(root,'skills',plugin,'scripts');
+      await mkdir(skill,{recursive:true});await mkdir(core,{recursive:true});await mkdir(join(root,'.codex-plugin'));
+      await writeFile(join(root,'.codex-plugin','plugin.json'),JSON.stringify({name:plugin,version:'0.6.169'}));
+      const trace=join(root,'trace.txt'),quotedTrace=trace.replaceAll("'","''");
+      const prefix=`Add-Content -LiteralPath '${quotedTrace}' -Value ([IO.Path]::GetFileName($PSCommandPath))\n`;
+      for(const file of ['start-gptsnap.ps1','gptsnap-client.mjs']) {
+        let source=await readFile(join(repository,'plugins',plugin,'skills','gptsnap','scripts',file),'utf8');
+        if(file==='start-gptsnap.ps1') {
+          assert.ok(!/Open-GptSnapBrowser|UseShellExecute\s*=\s*\$true|Start-Process/.test(source),'No OS browser-opening boundary is permitted');
+          source=source.replace('function Request-GptSnapReuse(','function FixtureUnusedReuse(');
+          source=source.replace('function Value(',`function Request-GptSnapReuse([string]$Code,[string]$Context) {
+            Add-Content -LiteralPath '${quotedTrace}' -Value 'workspace-reuse'
+            if ($Code -cne 'cgw_${'c'.repeat(40)}' -or $Context -cne '${context}') { throw 'Wrong reuse binding' }
+            ${scenario==='offline'?"throw 'Offline'":''}
             return ('${JSON.stringify({protocol:'cogentspec-workspace-reuse-v1',
-              status:scenario === 'reuse-busy' ? 'busy' : ['reused','reuse-unverified'].includes(scenario) ? 'reused' : 'open_required',
-              contextKey:scenario === 'reuse-wrong-context' ? 'ctx-'+'d'.repeat(64) : context,
-              surface:'chatgpt',experience:'split-screen',acknowledgementVerified:scenario === 'reused'})}' | ConvertFrom-Json)
-          }\nfunction Value(`);
-          source = source.replace('function Value(', `function Open-GptSnapBrowser([Uri]$Destination) {
-            Add-Content -LiteralPath '${trace.replaceAll("'", "''")}' -Value 'native-browser'
-            if ($Destination.AbsoluteUri -cne '${expectedUrl}') {throw 'Wrong native destination'}
-            ${scenario === 'failed-open' ? "throw 'Browser unavailable'" : ''}
+              status:['reused','resume','unverified'].includes(scenario)?'reused':scenario,
+              contextKey:scenario==='wrong-context'?'ctx-'+'d'.repeat(64):context,surface:'chatgpt',experience:'split-screen',
+              acknowledgementVerified:['reused','resume'].includes(scenario)})}' | ConvertFrom-Json)
           }\nfunction Value(`);
         }
-        await writeFile(join(skill, file), source);
+        await writeFile(join(skill,file),source);
       }
-      await writeFile(join(core, 'check-cogentspec-update.ps1'), prefix + `'${JSON.stringify({ status: 'current' })}'`);
-      await writeFile(join(core, 'project-context.ps1'), prefix + `'${JSON.stringify({ isolated: true, contextKey: context })}'`);
-      const destination = scenario === 'unsafe-destination' ? url.replace('cogentspec.app','attacker.invalid') : url;
-      const launch = scenario === 'approval' || scenario === 'unsafe-approval'
-        ? {status:'approval_required',contextKey:context,approvalProtocol:'cogentspec-gptsnap-approval-v1',
-          approvalUrl:scenario === 'unsafe-approval' ? approvalUrl.replace('cogentspec.com','attacker.invalid') : approvalUrl,
-          expiresAt:new Date(Date.now()+600000).toISOString(),pollAfterSeconds:5,browserOpened:false}
-        : { status: 'ready', bridge: 'already_running',
-          contextKey: context, contextIsolated: true, workspaceUrl: destination, webWorkspaceUrl: destination, presenceVerified: true,
-          defaultDirectoryReady: true, accountState: 'signed_in', mcpState: 'not_required', projectDataConnection: 'authenticated_desktop_bridge', browserOpened: false };
-      await writeFile(join(core, 'start-cogentstack-bridge.ps1'), prefix + `'${JSON.stringify(launch)}'`);
-      const ack = { protocol: 'cogentspec-workspace-connection-v1', status: scenario === 'absent' ? 'not_connected' : 'connected',
-        contextKey: scenario === 'wrong-context' ? 'ctx-' + 'e'.repeat(64) : context, surface: 'chatgpt', experience: 'split-screen',
-        acknowledgementVerified: scenario !== 'unverified' };
-      await writeFile(join(core, 'connect-cogentstack.ps1'), `param($Mode,$ContextKey,$Surface,$WorkspaceCode,$RequestTimeoutSeconds)\n`
-        + prefix + `if ($Mode -ne 'workspace-status' -or $ContextKey -ne '${context}' -or $Surface -ne 'chatgpt' -or $WorkspaceCode -ne 'cgw_${'c'.repeat(40)}') { throw 'Wrong receipt' }\n'${JSON.stringify(ack)}'`);
-      const { connectGptSnap } = await import(pathToFileURL(join(skill, 'gptsnap-client.mjs')).href);
-      const calls = [];
-      let rawProtocol='';
-      const result = await connectGptSnap({ cwd: root,
-        spawnCommand:(exe,args,options)=>{
-          const child=spawn(exe,args,options);
-          child.stdout.on('data',chunk=>{rawProtocol+=chunk.toString();});
-          return child;
-        },
-        ...(scenario === 'resume' ? {resumeApproval:{contextKey:context}} : {}),
-        openWorkspace: async target => {calls.push(target);throw new Error('Agent callback forbidden');} });
-      const expectedStatus = ['connected','resume','reused'].includes(scenario) ? 'connected'
-        : scenario === 'approval' ? 'approval_required'
-        : ['failed-open','unsafe-destination','unsafe-approval','reuse-busy','reuse-offline','reuse-wrong-context','reuse-unverified'].includes(scenario) ? 'failed' : 'not_connected';
-      assert.equal(result.status, expectedStatus, JSON.stringify(result));
-      assert.deepEqual(calls, []);
-      assert.ok(!JSON.stringify(result).includes('cgw_'));
-      assert.ok(!/cgw_|https:\/\/|gptPopTab/.test(rawProtocol), 'Normal stdout must not export a browser handoff');
-      const invocations = (await readFile(trace, 'utf8')).trim().split(/\r?\n/);
-      const preparation = scenario === 'resume' ? ['start-cogentstack-bridge.ps1']
-        : ['check-cogentspec-update.ps1', 'project-context.ps1', 'start-cogentstack-bridge.ps1'];
-      assert.deepEqual(invocations.slice(0, preparation.length), preparation);
-      const nativeCount = invocations.filter(name=>name==='native-browser').length;
-      const reuseStops = ['reused','reuse-busy','reuse-offline','reuse-wrong-context','reuse-unverified'];
-      assert.equal(nativeCount, ['unsafe-destination','unsafe-approval',...reuseStops].includes(scenario) ? 0 : 1);
-      assert.ok(invocations.filter(name => name === 'connect-cogentstack.ps1').length <= 1);
-      const expectsAck = !['failed-open','unsafe-destination','approval','unsafe-approval',...reuseStops].includes(scenario);
-      assert.equal(invocations.filter(name=>name==='connect-cogentstack.ps1').length, expectsAck ? 1 : 0);
-      if (expectsAck) assert.deepEqual(invocations.slice(preparation.length), ['workspace-reuse','native-browser','connect-cogentstack.ps1']);
-      assert.equal(result.approvalUrl, undefined);
-      console.log(`${plugin}: ${scenario} installed native handoff passed without agent browser capabilities`);
-    } finally {
-      await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
-    }
+      await writeFile(join(core,'check-cogentspec-update.ps1'),prefix+`'{"status":"current"}'`);
+      await writeFile(join(core,'project-context.ps1'),prefix+`'${JSON.stringify({isolated:true,contextKey:context})}'`);
+      const approval=scenario==='approval'||scenario==='unsafe-approval';
+      const destination=scenario==='unsafe-destination'?url.replace('cogentspec.app','attacker.invalid'):url;
+      const launch=approval?{status:'approval_required',contextKey:context,approvalProtocol:'cogentspec-gptsnap-approval-v1',
+        approvalUrl:`https://${scenario==='unsafe-approval'?'attacker.invalid':'cogentspec.com'}/activate?code=TEST&experience=split-screen`,
+        expiresAt:new Date(Date.now()+600000).toISOString(),pollAfterSeconds:5,browserOpened:false}:
+        {status:'ready',bridge:'already_running',contextKey:context,contextIsolated:true,workspaceUrl:destination,webWorkspaceUrl:destination,
+          presenceVerified:true,defaultDirectoryReady:true,accountState:'signed_in',mcpState:'not_required',projectDataConnection:'authenticated_desktop_bridge',browserOpened:false};
+      await writeFile(join(core,'start-cogentstack-bridge.ps1'),prefix+`'${JSON.stringify(launch)}'`);
+      await writeFile(join(core,'connect-cogentstack.ps1'),prefix+`throw 'An extra receipt helper is forbidden'`);
+      const {connectGptSnap}=await import(pathToFileURL(join(skill,'gptsnap-client.mjs')).href);
+      let output='';const callbacks=[];
+      const result=await connectGptSnap({cwd:root,spawnCommand:(exe,args,options)=>{
+        const child=spawn(exe,args,options);child.stdout.on('data',chunk=>{output+=chunk;});return child;
+      },...(scenario==='resume'?{resumeApproval:{contextKey:context}}:{}),openWorkspace:async target=>{callbacks.push(target);throw Error('Agent callback forbidden');}});
+      const expected=['reused','resume'].includes(scenario)?'connected':scenario==='approval'?'approval_required':
+        ['owner_unavailable','owner_changed','busy','open_required'].includes(scenario)?'not_connected':'failed';
+      assert.equal(result.status,expected,JSON.stringify(result));assert.deepEqual(callbacks,[]);
+      assert.ok(!/cgw_|https:\/\/|gptPopTab/.test(output),'No browser handoff in normal stdout');
+      const invocations=(await readFile(trace,'utf8')).trim().split(/\r?\n/);
+      const expectedCalls=scenario==='resume'?['start-cogentstack-bridge.ps1']:
+        ['check-cogentspec-update.ps1','project-context.ps1','start-cogentstack-bridge.ps1'];
+      if(!approval&&scenario!=='unsafe-destination')expectedCalls.push('workspace-reuse');
+      assert.deepEqual(invocations,expectedCalls,'One preparation/reuse only, no open or receipt fallback');
+      console.log(`${plugin}: ${scenario} existing-workspace-only handshake passed`);
+    } finally {await rm(root,{recursive:true,force:true,maxRetries:10,retryDelay:100});}
   }
 }

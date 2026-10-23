@@ -187,7 +187,7 @@ $result | ConvertTo-Json -Compress
     return { scenario, status: result.status, workflowElapsedMs: result.workflowElapsedMs };
   } finally {
     assert.equal(resolve(root, '..'), resolve(tmpdir()));
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 }
 

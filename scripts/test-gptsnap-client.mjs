@@ -11,7 +11,7 @@ const ready = { protocol, status: 'workspace_ready', contextKey: context, worksp
   browserNavigationProtocol: 'cogentspec-gptpop-navigation-v1', presenceVerified: true, defaultDirectoryReady: true,
   accountState: 'signed_in', projectDataConnection: 'authenticated_desktop_bridge', mcpState: 'not_required', browserOpened: false };
 const confirmed = { protocol, status: 'connected', contextKey: context, workspaceConnected: true,
-  acknowledgementVerified: true, browserOpened: true, browserHandoff: 'windows-default-browser' };
+  acknowledgementVerified: true, browserOpened: false, browserReused: true, browserHandoff: 'authenticated-workspace-reuse' };
 
 function fakeCommand(frames, onSpawn = () => {}) {
   let child;
@@ -29,7 +29,7 @@ function fakeCommand(frames, onSpawn = () => {}) {
   } };
 }
 
-test('normal command needs no browser capability: the installed supervisor owns opening and acknowledgement', async () => {
+test('normal command needs no browser capability: only authenticated existing-workspace reuse connects', async () => {
   let invocations = 0;
   const calls = [];
   // No browser/DOM object is provided: any inspection, selector, screenshot,
@@ -50,10 +50,11 @@ test('normal command needs no browser capability: the installed supervisor owns 
 });
 
 test('readiness, browser-open acceptance and fabricated/absent ACK cannot report connected', async () => {
-  for (const frames of [[ready], [{...confirmed,browserOpened:false}], [{ ...confirmed, acknowledgementVerified: false }],
+  for (const frames of [[ready], [{...confirmed,browserOpened:true}], [{ ...confirmed, acknowledgementVerified: false }],
     [{ ...confirmed, contextKey: 'default' }], [ready, ready, confirmed],
     [{ ...ready, workspaceUrl: url.replace('cogentspec.app', 'evil.invalid') }, confirmed],
-    [{ ...ready, status: 'ready' }, confirmed], [{...confirmed,browserHandoff:'agent'}]]) {
+    [{ ...ready, status: 'ready' }, confirmed], [{...confirmed,browserHandoff:'agent'}],
+    [{...confirmed,browserOpened:true,browserReused:false,browserHandoff:'windows-default-browser'}]]) {
     let opens = 0;
     const result = await connectGptSnap({ cwd: process.cwd(), ...fakeCommand(frames), openWorkspace: async () => { opens++; } });
     assert.notEqual(result.status, 'connected');

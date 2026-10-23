@@ -202,7 +202,7 @@ for (const pluginPath of [sourcePluginPath, compatibilityPluginPath]) {
       if (commandSkill.includes("mcp__codex_app__open_in_codex") || !commandSkill.includes("Never use open_in_codex") || !commandSkill.includes("Do not use browser-control tools")) {
         fail("GPTSnap must delegate opening to its installed command, never agent browser control");
       }
-      for (const marker of ["gptsnap-client.mjs", "protected acknowledgement", "Windows-default-browser"]) {
+      for (const marker of ["gptsnap-client.mjs", "protected acknowledgement", "registered owning tab"]) {
         if (!commandSkill.includes(marker)) fail(`gptpop external delivery is missing ${marker}`);
       }
     }
@@ -312,9 +312,9 @@ for (const pluginPath of [sourcePluginPath, compatibilityPluginPath]) {
   }
 }
 if (/SendInput|open_in_codex|openTabs|claimTab/.test(canonicalSnapStart)
-  || !canonicalSnapStart.includes('$info.UseShellExecute = $true')
-  || !canonicalSnapStart.includes('Open-GptSnapBrowser $uri')) {
-  fail('GPTSnap startup must own the validated native handoff without agent browser discovery');
+  || /UseShellExecute\s*=\s*\$true|Open-GptSnapBrowser|Start-Process/.test(canonicalSnapStart)
+  || !canonicalSnapStart.includes("browserHandoff = 'existing-workspace-only'")) {
+  fail('GPTSnap must reconnect only the registered workspace, without opening another work area or agent browser discovery');
 }
 const canonicalDeskStart = await readFile(deskStartPath(sourcePluginPath), 'utf8');
 const compatibilityDeskStart = await readFile(deskStartPath(compatibilityPluginPath), 'utf8');
