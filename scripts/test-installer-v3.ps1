@@ -232,6 +232,17 @@ public static class GitFixture
     Assert-InstallerTest ($missingSourceRun.exitCode -ne 0 -and $missingSourceRun.result.failureStage -eq 'source_package_integrity_verification') 'A missing required source file must fail preflight.'
     Assert-InstallerTest ((Get-FileHash -LiteralPath $previousMarker).Hash -eq $previousDigest) 'A missing source file changed the previous package.'
     foreach ($mutation in @('extra', 'changed')) {
+        # Source syntax must be rejected before the plugin manager can replace a working installation.
+        if ($mutation -eq 'extra') {
+            $snapSourcePath = Join-Path $fixturePlugin 'skills\gptsnap\scripts\start-gptsnap.ps1'
+            $snapSourceBytes = [IO.File]::ReadAllBytes($snapSourcePath)
+            try {
+                [IO.File]::WriteAllText($snapSourcePath, 'param(')
+                $badSnapRun = Invoke-InstallerFixture -PowerShellPath $powerShellPath -InstallerPath $installerPath -UpdateOnly -DeferConnectionStartup
+            } finally { [IO.File]::WriteAllBytes($snapSourcePath, $snapSourceBytes) }
+            Assert-InstallerTest ($badSnapRun.exitCode -ne 0 -and $badSnapRun.result.failureStage -eq 'source_package_integrity_verification') 'Malformed GPTSnap startup passed source preflight.'
+            Assert-InstallerTest ((Get-FileHash -LiteralPath $previousMarker).Hash -eq $previousDigest) 'Malformed GPTSnap startup replaced the working package.'
+        }
         $originalMutation = $env:COGENTSPEC_INSTALLER_TEST_INSTALLED_MUTATION
         try {
             $env:COGENTSPEC_INSTALLER_TEST_INSTALLED_MUTATION = $mutation
@@ -422,6 +433,7 @@ public static class GitFixture
         completedStages = $completedStageNames
         invalidReferenceRejectedBeforeCommands = $true
         sourcePreflightPreservesPreviousPackage = $true
+        malformedGptSnapRejectedBeforeReplacement = $true
         missingRequiredSourceRejected = $true
         extraInstalledFileRejected = $true
         changedInstalledFileRejected = $true

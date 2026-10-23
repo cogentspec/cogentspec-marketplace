@@ -325,6 +325,7 @@ try {
         'skills/gptpop/SKILL.md',
         'skills/gptsnap/agents/openai.yaml',
         'skills/gptsnap/SKILL.md',
+        'skills/gptsnap/scripts/start-gptsnap.ps1',
         'skills/gptweb/agents/openai.yaml',
         'skills/gptweb/SKILL.md',
         'skills/gptweb/scripts/start-gptweb.ps1',
@@ -372,6 +373,14 @@ try {
     })
     if (-not (Test-StringSetEqual -Actual $sourceFiles -Expected $allowedFiles)) {
         throw 'The prepared CogentSpec package does not match the official public-file allowlist; the installed package was not changed.'
+    }
+    # Validate the installed command entry point before replacing a working package.
+    $snapPath = Join-Path $sourcePluginPath 'skills\gptsnap\scripts\start-gptsnap.ps1'
+    $snapTokens = $null; $snapErrors = $null
+    [void][Management.Automation.Language.Parser]::ParseFile($snapPath, [ref]$snapTokens, [ref]$snapErrors)
+    $snapSkill = Get-Content -LiteralPath (Join-Path $sourcePluginPath 'skills\gptsnap\SKILL.md') -Raw
+    if ($snapErrors.Count -gt 0 -or -not $snapSkill.Contains('scripts/start-gptsnap.ps1')) {
+        throw 'The prepared GPTSnap command entry point is invalid; the installed package was not changed.'
     }
     $sourceHashes = @{}
     foreach ($relativePath in $allowedFiles) {

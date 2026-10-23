@@ -255,7 +255,7 @@ for (const [name, skill] of [["canonical skill", canonicalSkill], ["compatibilit
   for (const marker of [
     "Explicit one-word destination dispatch",
     "before running any Bridge helper",
-    "-Experience split-screen",
+    "../gptsnap/scripts/start-gptsnap.ps1",
     "-Experience desktop-ui",
     "-Experience web",
     "../gptweb/scripts/start-gptweb.ps1",
@@ -298,6 +298,19 @@ for (const pluginPath of [sourcePluginPath, compatibilityPluginPath]) {
   }
 }
 const deskStartPath = (pluginPath) => join(pluginPath, 'skills', 'gptdesk', 'scripts', 'start-gptdesk.ps1');
+const snapStartPath = pluginPath => join(pluginPath, 'skills', 'gptsnap', 'scripts', 'start-gptsnap.ps1');
+const canonicalSnapStart = await readFile(snapStartPath(sourcePluginPath), 'utf8');
+const compatibilitySnapStart = await readFile(snapStartPath(compatibilityPluginPath), 'utf8');
+if (canonicalSnapStart !== compatibilitySnapStart) fail('GPTSnap startup supervisors must match across GPT packages');
+for (const pluginPath of [sourcePluginPath, compatibilityPluginPath]) {
+  const snapSkill = await readFile(join(pluginPath, 'skills', 'gptsnap', 'SKILL.md'), 'utf8');
+  if (!snapSkill.includes('scripts/start-gptsnap.ps1') || !snapSkill.includes('supervisor owns')) {
+    fail('GPTSnap must use its installed one-shot startup entrypoint');
+  }
+}
+if (/SendInput|open_in_codex|Start-Process/.test(canonicalSnapStart)) {
+  fail('GPTSnap startup must leave browser delivery and UI verification to the approved host');
+}
 const canonicalDeskStart = await readFile(deskStartPath(sourcePluginPath), 'utf8');
 const compatibilityDeskStart = await readFile(deskStartPath(compatibilityPluginPath), 'utf8');
 if (canonicalDeskStart !== compatibilityDeskStart) fail('GPTDesk startup supervisors must match across GPT packages');

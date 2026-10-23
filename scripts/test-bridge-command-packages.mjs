@@ -30,10 +30,15 @@ function filesUnder(directory) {
   });
 }
 
+test('GPTSnap installed startup executable is identical in both packages', () => {
+  assert.equal(read('plugins/cogentspec/skills/gptsnap/scripts/start-gptsnap.ps1'),
+    read('plugins/cogentstack/skills/gptsnap/scripts/start-gptsnap.ps1'));
+});
+
 // Guard the exact public file-set boundary that previously broke all commands.
 // This deliberately reads each installer's real allowlist instead of copying it.
 for (const plugin of ['cogentspec', 'cogentstack']) {
-  test(`${plugin}: instruction-only update preserves trusted package inventory`, () => {
+  test(`${plugin}: command update preserves trusted package inventory`, () => {
     const installer = read(`.agents/plugins/install-${plugin}.ps1`);
     const allowedBlock = /\$allowedFiles = @\(([\s\S]*?)\n    \)/.exec(installer);
     assert.ok(allowedBlock, 'Installer must declare an exact public allowlist');
