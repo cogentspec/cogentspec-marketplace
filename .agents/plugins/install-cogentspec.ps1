@@ -301,39 +301,23 @@ try {
     }
     Complete-InstallStage
 
-    Set-InstallStage -Name 'plugin_installation'
-    $installJson = Invoke-BoundedNative -FilePath $script:codexPath -Arguments @('plugin', 'add', 'cogentspec@cogentstack', '--json') -Operation 'plugin installation'
-    $installResult = Read-JsonResult -Text $installJson -Operation 'Plugin installation'
-    $installedPath = [string]$installResult.installedPath
-    if (-not $installedPath -or -not (Test-Path -LiteralPath $installedPath)) {
-        throw 'The CogentSpec plugin installation did not return a valid installed package path.'
-    }
-    Complete-InstallStage
-
-    Set-InstallStage -Name 'installed_state_verification'
-    $pluginListJson = Invoke-BoundedNative -FilePath $script:codexPath -Arguments @('plugin', 'list', '--json') -Operation 'installed plugin inspection'
-    $pluginList = Read-JsonResult -Text $pluginListJson -Operation 'Installed plugin inspection'
-    $installedPlugin = @($pluginList.installed | Where-Object { $_.pluginId -eq 'cogentspec@cogentstack' }) | Select-Object -First 1
-    if (-not $installedPlugin -or -not [bool]$installedPlugin.installed -or -not [bool]$installedPlugin.enabled) {
-        throw 'The CogentSpec plugin is not installed and enabled.'
-    }
-    Complete-InstallStage
-
-    Set-InstallStage -Name 'package_integrity_verification'
+    Set-InstallStage -Name 'source_package_integrity_verification'
     $sourcePluginPath = Join-Path $marketplaceRoot 'plugins\cogentspec'
     $sourceManifestPath = Join-Path $sourcePluginPath '.codex-plugin\plugin.json'
-    $installedManifestPath = Join-Path $installedPath '.codex-plugin\plugin.json'
     $sourceManifest = Get-Content -LiteralPath $sourceManifestPath -Raw | ConvertFrom-Json
-    $installedManifest = Get-Content -LiteralPath $installedManifestPath -Raw | ConvertFrom-Json
-    if ([string]$sourceManifest.version -ne [string]$installedManifest.version -or [string]$installedPlugin.version -ne [string]$sourceManifest.version) {
-        throw 'The installed CogentSpec version does not match the prepared marketplace package.'
-    }
-
     $allowedFiles = @(
         '.codex-plugin/plugin.json',
         '.mcp.json',
         'assets/icon.png',
         'assets/logo.png',
+        'skills/qwenlocal/command.json',
+        'skills/qwenlocal/SKILL.md',
+        'skills/qwenlocal/scripts/build-qwen-launcher.ps1',
+        'skills/qwenlocal/scripts/install-qwenlocal.ps1',
+        'skills/qwenlocal/scripts/prepare-qwen-runtime.ps1',
+        'skills/qwenlocal/scripts/qwen-runtime.mjs',
+        'skills/qwenlocal/scripts/qwen-windowless-launcher.cs',
+        'skills/qwenlocal/scripts/start-qwenlocal.ps1',
         'skills/gptdesk/agents/openai.yaml',
         'skills/gptdesk/SKILL.md',
         'skills/gptdesk/scripts/start-gptdesk.ps1',
@@ -383,6 +367,43 @@ try {
         'skills/cogentspec/scripts/watch-cogentstack-bridge.ps1',
         'skills/cogentspec/SKILL.md'
     )
+    $sourceFiles = @(Get-ChildItem -LiteralPath $sourcePluginPath -Recurse -Force -File | ForEach-Object {
+        $_.FullName.Substring($sourcePluginPath.Length + 1).Replace('\', '/')
+    })
+    if (-not (Test-StringSetEqual -Actual $sourceFiles -Expected $allowedFiles)) {
+        throw 'The prepared CogentSpec package does not match the official public-file allowlist; the installed package was not changed.'
+    }
+    $sourceHashes = @{}
+    foreach ($relativePath in $allowedFiles) {
+        [void](Get-RemainingMilliseconds)
+        $sourceHashes[$relativePath] = (Get-FileHash -LiteralPath (Join-Path $sourcePluginPath $relativePath.Replace('/', '\')) -Algorithm SHA256).Hash
+    }
+    Complete-InstallStage
+
+    Set-InstallStage -Name 'plugin_installation'
+    $installJson = Invoke-BoundedNative -FilePath $script:codexPath -Arguments @('plugin', 'add', 'cogentspec@cogentstack', '--json') -Operation 'plugin installation'
+    $installResult = Read-JsonResult -Text $installJson -Operation 'Plugin installation'
+    $installedPath = [string]$installResult.installedPath
+    if (-not $installedPath -or -not (Test-Path -LiteralPath $installedPath)) {
+        throw 'The CogentSpec plugin installation did not return a valid installed package path.'
+    }
+    Complete-InstallStage
+
+    Set-InstallStage -Name 'installed_state_verification'
+    $pluginListJson = Invoke-BoundedNative -FilePath $script:codexPath -Arguments @('plugin', 'list', '--json') -Operation 'installed plugin inspection'
+    $pluginList = Read-JsonResult -Text $pluginListJson -Operation 'Installed plugin inspection'
+    $installedPlugin = @($pluginList.installed | Where-Object { $_.pluginId -eq 'cogentspec@cogentstack' }) | Select-Object -First 1
+    if (-not $installedPlugin -or -not [bool]$installedPlugin.installed -or -not [bool]$installedPlugin.enabled) {
+        throw 'The CogentSpec plugin is not installed and enabled.'
+    }
+    Complete-InstallStage
+
+    Set-InstallStage -Name 'package_integrity_verification'
+    $installedManifestPath = Join-Path $installedPath '.codex-plugin\plugin.json'
+    $installedManifest = Get-Content -LiteralPath $installedManifestPath -Raw | ConvertFrom-Json
+    if ([string]$sourceManifest.version -ne [string]$installedManifest.version -or [string]$installedPlugin.version -ne [string]$sourceManifest.version) {
+        throw 'The installed CogentSpec version does not match the prepared marketplace package.'
+    }
     $actualFiles = @(Get-ChildItem -LiteralPath $installedPath -Recurse -Force -File | ForEach-Object {
         $_.FullName.Substring($installedPath.Length + 1).Replace('\', '/')
     })
@@ -392,7 +413,7 @@ try {
     foreach ($relativePath in $allowedFiles) {
         [void](Get-RemainingMilliseconds)
         $nativeRelativePath = $relativePath.Replace('/', '\')
-        $sourceHash = (Get-FileHash -LiteralPath (Join-Path $sourcePluginPath $nativeRelativePath) -Algorithm SHA256).Hash
+        $sourceHash = $sourceHashes[$relativePath]
         $installedHash = (Get-FileHash -LiteralPath (Join-Path $installedPath $nativeRelativePath) -Algorithm SHA256).Hash
         if ($sourceHash -ne $installedHash) {
             throw "The installed package differs from the prepared marketplace at $relativePath."

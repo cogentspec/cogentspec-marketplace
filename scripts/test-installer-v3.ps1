@@ -148,6 +148,12 @@ if (`$CliArgs.Count -ge 3 -and `$CliArgs[0] -eq 'plugin' -and `$CliArgs[1] -eq '
     if (Test-Path -LiteralPath '$escapedInstalledPlugin') { Remove-Item -LiteralPath '$escapedInstalledPlugin' -Recurse -Force }
     [void](New-Item -ItemType Directory -Path (Split-Path -Parent '$escapedInstalledPlugin') -Force)
     Copy-Item -LiteralPath '$escapedSourcePlugin' -Destination '$escapedInstalledPlugin' -Recurse -Force
+    if (`$env:COGENTSPEC_INSTALLER_TEST_INSTALLED_MUTATION -eq 'extra') {
+        'unexpected fixture' | Set-Content -LiteralPath (Join-Path '$escapedInstalledPlugin' 'unexpected.ps1') -Encoding ascii
+    }
+    if (`$env:COGENTSPEC_INSTALLER_TEST_INSTALLED_MUTATION -eq 'changed') {
+        'altered fixture' | Add-Content -LiteralPath (Join-Path '$escapedInstalledPlugin' 'skills\qwenlocal\command.json') -Encoding ascii
+    }
     [ordered]@{ installedPath = '$escapedInstalledPlugin' } | ConvertTo-Json -Compress
     exit 0
 }
@@ -202,6 +208,39 @@ public static class GitFixture
     $powerShellPath = (Get-Process -Id $PID).Path
     $installerPath = Join-Path $fixtureInstallerDirectory "install-$PluginName.ps1"
     $validReference = 'cgb_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'
+    # Exercise the actual complete package before any fixture installation.
+    # A stale allowlist must fail before plugin replacement or account access.
+    [void](New-Item -ItemType Directory -Path $fixtureInstalledPlugin -Force)
+    $previousMarker = Join-Path $fixtureInstalledPlugin 'previous-package.txt'
+    'previous working fixture' | Set-Content -LiteralPath $previousMarker -Encoding ascii
+    $previousDigest = (Get-FileHash -LiteralPath $previousMarker).Hash
+    $unexpectedSource = Join-Path $fixturePlugin 'unexpected.ps1'
+    'unexpected fixture' | Set-Content -LiteralPath $unexpectedSource -Encoding ascii
+    try {
+        $extraSourceRun = Invoke-InstallerFixture -PowerShellPath $powerShellPath -InstallerPath $installerPath -UpdateOnly -DeferConnectionStartup
+    } finally { Remove-Item -LiteralPath $unexpectedSource -Force }
+    Assert-InstallerTest ($extraSourceRun.exitCode -ne 0 -and $extraSourceRun.result.failureStage -eq 'source_package_integrity_verification') 'An unexpected source file must fail preflight.'
+    Assert-InstallerTest (@($extraSourceRun.result.completedStages.stage) -notcontains 'plugin_installation') 'A rejected source changed the installed plugin.'
+    Assert-InstallerTest ((Get-FileHash -LiteralPath $previousMarker).Hash -eq $previousDigest) 'Preflight failure changed the previous package.'
+    Assert-InstallerTest (-not $extraSourceRun.result.claimAttempted -and $extraSourceRun.result.accountRequestConsumed -eq $false) 'Source rejection attempted account access.'
+    $requiredSource = Join-Path $fixturePlugin 'skills\qwenlocal\command.json'
+    $heldSource = Join-Path $fixtureRoot 'held-command.json'
+    Move-Item -LiteralPath $requiredSource -Destination $heldSource
+    try {
+        $missingSourceRun = Invoke-InstallerFixture -PowerShellPath $powerShellPath -InstallerPath $installerPath -UpdateOnly -DeferConnectionStartup
+    } finally { Move-Item -LiteralPath $heldSource -Destination $requiredSource }
+    Assert-InstallerTest ($missingSourceRun.exitCode -ne 0 -and $missingSourceRun.result.failureStage -eq 'source_package_integrity_verification') 'A missing required source file must fail preflight.'
+    Assert-InstallerTest ((Get-FileHash -LiteralPath $previousMarker).Hash -eq $previousDigest) 'A missing source file changed the previous package.'
+    foreach ($mutation in @('extra', 'changed')) {
+        $originalMutation = $env:COGENTSPEC_INSTALLER_TEST_INSTALLED_MUTATION
+        try {
+            $env:COGENTSPEC_INSTALLER_TEST_INSTALLED_MUTATION = $mutation
+            $badInstalledRun = Invoke-InstallerFixture -PowerShellPath $powerShellPath -InstallerPath $installerPath -UpdateOnly -DeferConnectionStartup
+        } finally { $env:COGENTSPEC_INSTALLER_TEST_INSTALLED_MUTATION = $originalMutation }
+        Assert-InstallerTest ($badInstalledRun.exitCode -ne 0 -and $badInstalledRun.result.failureStage -eq 'package_integrity_verification') "Installed $mutation mutation escaped integrity verification."
+        Assert-InstallerTest (@($badInstalledRun.result.completedStages.stage) -notcontains 'superseded_bridge_cleanup') 'Rejected installed files reached worker cleanup.'
+        Assert-InstallerTest (-not $badInstalledRun.result.claimAttempted -and $badInstalledRun.result.accountRequestConsumed -eq $false) 'Installed mutation attempted account access.'
+    }
     $validRun = Invoke-InstallerFixture -PowerShellPath $powerShellPath -InstallerPath $installerPath -Reference $validReference -ValidateOnly
     $valid = $validRun.result
 
@@ -219,6 +258,7 @@ public static class GitFixture
     $completedStageNames = @($valid.completedStages | ForEach-Object { [string]$_.stage })
     Assert-InstallerTest ($completedStageNames -contains 'plugin_installation') 'The plugin installation stage was not evidenced.'
     Assert-InstallerTest ($completedStageNames -contains 'package_integrity_verification') 'The package integrity stage was not evidenced.'
+    Assert-InstallerTest ($completedStageNames -contains 'source_package_integrity_verification') 'The source preflight stage was not evidenced.'
     Assert-InstallerTest ($completedStageNames -contains 'launcher_contract_verification') 'The launcher verification stage was not evidenced.'
 
     $updateRun = Invoke-InstallerFixture -PowerShellPath $powerShellPath -InstallerPath $installerPath -UpdateOnly
@@ -381,6 +421,10 @@ public static class GitFixture
         nativeCommandsCompleted = [int]$valid.nativeCommandsCompleted
         completedStages = $completedStageNames
         invalidReferenceRejectedBeforeCommands = $true
+        sourcePreflightPreservesPreviousPackage = $true
+        missingRequiredSourceRejected = $true
+        extraInstalledFileRejected = $true
+        changedInstalledFileRejected = $true
         updateCasePassed = $true
         updatedVersion = [string]$update.version
         updateElapsedMs = [int]$update.installerElapsedMs
