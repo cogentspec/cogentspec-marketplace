@@ -30,6 +30,28 @@ function Open-GptSnapBrowser([Uri]$Destination) {
     if ($null -ne $opened) { $opened.Dispose() }
 }
 
+function Request-GptSnapReuse([string]$Code, [string]$Context) {
+    # Use the installing user's existing credential only at the fixed protected
+    # endpoint. No browser discovery, credentials rotation or shared-helper change.
+    Add-Type -AssemblyName System.Security -ErrorAction Stop
+    $credentialFile = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'CogentSpec\desktop-credential.json'
+    $credential = Get-Content -LiteralPath $credentialFile -Raw | ConvertFrom-Json
+    $token = $null
+    $bytes = $null
+    try {
+        $bytes = [Security.Cryptography.ProtectedData]::Unprotect([Convert]::FromBase64String([string]$credential.token),
+            $null, [Security.Cryptography.DataProtectionScope]::CurrentUser)
+        $token = [Text.Encoding]::UTF8.GetString($bytes)
+        return Invoke-RestMethod -Method Post -Uri 'https://cogentspec.com/api/device-authorization/workspace-reuse' `
+            -ContentType 'application/json' -Headers @{ Authorization = "Bearer $token"; Accept = 'application/json' } `
+            -Body (@{code = $Code; contextKey = $Context; surface = 'chatgpt'; experience = 'split-screen'} | ConvertTo-Json -Compress) `
+            -TimeoutSec ([Math]::Min(20, [Math]::Max(1, [int]((Remaining) / 1000))))
+    } finally {
+        $token = $null
+        if ($null -ne $bytes) { [Array]::Clear($bytes, 0, $bytes.Length) }
+    }
+}
+
 function Value($Object, [string]$Name, $Default = $null) {
     if ($null -eq $Object) { return $Default }
     $property = $Object.PSObject.Properties[$Name]
@@ -298,6 +320,23 @@ try {
         userMessage = 'GPTSnap is ready to connect to the browser workspace.'
       }); return
     }
+    $workspaceCode = [Uri]::UnescapeDataString($uri.Fragment.Substring('#desktop-web='.Length))
+    $stage = 'workspace_reuse'
+    $reuse = Request-GptSnapReuse $workspaceCode $resolvedContext
+    [void](Remaining)
+    if ((Value $reuse 'protocol') -cne 'cogentspec-workspace-reuse-v1' -or
+        (Value $reuse 'contextKey') -cne $resolvedContext -or (Value $reuse 'surface') -cne 'chatgpt' -or
+        (Value $reuse 'experience') -cne 'split-screen') { throw 'invalid_workspace_reuse' }
+    if ((Value $reuse 'status') -ceq 'reused' -and (Value $reuse 'acknowledgementVerified') -ceq $true) {
+        Finish ([pscustomobject]@{ status = 'connected'; workspaceConnected = $true; browserOpened = $false;
+            browserReused = $true; browserHandoff = 'authenticated-workspace-reuse'; contextKey = $resolvedContext;
+            acknowledgementVerified = $true; userMessage = 'GPTSnap connected.' }); return
+    }
+    # Only an explicit, authenticated absence permits opening. Ambiguous, busy,
+    # offline or malformed replies never fall back to a duplicate work area.
+    if ((Value $reuse 'status') -cne 'open_required' -or (Value $reuse 'acknowledgementVerified') -cne $false) {
+        throw 'workspace_reuse_unavailable'
+    }
     $stage = 'browser_handoff'
     $handoffStarted = [int]$timer.ElapsedMilliseconds
     [void](Remaining)
@@ -305,7 +344,6 @@ try {
     $browserOpened = $true
     [void](Remaining)
     $stages.Add([ordered]@{stage = 'browser_handoff'; durationMs = [int]$timer.ElapsedMilliseconds - $handoffStarted})
-    $workspaceCode = [Uri]::UnescapeDataString($uri.Fragment.Substring('#desktop-web='.Length))
     $acknowledgement = Run-Helper (Join-Path $coreScripts 'connect-cogentstack.ps1') @(
         '-Mode', 'workspace-status', '-ContextKey', $resolvedContext, '-Surface', 'chatgpt',
         '-WorkspaceCode', $workspaceCode, '-RequestTimeoutSeconds', '10'
@@ -316,7 +354,7 @@ try {
         (Value $acknowledgement 'surface') -ceq 'chatgpt' -and
         (Value $acknowledgement 'experience') -ceq 'split-screen' -and
         (Value $acknowledgement 'acknowledgementVerified') -ceq $true) {
-        Finish ([pscustomobject]@{ status = 'connected'; workspaceConnected = $true; browserOpened = $true; browserHandoff = 'windows-default-browser';
+        Finish ([pscustomobject]@{ status = 'connected'; workspaceConnected = $true; browserOpened = $true; browserReused = $false; browserHandoff = 'windows-default-browser';
             contextKey = $resolvedContext; acknowledgementVerified = $true; userMessage = 'GPTSnap connected.' })
     } else {
         Finish ([pscustomobject]@{ status = 'not_connected'; workspaceConnected = $false; browserOpened = $true; browserHandoff = 'windows-default-browser';
@@ -329,6 +367,7 @@ try {
             elseif ($browserOpened) { 'GPTSnap could not confirm the workspace connection. Nothing was retried.' }
             elseif ($timedOut) { 'GPTSnap could not connect within its startup time limit. No workspace was opened.' }
             elseif ($stage -in @('browser_handoff', 'browser_approval_handoff')) { 'GPTSnap could not open your default browser. Nothing was retried.' }
+            elseif ($stage -eq 'workspace_reuse') { 'GPTSnap could not verify an existing work area. No additional work area was opened.' }
             else { 'GPTSnap could not verify the connection. Your projects are unchanged.' }
     })
 }

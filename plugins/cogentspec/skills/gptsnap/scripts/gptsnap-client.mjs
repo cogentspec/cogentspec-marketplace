@@ -52,8 +52,9 @@ export async function connectGptSnap({ cwd, resumeApproval, spawnCommand = spawn
           throw new Error('The installed command must own its private browser handoff');
         }
         if (value.status === 'connected') {
-          if (!/^ctx-[a-f0-9]{64}$/.test(value.contextKey) || value.browserOpened !== true
-            || value.browserHandoff !== 'windows-default-browser' || value.workspaceConnected !== true
+          const reused = value.browserHandoff === 'authenticated-workspace-reuse' && value.browserReused === true && value.browserOpened === false;
+          const opened = value.browserHandoff === 'windows-default-browser' && value.browserOpened === true && value.browserReused !== true;
+          if (!/^ctx-[a-f0-9]{64}$/.test(value.contextKey) || (!reused && !opened) || value.workspaceConnected !== true
             || value.acknowledgementVerified !== true) throw new Error('Unverified connection');
           finish({status:'connected',userMessage:'GPTSnap connected.',elapsedMs:Date.now()-started});
         } else if (value.status === 'approval_required') {

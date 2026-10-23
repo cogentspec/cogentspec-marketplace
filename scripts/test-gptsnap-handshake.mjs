@@ -9,7 +9,7 @@ const repository = resolve(import.meta.dirname, '..');
 const context = 'ctx-' + 'a'.repeat(64);
 const url = `https://cogentspec.app/stack?surface=chatgpt&context=${context}&experience=split-screen&open=web&nav=${'b'.repeat(32)}#desktop-web=cgw_${'c'.repeat(40)}`;
 for (const plugin of ['cogentspec', 'cogentstack']) {
-  for (const scenario of ['connected', 'absent', 'wrong-context', 'unverified', 'failed-open', 'unsafe-destination', 'approval', 'unsafe-approval', 'resume']) {
+  for (const scenario of ['connected', 'reused', 'reuse-busy', 'reuse-offline', 'reuse-wrong-context', 'reuse-unverified', 'absent', 'wrong-context', 'unverified', 'failed-open', 'unsafe-destination', 'approval', 'unsafe-approval', 'resume']) {
     const root = await mkdtemp(join(tmpdir(), 'gptsnap handshake fixture '));
     assert.equal(resolve(root, '..'), resolve(tmpdir()));
     try {
@@ -29,6 +29,16 @@ for (const plugin of ['cogentspec', 'cogentstack']) {
           // Only the private fixture replaces the OS boundary; the real source
           // still validates the complete destination before this function runs.
           source = source.replace('function Open-GptSnapBrowser(', 'function FixtureUnusedNativeBrowser(');
+          source = source.replace('function Request-GptSnapReuse(', 'function FixtureUnusedReuse(');
+          source = source.replace('function Value(', `function Request-GptSnapReuse([string]$Code, [string]$Context) {
+            Add-Content -LiteralPath '${trace.replaceAll("'", "''")}' -Value 'workspace-reuse'
+            if ($Code -cne 'cgw_${'c'.repeat(40)}' -or $Context -cne '${context}') {throw 'Wrong reuse binding'}
+            ${scenario === 'reuse-offline' ? "throw 'Offline'" : ''}
+            return ('${JSON.stringify({protocol:'cogentspec-workspace-reuse-v1',
+              status:scenario === 'reuse-busy' ? 'busy' : ['reused','reuse-unverified'].includes(scenario) ? 'reused' : 'open_required',
+              contextKey:scenario === 'reuse-wrong-context' ? 'ctx-'+'d'.repeat(64) : context,
+              surface:'chatgpt',experience:'split-screen',acknowledgementVerified:scenario === 'reused'})}' | ConvertFrom-Json)
+          }\nfunction Value(`);
           source = source.replace('function Value(', `function Open-GptSnapBrowser([Uri]$Destination) {
             Add-Content -LiteralPath '${trace.replaceAll("'", "''")}' -Value 'native-browser'
             if ($Destination.AbsoluteUri -cne '${expectedUrl}') {throw 'Wrong native destination'}
@@ -64,9 +74,9 @@ for (const plugin of ['cogentspec', 'cogentstack']) {
         },
         ...(scenario === 'resume' ? {resumeApproval:{contextKey:context}} : {}),
         openWorkspace: async target => {calls.push(target);throw new Error('Agent callback forbidden');} });
-      const expectedStatus = ['connected','resume'].includes(scenario) ? 'connected'
+      const expectedStatus = ['connected','resume','reused'].includes(scenario) ? 'connected'
         : scenario === 'approval' ? 'approval_required'
-        : ['failed-open','unsafe-destination','unsafe-approval'].includes(scenario) ? 'failed' : 'not_connected';
+        : ['failed-open','unsafe-destination','unsafe-approval','reuse-busy','reuse-offline','reuse-wrong-context','reuse-unverified'].includes(scenario) ? 'failed' : 'not_connected';
       assert.equal(result.status, expectedStatus, JSON.stringify(result));
       assert.deepEqual(calls, []);
       assert.ok(!JSON.stringify(result).includes('cgw_'));
@@ -76,11 +86,12 @@ for (const plugin of ['cogentspec', 'cogentstack']) {
         : ['check-cogentspec-update.ps1', 'project-context.ps1', 'start-cogentstack-bridge.ps1'];
       assert.deepEqual(invocations.slice(0, preparation.length), preparation);
       const nativeCount = invocations.filter(name=>name==='native-browser').length;
-      assert.equal(nativeCount, ['unsafe-destination','unsafe-approval'].includes(scenario) ? 0 : 1);
+      const reuseStops = ['reused','reuse-busy','reuse-offline','reuse-wrong-context','reuse-unverified'];
+      assert.equal(nativeCount, ['unsafe-destination','unsafe-approval',...reuseStops].includes(scenario) ? 0 : 1);
       assert.ok(invocations.filter(name => name === 'connect-cogentstack.ps1').length <= 1);
-      const expectsAck = !['failed-open','unsafe-destination','approval','unsafe-approval'].includes(scenario);
+      const expectsAck = !['failed-open','unsafe-destination','approval','unsafe-approval',...reuseStops].includes(scenario);
       assert.equal(invocations.filter(name=>name==='connect-cogentstack.ps1').length, expectsAck ? 1 : 0);
-      if (expectsAck) assert.deepEqual(invocations.slice(preparation.length), ['native-browser','connect-cogentstack.ps1']);
+      if (expectsAck) assert.deepEqual(invocations.slice(preparation.length), ['workspace-reuse','native-browser','connect-cogentstack.ps1']);
       assert.equal(result.approvalUrl, undefined);
       console.log(`${plugin}: ${scenario} installed native handoff passed without agent browser capabilities`);
     } finally {

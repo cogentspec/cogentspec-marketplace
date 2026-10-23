@@ -62,6 +62,14 @@ test('readiness, browser-open acceptance and fabricated/absent ACK cannot report
   }
 });
 
+test('authenticated reuse connects without opening, but contradictory or unverified reuse fails closed', async () => {
+  const reused = {...confirmed,browserOpened:false,browserReused:true,browserHandoff:'authenticated-workspace-reuse'};
+  assert.equal((await connectGptSnap({cwd:process.cwd(),...fakeCommand([reused])})).status,'connected');
+  for (const patch of [{browserReused:false},{browserOpened:true},{acknowledgementVerified:false},{browserHandoff:'agent'}]) {
+    assert.notEqual((await connectGptSnap({cwd:process.cwd(),...fakeCommand([{...reused,...patch}])})).status,'connected');
+  }
+});
+
 test('failed native browser delivery stops without an agent navigation fallback', async () => {
   let opens = 0;
   const result = await connectGptSnap({ cwd: process.cwd(), ...fakeCommand([{protocol,status:'failed',userMessage:'GPTSnap could not open your default browser. Nothing was retried.'}]), openWorkspace: async () => {
