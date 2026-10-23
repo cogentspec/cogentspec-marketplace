@@ -5,6 +5,14 @@ description: Connect the current Claude Code Desktop project to its isolated Cog
 
 # Use CogentSpec Web through Desktop Bridge in Claude Code Desktop
 
+## User-command experience
+
+A bare Bridge command is a connection request, not a debugging, audit or project-work request. Give one brief startup acknowledgement, perform the required checks privately, and finish with only this destination's prescribed short outcome and any required workspace link. Do not append a verification checklist, project names/counts, version/timing report, proof screenshot or CPD commentary unless the user asks or the host requires it.
+
+Keep the normal current-package command within a one-minute interaction budget (or the destination helper's existing bounded budget). Go directly through its one-shot update/context/start/open/verify flow. Do not search repositories or chat history, run tests, collect optional diagnostics, reload unrelated skills, generate evidence files or rearrange windows. Reuse the already claimed intended browser when available; still live-claim it before navigation. Browser-tool destinations still require matching context, consumed handoff, visible **Bridge connected**, and an authorized **My projects** view; do not select or modify a project.
+
+Interrupt only for a required permission/account approval, ambiguous destination, a verified update, unavailable update check, or failure. Announce a required update briefly and continue the same command. On failure, give the plain user message and supported next action; stop without automatic retries or destination substitution. A ready worker or accepted open is not a verified connection. Keep all existing integrity, privacy, authorization and destination-specific gates. Distinguish partial readiness honestly. Detailed diagnostics are a separate, explicit user request.
+
 CogentSpec is a normal web application. Claude Code Desktop remains the official independent AI application. The shared Desktop Bridge connects approved CogentSpec Web actions to this Windows computer; it does not embed, crop, resize, cover, join, inspect, or automate Claude's window. Qwen Desktop is an optional CogentSpec-owned integrated application and reuses the same Bridge rather than installing another copy.
 
 Use `${CLAUDE_PLUGIN_ROOT}` for every bundled script path. Run project-context, Bridge, and project helpers from the invoking Claude project directory, never from the plugin cache, marketplace checkout, user-profile root, or a temporary directory.
