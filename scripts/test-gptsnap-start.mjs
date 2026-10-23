@@ -112,6 +112,7 @@ $result | ConvertTo-Json -Compress
     const began = performance.now();
     const resume = scenario.startsWith('resume-');
     const runResult = await run(powershell, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', driver,
+      '-PrepareOnly',
       ...(resume ? ['-ResumeApproval', '-ContextKey', context] : []),
       ...(scenario === 'stall' ? ['-WorkflowTimeoutSeconds', '2'] : scenario === 'update-stall' ? ['-WorkflowTimeoutSeconds', '3', '-UpdateTimeoutSeconds', '1'] : [])], env, root);
     assert.equal(runResult.code, 0, runResult.stderr);

@@ -2,6 +2,7 @@
 param(
     [ValidateRange(1, 50)][int]$WorkflowTimeoutSeconds = 50,
     [ValidateRange(1, 120)][int]$UpdateTimeoutSeconds = 120,
+    [switch]$PrepareOnly,
     [Parameter(Mandatory = $true, ParameterSetName = 'Resume')]
     [switch]$ResumeApproval,
     [Parameter(Mandatory = $true, ParameterSetName = 'Resume')]
@@ -264,7 +265,7 @@ try {
         throw 'snap_ready_contract_invalid'
     }
     Finish ([pscustomobject]@{
-        status = 'ready'; contextKey = $resolvedContext; contextIsolated = $true
+        status = if ($PrepareOnly) { 'ready' } else { 'workspace_ready' }; contextKey = $resolvedContext; contextIsolated = $true
         workspaceUrl = [string]$result.workspaceUrl; webWorkspaceUrl = [string]$result.workspaceUrl
         browserNavigationProtocol = 'cogentspec-gptpop-navigation-v1'
         browserNavigationCode = 'await gptPopTab.goto(' + (ConvertTo-Json -InputObject ([string]$result.workspaceUrl) -Compress) + ');'
@@ -274,6 +275,24 @@ try {
         pluginVersion = [string]$manifest.version; refreshedPluginPath = $pluginRoot
         userMessage = 'GPTSnap is ready to connect to the browser workspace.'
     })
+    if ($PrepareOnly) { return }
+    $workspaceCode = [Uri]::UnescapeDataString($uri.Fragment.Substring('#desktop-web='.Length))
+    $acknowledgement = Run-Helper (Join-Path $coreScripts 'connect-cogentstack.ps1') @(
+        '-Mode', 'workspace-status', '-ContextKey', $resolvedContext, '-Surface', 'chatgpt',
+        '-WorkspaceCode', $workspaceCode, '-RequestTimeoutSeconds', '10'
+    ) 'workspace_acknowledgement'
+    if ((Value $acknowledgement 'protocol') -ceq 'cogentspec-workspace-connection-v1' -and
+        (Value $acknowledgement 'status') -ceq 'connected' -and
+        (Value $acknowledgement 'contextKey') -ceq $resolvedContext -and
+        (Value $acknowledgement 'surface') -ceq 'chatgpt' -and
+        (Value $acknowledgement 'experience') -ceq 'split-screen' -and
+        (Value $acknowledgement 'acknowledgementVerified') -ceq $true) {
+        Finish ([pscustomobject]@{ status = 'connected'; workspaceConnected = $true;
+            contextKey = $resolvedContext; acknowledgementVerified = $true; userMessage = 'GPTSnap connected.' })
+    } else {
+        Finish ([pscustomobject]@{ status = 'not_connected'; workspaceConnected = $false;
+            userMessage = 'The workspace opened, but GPTSnap could not confirm its connection. Nothing was retried.' })
+    }
 } catch {
     Finish ([pscustomobject]@{
         status = 'failed'; failureStage = $stage; workflowTimedOut = $timedOut

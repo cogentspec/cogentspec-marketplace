@@ -202,7 +202,7 @@ for (const pluginPath of [sourcePluginPath, compatibilityPluginPath]) {
       if (commandSkill.includes("mcp__codex_app__open_in_codex") || !commandSkill.includes("Never use `open_in_codex`") || !commandSkill.includes("live-claim")) {
         fail("gptpop must target a claimed external browser tab, never an embedded pane");
       }
-      for (const marker of ["cogentspec-gptpop-navigation-v1", "browserNavigationCode", "Bridge connected", "My projects"]) {
+      for (const marker of ["gptsnap-client.mjs", "protected acknowledgement", "Do not inspect or debug the interface"]) {
         if (!commandSkill.includes(marker)) fail(`gptpop external delivery is missing ${marker}`);
       }
     }
@@ -302,9 +302,12 @@ const snapStartPath = pluginPath => join(pluginPath, 'skills', 'gptsnap', 'scrip
 const canonicalSnapStart = await readFile(snapStartPath(sourcePluginPath), 'utf8');
 const compatibilitySnapStart = await readFile(snapStartPath(compatibilityPluginPath), 'utf8');
 if (canonicalSnapStart !== compatibilitySnapStart) fail('GPTSnap startup supervisors must match across GPT packages');
+const canonicalSnapClient = await readFile(join(sourcePluginPath, 'skills/gptsnap/scripts/gptsnap-client.mjs'), 'utf8');
+const compatibilitySnapClient = await readFile(join(compatibilityPluginPath, 'skills/gptsnap/scripts/gptsnap-client.mjs'), 'utf8');
+if (canonicalSnapClient !== compatibilitySnapClient) fail('GPTSnap command clients must match across GPT packages');
 for (const pluginPath of [sourcePluginPath, compatibilityPluginPath]) {
   const snapSkill = await readFile(join(pluginPath, 'skills', 'gptsnap', 'SKILL.md'), 'utf8');
-  if (!snapSkill.includes('scripts/start-gptsnap.ps1') || !snapSkill.includes('supervisor owns')) {
+  if (!snapSkill.includes('scripts/start-gptsnap.ps1') || !snapSkill.includes('gptsnap-client.mjs')) {
     fail('GPTSnap must use its installed one-shot startup entrypoint');
   }
 }

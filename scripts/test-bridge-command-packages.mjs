@@ -35,6 +35,11 @@ test('GPTSnap installed startup executable is identical in both packages', () =>
     read('plugins/cogentstack/skills/gptsnap/scripts/start-gptsnap.ps1'));
 });
 
+test('GPTSnap acknowledgement client is identical in both packages', () => {
+  assert.equal(read('plugins/cogentspec/skills/gptsnap/scripts/gptsnap-client.mjs'),
+    read('plugins/cogentstack/skills/gptsnap/scripts/gptsnap-client.mjs'));
+});
+
 // Guard the exact public file-set boundary that previously broke all commands.
 // This deliberately reads each installer's real allowlist instead of copying it.
 for (const plugin of ['cogentspec', 'cogentstack']) {

@@ -326,6 +326,7 @@ try {
         'skills/gptsnap/agents/openai.yaml',
         'skills/gptsnap/SKILL.md',
         'skills/gptsnap/scripts/start-gptsnap.ps1',
+        'skills/gptsnap/scripts/gptsnap-client.mjs',
         'skills/gptweb/agents/openai.yaml',
         'skills/gptweb/SKILL.md',
         'skills/gptweb/scripts/start-gptweb.ps1',

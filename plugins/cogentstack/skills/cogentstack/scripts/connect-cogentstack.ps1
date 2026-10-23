@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('claim', 'start', 'complete', 'status', 'disconnect')]
+    [ValidateSet('claim', 'start', 'complete', 'status', 'disconnect', 'workspace-status')]
     [string]$Mode = 'start',
 
     [string]$InstallationRequest = '',
@@ -12,6 +12,8 @@ param(
     [switch]$WorkspaceGrant,
 
     [switch]$BrowserApproval,
+
+    [string]$WorkspaceCode = '',
 
     [ValidateRange(3, 20)]
     [int]$RequestTimeoutSeconds = 20
@@ -134,6 +136,29 @@ function New-CogentSpecWorkspaceGrant([string]$Token, [string]$GrantContextKey, 
         -Headers @{ Accept = 'application/json'; Authorization = "Bearer $Token" } `
         -Body (@{ contextKey = $GrantContextKey; surface = $GrantSurface } | ConvertTo-Json -Compress) `
         -TimeoutSec $RequestTimeoutSeconds
+}
+
+if ($Mode -eq 'workspace-status') {
+    if ($Surface -ne 'chatgpt' -or $ContextKey -notmatch '^ctx-[a-f0-9]{64}$' -or
+        $WorkspaceCode -notmatch '^cgw_[A-Za-z0-9_-]{32,200}$' -or -not (Test-Path -LiteralPath $credentialPath)) {
+        Write-CompactJson ([ordered]@{ status = 'not_connected'; userMessage = 'GPTSnap could not confirm this workspace.' })
+        return
+    }
+    $token = $null
+    try {
+        $credential = Get-Content -Raw -LiteralPath $credentialPath | ConvertFrom-Json
+        $token = Unprotect-CogentSpecValue ([string]$credential.token)
+        $result = Invoke-RestMethod -Method Post -Uri "$serviceUrl/api/device-authorization/workspace-connection" `
+            -ContentType 'application/json' -Headers @{ Accept = 'application/json'; Authorization = "Bearer $token" } `
+            -Body (@{ code = $WorkspaceCode; contextKey = $ContextKey; surface = 'chatgpt'; experience = 'split-screen' } | ConvertTo-Json -Compress) `
+            -TimeoutSec $RequestTimeoutSeconds
+        Write-CompactJson $result
+    } catch {
+        $failure = Get-CogentSpecAccessFailure $_ -UnknownForbiddenIsUnavailable
+        if ($failure) { Write-CompactJson $failure }
+        else { Write-CompactJson ([ordered]@{ status = 'not_connected'; userMessage = 'GPTSnap could not confirm this workspace.' }) }
+    } finally { $token = $null; $WorkspaceCode = '' }
+    return
 }
 
 if ($Mode -eq 'status') {

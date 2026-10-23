@@ -105,7 +105,7 @@ foreach ($pair in @(@($url, 'unscoped', 'chatgpt'), @($url, $key, 'claude-deskto
     ]) await assert.rejects(verifyDelivery({ ...good, browserNavigationCode: code }));
   });
 
-  test("both GPTSnap instructions prohibit embedded delivery and require claimed external verification", () => {
+  test("both GPTSnap commands require protected acknowledgement without interface probing", () => {
     for (const pkg of ["cogentspec", "cogentstack"]) {
       const skill = readFileSync(resolve(root, "plugins", pkg, "skills/gptsnap/SKILL.md"), "utf8");
       const alias = readFileSync(resolve(root, "plugins", pkg, "skills/gptpop/SKILL.md"), "utf8");
@@ -114,9 +114,10 @@ foreach ($pair in @(@($url, 'unscoped', 'chatgpt'), @($url, $key, 'claude-deskto
       assert.ok(skill.includes("name: gptsnap"));
       assert.ok(skill.includes("live-claim"));
       assert.ok(skill.includes("Never use `open_in_codex`"));
-      assert.ok(skill.includes("cogentspec-gptpop-navigation-v1"));
-      assert.ok(skill.includes("Bridge connected"));
-      assert.ok(skill.includes("My projects"));
+      assert.ok(skill.includes("gptsnap-client.mjs"));
+      assert.ok(skill.includes("protected acknowledgement"));
+      assert.ok(!skill.includes("Check **My projects**"));
+      assert.ok(!skill.includes("visible **Bridge connected**"));
       assert.ok(!skill.includes("mcp__codex_app__open_in_codex"));
     }
   });
