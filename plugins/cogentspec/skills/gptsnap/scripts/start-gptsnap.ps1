@@ -296,7 +296,8 @@ try {
 } catch {
     Finish ([pscustomobject]@{
         status = 'failed'; failureStage = $stage; workflowTimedOut = $timedOut
-        userMessage = if ($timedOut) { 'GPTSnap could not connect within its startup time limit. No workspace was opened.' }
+        userMessage = if ($timedOut -and $stage -eq 'workspace_acknowledgement') { 'GPTSnap could not confirm the workspace connection within its time limit. Nothing was retried.' }
+            elseif ($timedOut) { 'GPTSnap could not connect within its startup time limit. No workspace was opened.' }
             else { 'GPTSnap could not verify the connection. Your projects are unchanged.' }
     })
 }
