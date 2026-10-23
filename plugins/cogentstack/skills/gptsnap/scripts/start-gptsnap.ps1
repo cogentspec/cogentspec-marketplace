@@ -18,6 +18,17 @@ $update = $null
 $installer = $null
 $installerVerified = $false
 $timedOut = $false
+$browserOpened = $false
+
+function Open-GptSnapBrowser([Uri]$Destination) {
+    # The installed command owns this handoff. Windows chooses its configured
+    # external browser; no tab, profile, window or interface discovery is needed.
+    $info = [Diagnostics.ProcessStartInfo]::new()
+    $info.FileName = $Destination.AbsoluteUri
+    $info.UseShellExecute = $true
+    $opened = [Diagnostics.Process]::Start($info)
+    if ($null -ne $opened) { $opened.Dispose() }
+}
 
 function Value($Object, [string]$Name, $Default = $null) {
     if ($null -eq $Object) { return $Default }
@@ -241,14 +252,24 @@ try {
         if (-not (Safe-Origin $uri 'cogentspec.com' '/activate') -or $uri.Fragment -or
             $query.Count -ne 2 -or -not $query.code -or $query.experience -cne 'split-screen' -or
             $expiry -le [DateTimeOffset]::UtcNow -or [int]$result.pollAfterSeconds -lt 5) { throw 'invalid_approval' }
-        Finish ([pscustomobject]@{
+        if (-not $PrepareOnly) {
+            $stage = 'browser_approval_handoff'
+            [void](Remaining)
+            Open-GptSnapBrowser $uri
+            $browserOpened = $true
+        }
+        $approvalResult = [pscustomobject]@{
             status = 'approval_required'; contextKey = $resolvedContext
-            approvalProtocol = 'cogentspec-gptsnap-approval-v1'; approvalUrl = [string]$result.approvalUrl
+            approvalProtocol = 'cogentspec-gptsnap-approval-v1'
             expiresAt = $expiry.ToString('o'); pollAfterSeconds = [int]$result.pollAfterSeconds
-            browserOpened = $false; refreshedPluginPath = $pluginRoot
-            browserNavigationCode = 'await gptPopTab.goto(' + (ConvertTo-Json -InputObject ([string]$result.approvalUrl) -Compress) + ');'
+            browserOpened = $browserOpened; browserHandoff = 'windows-default-browser'; refreshedPluginPath = $pluginRoot
             userMessage = 'Approve this computer in CogentSpec to finish connecting GPTSnap.'
-        }); return
+        }
+        if ($PrepareOnly) {
+            $approvalResult | Add-Member -NotePropertyName approvalUrl -NotePropertyValue ([string]$result.approvalUrl)
+            $approvalResult | Add-Member -NotePropertyName browserNavigationCode -NotePropertyValue ('await gptPopTab.goto(' + (ConvertTo-Json -InputObject ([string]$result.approvalUrl) -Compress) + ');')
+        }
+        Finish $approvalResult; return
     }
     if ([string]$result.status -cne 'ready') { Forward-Failure $result; return }
     $uri = [Uri][string]$result.workspaceUrl
@@ -264,8 +285,9 @@ try {
         (Value $result 'browserOpened') -cne $false -or (Value $result 'bridge') -notin @('started', 'already_running')) {
         throw 'snap_ready_contract_invalid'
     }
-    Finish ([pscustomobject]@{
-        status = if ($PrepareOnly) { 'ready' } else { 'workspace_ready' }; contextKey = $resolvedContext; contextIsolated = $true
+    if ($PrepareOnly) {
+      Finish ([pscustomobject]@{
+        status = 'ready'; contextKey = $resolvedContext; contextIsolated = $true
         workspaceUrl = [string]$result.workspaceUrl; webWorkspaceUrl = [string]$result.workspaceUrl
         browserNavigationProtocol = 'cogentspec-gptpop-navigation-v1'
         browserNavigationCode = 'await gptPopTab.goto(' + (ConvertTo-Json -InputObject ([string]$result.workspaceUrl) -Compress) + ');'
@@ -274,8 +296,15 @@ try {
         mcpState = 'not_required'; defaultDirectoryReady = $true
         pluginVersion = [string]$manifest.version; refreshedPluginPath = $pluginRoot
         userMessage = 'GPTSnap is ready to connect to the browser workspace.'
-    })
-    if ($PrepareOnly) { return }
+      }); return
+    }
+    $stage = 'browser_handoff'
+    $handoffStarted = [int]$timer.ElapsedMilliseconds
+    [void](Remaining)
+    Open-GptSnapBrowser $uri
+    $browserOpened = $true
+    [void](Remaining)
+    $stages.Add([ordered]@{stage = 'browser_handoff'; durationMs = [int]$timer.ElapsedMilliseconds - $handoffStarted})
     $workspaceCode = [Uri]::UnescapeDataString($uri.Fragment.Substring('#desktop-web='.Length))
     $acknowledgement = Run-Helper (Join-Path $coreScripts 'connect-cogentstack.ps1') @(
         '-Mode', 'workspace-status', '-ContextKey', $resolvedContext, '-Surface', 'chatgpt',
@@ -287,17 +316,19 @@ try {
         (Value $acknowledgement 'surface') -ceq 'chatgpt' -and
         (Value $acknowledgement 'experience') -ceq 'split-screen' -and
         (Value $acknowledgement 'acknowledgementVerified') -ceq $true) {
-        Finish ([pscustomobject]@{ status = 'connected'; workspaceConnected = $true;
+        Finish ([pscustomobject]@{ status = 'connected'; workspaceConnected = $true; browserOpened = $true; browserHandoff = 'windows-default-browser';
             contextKey = $resolvedContext; acknowledgementVerified = $true; userMessage = 'GPTSnap connected.' })
     } else {
-        Finish ([pscustomobject]@{ status = 'not_connected'; workspaceConnected = $false;
+        Finish ([pscustomobject]@{ status = 'not_connected'; workspaceConnected = $false; browserOpened = $true; browserHandoff = 'windows-default-browser';
             userMessage = 'The workspace opened, but GPTSnap could not confirm its connection. Nothing was retried.' })
     }
 } catch {
     Finish ([pscustomobject]@{
-        status = 'failed'; failureStage = $stage; workflowTimedOut = $timedOut
+        status = 'failed'; failureStage = $stage; workflowTimedOut = $timedOut; browserOpened = $browserOpened
         userMessage = if ($timedOut -and $stage -eq 'workspace_acknowledgement') { 'GPTSnap could not confirm the workspace connection within its time limit. Nothing was retried.' }
+            elseif ($browserOpened) { 'GPTSnap could not confirm the workspace connection. Nothing was retried.' }
             elseif ($timedOut) { 'GPTSnap could not connect within its startup time limit. No workspace was opened.' }
+            elseif ($stage -in @('browser_handoff', 'browser_approval_handoff')) { 'GPTSnap could not open your default browser. Nothing was retried.' }
             else { 'GPTSnap could not verify the connection. Your projects are unchanged.' }
     })
 }

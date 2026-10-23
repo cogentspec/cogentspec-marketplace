@@ -112,8 +112,8 @@ foreach ($pair in @(@($url, 'unscoped', 'chatgpt'), @($url, $key, 'claude-deskto
       assert.ok(alias.includes("../gptsnap/SKILL.md"));
       assert.ok(!alias.includes("-Experience "));
       assert.ok(skill.includes("name: gptsnap"));
-      assert.ok(skill.includes("live-claim"));
-      assert.ok(skill.includes("Never use `open_in_codex`"));
+      assert.ok(skill.includes("Do not use browser-control tools"));
+      assert.ok(skill.includes("Never use open_in_codex"));
       assert.ok(skill.includes("gptsnap-client.mjs"));
       assert.ok(skill.includes("protected acknowledgement"));
       assert.ok(!skill.includes("Check **My projects**"));

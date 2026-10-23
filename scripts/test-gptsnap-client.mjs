@@ -10,7 +10,8 @@ const protocol = 'cogentspec-gptsnap-start-v1';
 const ready = { protocol, status: 'workspace_ready', contextKey: context, workspaceUrl: url, webWorkspaceUrl: url,
   browserNavigationProtocol: 'cogentspec-gptpop-navigation-v1', presenceVerified: true, defaultDirectoryReady: true,
   accountState: 'signed_in', projectDataConnection: 'authenticated_desktop_bridge', mcpState: 'not_required', browserOpened: false };
-const confirmed = { protocol, status: 'connected', contextKey: context, workspaceConnected: true, acknowledgementVerified: true };
+const confirmed = { protocol, status: 'connected', contextKey: context, workspaceConnected: true,
+  acknowledgementVerified: true, browserOpened: true, browserHandoff: 'windows-default-browser' };
 
 function fakeCommand(frames, onSpawn = () => {}) {
   let child;
@@ -28,55 +29,55 @@ function fakeCommand(frames, onSpawn = () => {}) {
   } };
 }
 
-test('normal command uses only one URL-open capability and server acknowledgement, never UI inspection', async () => {
+test('normal command needs no browser capability: the installed supervisor owns opening and acknowledgement', async () => {
   let invocations = 0;
   const calls = [];
   // No browser/DOM object is provided: any inspection, selector, screenshot,
   // project-list read or click would be unavailable and fail this path.
   const result = await connectGptSnap({ cwd: process.cwd(),
-    ...fakeCommand([ready, confirmed], (args, options) => {
+    ...fakeCommand([confirmed], (args, options) => {
       invocations++;
       assert.equal(options.windowsHide, true);
       assert.equal(options.cwd, process.cwd());
       assert.ok(!args.includes('-PrepareOnly'));
-    }), openWorkspace: async target => calls.push(target) });
+    }), openWorkspace: async target => {calls.push(target);throw new Error('Agent browser callback must never run');} });
   assert.equal(result.status, 'connected');
   assert.equal(result.userMessage, 'GPTSnap connected.');
   assert.equal(invocations, 1);
-  assert.deepEqual(calls, [url]);
+  assert.deepEqual(calls, []);
   assert.ok(!JSON.stringify(result).includes('cgw_'));
   assert.ok(!JSON.stringify(result).includes('PRIVATE_'));
 });
 
 test('readiness, browser-open acceptance and fabricated/absent ACK cannot report connected', async () => {
-  for (const frames of [[ready], [confirmed], [ready, { ...confirmed, acknowledgementVerified: false }],
-    [ready, { ...confirmed, contextKey: 'ctx-' + 'd'.repeat(64) }], [ready, ready, confirmed],
+  for (const frames of [[ready], [{...confirmed,browserOpened:false}], [{ ...confirmed, acknowledgementVerified: false }],
+    [{ ...confirmed, contextKey: 'default' }], [ready, ready, confirmed],
     [{ ...ready, workspaceUrl: url.replace('cogentspec.app', 'evil.invalid') }, confirmed],
-    [{ ...ready, status: 'ready' }, confirmed]]) {
+    [{ ...ready, status: 'ready' }, confirmed], [{...confirmed,browserHandoff:'agent'}]]) {
     let opens = 0;
     const result = await connectGptSnap({ cwd: process.cwd(), ...fakeCommand(frames), openWorkspace: async () => { opens++; } });
     assert.notEqual(result.status, 'connected');
-    assert.ok(opens <= 1);
+    assert.equal(opens, 0);
     assert.ok(!JSON.stringify(result).includes('cgw_'));
   }
 });
 
-test('failed browser delivery stops without another navigation or connection attempt', async () => {
+test('failed native browser delivery stops without an agent navigation fallback', async () => {
   let opens = 0;
-  const result = await connectGptSnap({ cwd: process.cwd(), ...fakeCommand([ready, confirmed]), openWorkspace: async () => {
+  const result = await connectGptSnap({ cwd: process.cwd(), ...fakeCommand([{protocol,status:'failed',userMessage:'GPTSnap could not open your default browser. Nothing was retried.'}]), openWorkspace: async () => {
     opens++; throw new Error('PRIVATE_BROWSER_FAILURE');
   } });
-  assert.equal(result.status, 'not_connected');
-  assert.equal(opens, 1);
+  assert.equal(result.status, 'failed');
+  assert.equal(opens, 0);
   assert.ok(!JSON.stringify(result).includes('PRIVATE_'));
 });
 
-test('without an opening capability, return an unconsumed recovery link, never claim connected', async () => {
-  const result = await connectGptSnap({ cwd: process.cwd(), ...fakeCommand([{ ...ready, status: 'ready' }], args => {
-    assert.ok(args.includes('-PrepareOnly'));
+test('absence of browser tools is the normal path, never PrepareOnly or a handoff link', async () => {
+  const result = await connectGptSnap({ cwd: process.cwd(), ...fakeCommand([confirmed], args => {
+    assert.ok(!args.includes('-PrepareOnly'));
   }) });
-  assert.equal(result.status, 'ready');
-  assert.equal(result.workspaceUrl, url);
+  assert.equal(result.status, 'connected');
+  assert.equal(result.workspaceUrl, undefined);
 });
 
 test('approved host runtimes need no ambient process global', async () => {
@@ -85,7 +86,7 @@ test('approved host runtimes need no ambient process global', async () => {
   let spawned = 0;
   try {
     delete globalThis.process;
-    const result = await connectGptSnap({ cwd, ...fakeCommand([ready, confirmed], () => spawned++), openWorkspace: async () => {} });
+    const result = await connectGptSnap({ cwd, ...fakeCommand([confirmed], () => spawned++) });
     assert.equal(spawned, 1);
     assert.equal(result.status, 'connected');
   } finally { globalThis.process = ambient; }

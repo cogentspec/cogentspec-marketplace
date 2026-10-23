@@ -199,10 +199,10 @@ for (const pluginPath of [sourcePluginPath, compatibilityPluginPath]) {
     const commandSkill = await readFile(join(commandRoot, "SKILL.md"), "utf8");
     const commandMetadata = await readFile(join(commandRoot, "agents", "openai.yaml"), "utf8");
     if (command === "gptsnap") {
-      if (commandSkill.includes("mcp__codex_app__open_in_codex") || !commandSkill.includes("Never use `open_in_codex`") || !commandSkill.includes("live-claim")) {
-        fail("gptpop must target a claimed external browser tab, never an embedded pane");
+      if (commandSkill.includes("mcp__codex_app__open_in_codex") || !commandSkill.includes("Never use open_in_codex") || !commandSkill.includes("Do not use browser-control tools")) {
+        fail("GPTSnap must delegate opening to its installed command, never agent browser control");
       }
-      for (const marker of ["gptsnap-client.mjs", "protected acknowledgement", "Do not inspect or debug the interface"]) {
+      for (const marker of ["gptsnap-client.mjs", "protected acknowledgement", "Windows-default-browser"]) {
         if (!commandSkill.includes(marker)) fail(`gptpop external delivery is missing ${marker}`);
       }
     }
@@ -311,8 +311,10 @@ for (const pluginPath of [sourcePluginPath, compatibilityPluginPath]) {
     fail('GPTSnap must use its installed one-shot startup entrypoint');
   }
 }
-if (/SendInput|open_in_codex|Start-Process/.test(canonicalSnapStart)) {
-  fail('GPTSnap startup must leave browser delivery and UI verification to the approved host');
+if (/SendInput|open_in_codex|openTabs|claimTab/.test(canonicalSnapStart)
+  || !canonicalSnapStart.includes('$info.UseShellExecute = $true')
+  || !canonicalSnapStart.includes('Open-GptSnapBrowser $uri')) {
+  fail('GPTSnap startup must own the validated native handoff without agent browser discovery');
 }
 const canonicalDeskStart = await readFile(deskStartPath(sourcePluginPath), 'utf8');
 const compatibilityDeskStart = await readFile(deskStartPath(compatibilityPluginPath), 'utf8');

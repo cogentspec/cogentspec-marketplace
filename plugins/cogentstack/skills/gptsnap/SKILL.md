@@ -1,36 +1,30 @@
 ---
 name: gptsnap
-description: Connect the isolated CogentSpec external-browser workspace with the installed GPTSnap command and its protected workspace acknowledgement.
+description: Run the installed GPTSnap command, which opens its external browser workspace and confirms the protected connection without agent browser control.
 ---
 
 # GPTSnap user command
 
-Say **Connecting GPTSnap.**, run the installed command, then say **GPTSnap connected.** only when it returns `status: connected`. This is not a diagnostic request.
+Say **Connecting GPTSnap.**, run the installed command once, then say **GPTSnap connected.** only when it returns a verified status: connected. This is not a diagnostic request.
 
-## Normal connection — no interface inspection
+## One installed command owns the browser handoff
 
-Use the current package's `scripts/gptsnap-client.mjs` and its exported `connectGptSnap` function in the approved host runtime. Run it once with the invoking workspace directory and one narrow opening callback:
+From the invoking workspace, run the current package's scripts/start-gptsnap.ps1 once through the host-approved Windows-user execution tool. Capture its single JSON result privately and show only its plain outcome. The optional scripts/gptsnap-client.mjs process adapter runs the same command without any browser API or opening callback; it is not needed when PowerShell execution is available.
 
-```javascript
-const result = await connectGptSnap({ cwd: invokingWorkspace, openWorkspace: url => gptPopTab.goto(url) });
-```
+The command owns update -> isolated context -> Bridge -> validation of the exact webWorkspaceUrl -> one Windows-default-browser handoff -> protected acknowledgement. Internally the destination is -Surface chatgpt -Experience split-screen. Windows chooses the configured external browser and may open a new tab. Do not enumerate profiles or promise reuse of an existing tab. No physical snapping or window rearrangement is performed. The destination remains the CogentSpec GPT split-screen workspace, not GPTDesk/Web or a native Popout.
 
-Reuse the intended external browser and live-claim its CogentSpec tab using tab metadata only. If the destination is ambiguous, ask which tab. If no workspace tab exists, create one in the user-identified external browser. **Never use `open_in_codex` or an in-app browser pane.** No substitution with GPTDesk/Web, Popout or window-layout changes.
+**Do not use browser-control tools for this command.** No browser discovery, tab listing/claiming, browser session naming, URL-opening callbacks, navigation tools, DOM/AX reads, page evaluation, LED checks, Projects navigation, project-list reads, clicks, screenshots, console/network inspection or other interface debugging. **Never use open_in_codex** or an in-app browser. The installed command opens the validated destination itself, including a required approval page. Never perform a second browser handoff or use UI verification on failure.
 
-The installed client runs `scripts/start-gptsnap.ps1` once. The supervisor owns update/context/Bridge startup with `-Surface chatgpt -Experience split-screen`, validates the private `webWorkspaceUrl` handoff and emits a private `workspace_ready` event. The client opens that exact URL once; the supervisor then waits for the protected server acknowledgement. A ready worker, accepted URL open or redeemed grant alone cannot report connected.
+The protected acknowledgement requires the exact redeemed session, handoff, context, active licensed device lease and fresh worker presence. browserOpened: true or a ready worker alone cannot mean connected. Require workspaceConnected: true, acknowledgementVerified: true and browserHandoff: windows-default-browser with status: connected.
 
-**Do not inspect or debug the interface to confirm the connection.** No DOM/AX snapshots, selectors, page evaluation, LED inspection, project-list queries, Projects navigation, clicks, screenshots, console/network inspection or browser-state probes in a normal command. The workspace itself sends its acknowledgement; the command verifies it against the exact redeemed browser session, handoff, isolated context, active device lease and fresh worker presence. Never replace this acknowledgement with interface inspection, even on failure. Visual checks belong only to an explicitly requested diagnosis.
+Keep helper output, context keys and private protocol material out of ordinary responses. Do not search repositories/history, load the general-purpose skill, run tests, emit evidence reports or repeat helpers during ordinary connection. Normal output contains no workspace/approval URL or browser navigation code. -PrepareOnly exists for explicit recovery/testing only; never use it as the normal command or an automatic fallback. Use the permitted Windows-user execution scope; do not bypass integrity, account or host approval checks.
 
-Capture protocol events privately. Do not print `workspaceUrl`, `browserNavigationCode`, fragments, helper output or stderr. No handoff transfers through files, clipboard, local servers or address-bar typing. Use the host-approved Windows-user execution scope; never bypass approval or integrity checks. Do not load the general-purpose skill, search files/history, repeat helpers, run tests or produce evidence reports during ordinary connection.
+On success reply **GPTSnap connected.** On any failure show only the command's plain userMessage and stop. No automatic retry, reinstall, browser-control fallback, credentials request or success inferred from an accepted browser launch. Normal startup/acknowledgement has a 50-second budget; a required verified update has a separate bounded allowance. Do not describe helper timing as the entire conversational wait.
 
-On `connected`, reply **GPTSnap connected.** On failure, show only the returned plain `userMessage` and stop; no automatic retry, reinstall or new approval. Never infer missing licences or request credentials. The helper's normal startup/acknowledgement budget is 50 seconds; a required update has a separate bounded allowance. A timer is not a guarantee of the entire conversational wait.
+## Only if computer approval is required
 
-If browser control is unavailable, call the same client without `openWorkspace`. It prepares but does not consume the handoff; return its private URL once as **[Open CogentSpec GPT split-screen workspace](<URL>)** and report ready, not connected. Do not invent another opening method.
+The command validates the existing cogentspec-gptsnap-approval-v1 packet and opens its official HTTPS approval destination once through Windows. On approval_required, ask the user to approve this computer in the already-open CogentSpec page. Do not open, inspect or click that page yourself, request credentials, approve access/replacement, or send the user to /install.
 
-## Only if the command returns computer approval required
+Keep the returned context/expiry private. Poll ../cogentspec/scripts/connect-cogentstack.ps1 -Mode complete -BrowserApproval -ContextKey <same context> -Surface chatgpt -RequestTimeoutSeconds 6 no faster than the returned interval (at least five seconds), using the same pending request. Stop at expiry, denial or any failure. On authorized with browserAuthorizationCompleted: true, run scripts/start-gptsnap.ps1 beneath refreshedPluginPath once with -ResumeApproval -ContextKey <same context>. It skips repeated update/context and cannot start another approval. It opens the workspace itself and must return the same protected acknowledgement before success.
 
-Keep the returned approval packet private. The helper validates `approvalProtocol: cogentspec-gptsnap-approval-v1` and the exact HTTPS cogentspec.com /activate destination, original context, future expiry and polling interval. Navigate once to its `approvalUrl`; the user approves computer access there. Never approve account/device replacement yourself or send the user to /install.
-
-Poll `../cogentstack/scripts/connect-cogentstack.ps1 -Mode complete -BrowserApproval -ContextKey <same context> -Surface chatgpt -RequestTimeoutSeconds 6` no faster than `pollAfterSeconds` (at least 5 seconds), using the same request and stopping at expiry or any denial/error. On `authorized` with `browserAuthorizationCompleted: true`, use the client beneath `refreshedPluginPath` with `resumeApproval: { contextKey: sameContext }` and the same URL-opening callback. It resumes once without repeating update/context or starting another approval. Wait for the same protected acknowledgement before reporting success.
-
-`$gptpop` is an alias for this exact flow.
+$gptpop is an alias for this flow.
