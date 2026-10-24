@@ -4,12 +4,13 @@ import {readFile} from 'node:fs/promises';
 import {runInNewContext} from 'node:vm';
 import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
-import {commandBinding,validQwenConversation,verifiedReceipt} from './policy.mjs';
+import {commandBinding,validQwenConversation,verifiedHandoff,workspaceTab} from './policy.mjs';
 
 const id='a'.repeat(32),request={protocol:'cogentspec-qwen-web-command-v1',command:'$qwenweb',requestId:crypto.randomUUID()};
 const sender={id,documentId:crypto.randomUUID(),url:'https://chat.qwen.ai/c/private-conversation-id'};
-const proof={protocol:'cogentspec-workspace-beacon-start-v1',status:'connected',workspaceConnected:true,acknowledgementVerified:true,
- browserReused:true,browserOpened:false,browserHandoff:'authenticated-workspace-reuse',surface:'qwen-web',experience:'web'};
+const context='ctx-'+'a'.repeat(64);
+const proof={protocol:'cogentspec-qwenweb-navigation-v1',status:'ready',browserOpened:false,
+ workspaceUrl:'https://cogentspec.app/stack?surface=qwen-web&context='+context+'&experience=web&open=web&nav='+'b'.repeat(32)+'#desktop-web=cgw_'+'c'.repeat(40)};
 test('browser frames bind only the exact Qwen conversation and never send its URL to the host',async()=>{
  const binding=await commandBinding(request,sender,id);assert.match(binding.contextKey,/^ctx-[a-f0-9]{64}$/);
  assert.doesNotMatch(JSON.stringify(binding),/private-conversation|https:|cookie|path|token/);
@@ -19,26 +20,34 @@ test('browser frames bind only the exact Qwen conversation and never send its UR
  for(const path of ['/','/auth','/auth/login','/login','/settings']) assert.equal(validQwenConversation('https://chat.qwen.ai'+path),null);
  for(const patch of [{command:'$qwenlocal'},{command:'powershell.exe'},{requestId:'bad'},{script:'arbitrary'}])assert.equal(await commandBinding({...request,...patch},sender,id),null);
 });
-test('only fresh Qwen Web authenticated reuse receipts qualify as connected',()=>{
- assert.equal(verifiedReceipt(proof),true);
- for(const patch of [{surface:'chatgpt'},{experience:'split-screen'},{acknowledgementVerified:false},{browserOpened:true},{browserReused:false},{status:'ready'}])assert.equal(verifiedReceipt({...proof,...patch}),false);
+test('only exact provider/context Web grants reach navigation',()=>{
+ const binding={contextKey:context,requestId:request.requestId},value={...proof,requestId:request.requestId};
+ assert.equal(verifiedHandoff(value,binding),proof.workspaceUrl);
+ for(const patch of [{requestId:'stale'},{status:'connected'},{browserOpened:true},
+  {workspaceUrl:proof.workspaceUrl.replace('qwen-web','chatgpt')},
+  {workspaceUrl:proof.workspaceUrl.replace('cogentspec.app','attacker.invalid')},
+  {workspaceUrl:proof.workspaceUrl.replace(context,'ctx-'+'d'.repeat(64))},
+  {workspaceUrl:proof.workspaceUrl.replace('&open=web','&open=web&open=web')},
+  {workspaceUrl:proof.workspaceUrl.split('#')[0]}])assert.equal(verifiedHandoff({...value,...patch},binding),null);
+ assert.equal(workspaceTab('https://cogentspec.app/stack?surface=chatgpt&experience=web'),false);
 });
-test('worker uses native messaging only, fences duplicate requests and strips host output',{timeout:5000},async()=>{
- const source=await readFile(new URL('./worker.mjs',import.meta.url),'utf8');let handler,finish,calls=0,started;
- const nativeStarted=new Promise(resolve=>{started=resolve;});
- const chrome={runtime:{id,onMessage:{addListener:value=>handler=value},sendNativeMessage:async(name,binding)=>{
-  assert.equal(name,'com.cogentspec.qwen_web');assert.deepEqual(Object.keys(binding).sort(),['command','contextKey','protocol','requestId']);calls++;
-  return new Promise(resolve=>{finish=()=>resolve({...proof,requestId:binding.requestId,secret:'private'});started();});
- }}};
- runInNewContext(source.replace(/^import [^\r\n]+[\r\n]+/,''),{chrome,commandBinding,verifiedReceipt,Set});
- let replyFirst;const firstReply=new Promise(resolve=>{replyFirst=resolve;});handler(request,sender,replyFirst);await nativeStarted;
- const second=await new Promise(resolve=>handler({...request,requestId:crypto.randomUUID()},sender,resolve));
- assert.equal(calls,1);assert.equal(second.connected,false);finish();const first=await firstReply;
- assert.deepEqual(JSON.parse(JSON.stringify(first)),{connected:true,message:'Bridge connected.'});
- chrome.runtime.sendNativeMessage=async()=>({...proof,requestId:'stale'});
- const stale=await new Promise(resolve=>handler({...request,requestId:crypto.randomUUID()},sender,resolve));assert.equal(stale.connected,false);
- assert.doesNotMatch(source,/tabs\.|windows\.|fetch\(|postMessage/);
+
+test('worker delivers one private handoff and requires page verification, failing closed for ambiguity and cancellation',async()=>{
+ const source=await readFile(new URL('./worker.mjs',import.meta.url),'utf8');
+ const binding=await commandBinding(request,sender,id);
+ let handler,updates=[],mode='success';
+ const chrome={runtime:{id,onMessage:{addListener:fn=>handler=fn},sendNativeMessage:async()=>({...proof,requestId:binding.requestId,
+  workspaceUrl:proof.workspaceUrl.replace(context,binding.contextKey)})},tabs:{
+  query:async()=>mode==='ambiguous'?[{id:1,url:proof.workspaceUrl},{id:2,url:proof.workspaceUrl}]:[{id:1,url:proof.workspaceUrl}],
+  sendMessage:async(_id,message)=>message.operation==='prepare'?{approved:mode!=='cancel'}:{connected:mode!=='unverified'},
+  update:async(id,args)=>updates.push({id,args})}};
+ runInNewContext(source.replace(/^import [^\r\n]+[\r\n]+/,''),{chrome,commandBinding,verifiedHandoff,workspaceTab,Set,Promise,Error,setTimeout:fn=>fn()});
+ const send=()=>new Promise(resolve=>handler(request,sender,resolve));
+ assert.equal((await send()).connected,true);assert.equal(updates.length,1);assert.equal(updates[0].id,1);
+ for(const failure of ['ambiguous','cancel','unverified']){mode=failure;const before=updates.length;assert.equal((await send()).connected,false);assert.equal(updates.length,before+(failure==='unverified'?1:0));}
+ assert.doesNotMatch(source,/tabs\.create|windows\.|fetch\(|postMessage/);
 });
+
 test('only real exact-command Send or Enter actions trigger the content script',async()=>{
  const source=await readFile(new URL('./command.js',import.meta.url),'utf8'),listeners=new Map(),sent=[];
  class Element {
@@ -64,8 +73,28 @@ test('native transport compiles, validates framing, rejects arbitrary execution 
  const result=spawnSync('powershell.exe',['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',fileURLToPath(new URL('./test-native.ps1',import.meta.url))],{encoding:'utf8',windowsHide:true,timeout:15000});
  assert.equal(result.status,0,result.stderr);assert.equal(JSON.parse(result.stdout.trim()).status,'passed');
 });
-test('extension permissions exclude credentials, CogentSpec pages, tab control and external messages',async()=>{
+test('extension permissions are limited to native messaging and provider/work-area hosts',async()=>{
  const manifest=JSON.parse(await readFile(new URL('./manifest.json',import.meta.url),'utf8'));
  assert.deepEqual(manifest.permissions,['nativeMessaging']);assert.equal(manifest.externally_connectable,undefined);
- assert.ok(manifest.content_scripts[0].all_frames);assert.ok(manifest.host_permissions.every(host=>host.includes('qwen.ai')));
+ assert.ok(manifest.content_scripts[0].all_frames);assert.ok(manifest.host_permissions.every(host=>host.includes('qwen.ai')||host==='https://cogentspec.app/stack*'));
+});
+
+test('workspace confirmation and verification require the exact page, consumed grant, green status and authorized library',async()=>{
+ const source=await readFile(new URL('./workspace.js',import.meta.url),'utf8');
+ let handler,approved=true,green=true,status=200,calls=0;
+ const location={href:proof.workspaceUrl.split('#')[0]};
+ runInNewContext(source,{URL,location,window:{confirm:()=>approved},AbortSignal,
+  document:{querySelector:()=>green?{}:null},chrome:{runtime:{id,onMessage:{addListener:fn=>handler=fn}}},
+  fetch:async url=>{calls++;assert.equal(url,'/api/project-requests?surface=qwen-web&context='+context);return {ok:status===200,json:async()=>({requests:[]})};}});
+ const send=(operation,change={},senderId=id)=>new Promise(resolve=>{
+  const pending=handler({protocol:'cogentspec-qwen-web-page-v1',operation,contextKey:context,...change},{id:senderId},resolve);
+  if(!pending)resolve(undefined);
+ });
+ assert.equal((await send('prepare')).approved,true);approved=false;assert.equal((await send('prepare')).approved,false);
+ assert.equal((await send('verify')).connected,true);
+ green=false;assert.equal((await send('verify')).connected,false);green=true;
+ status=401;assert.equal((await send('verify')).connected,false);status=200;
+ const before=calls;assert.equal(await send('verify',{contextKey:'ctx-'+'f'.repeat(64)}),undefined);
+ assert.equal(await send('verify',{},'other-extension'),undefined);location.href=proof.workspaceUrl;
+ assert.equal(await send('verify'),undefined);assert.equal(calls,before,'Unconsumed or mismatched handoffs must not query a library');
 });

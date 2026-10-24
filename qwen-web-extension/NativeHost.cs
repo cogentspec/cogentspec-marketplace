@@ -38,15 +38,16 @@ namespace CogentSpecQwenWeb {
      || !Guid.TryParseExact(Text(request,"requestId"),"D",out id)
      || !Regex.IsMatch(Text(request,"contextKey") ?? "", "^ctx-[a-f0-9]{64}$")) throw new InvalidDataException();
    var result = connect(Text(request,"contextKey"));
-   bool verified = Text(result,"protocol") == "cogentspec-workspace-beacon-start-v1" && Text(result,"status") == "connected"
-     && Text(result,"surface") == "qwen-web" && Text(result,"experience") == "web"
-     && Text(result,"browserHandoff") == "authenticated-workspace-reuse"
-     && True(result,"workspaceConnected") && True(result,"acknowledgementVerified") && True(result,"browserReused")
+   bool verified = Text(result,"browserNavigationProtocol") == "cogentspec-qwenweb-navigation-v1" && Text(result,"status") == "ready"
+     && Text(result,"contextKey") == Text(request,"contextKey") && True(result,"contextIsolated")
+     && Text(result,"accountState") == "signed_in" && Text(result,"mcpState") == "not_required"
+     && Text(result,"projectDataConnection") == "authenticated_desktop_bridge"
+     && True(result,"presenceVerified") && True(result,"defaultDirectoryReady")
      && result.ContainsKey("browserOpened") && result["browserOpened"] is bool && !(bool)result["browserOpened"];
-   // Never forward helper text, context, credentials, handoff material or paths.
-   return new { protocol="cogentspec-workspace-beacon-start-v1", requestId=id.ToString(), status=verified?"connected":"not_connected",
-    workspaceConnected=verified, acknowledgementVerified=verified, browserReused=verified, browserOpened=false,
-    browserHandoff="authenticated-workspace-reuse", surface="qwen-web", experience="web" };
+   // The private grant is delivered only to the registered extension worker.
+   // Never forward arbitrary helper text or execution code to a page or chat.
+   return new { protocol="cogentspec-qwenweb-navigation-v1", requestId=id.ToString(), status=verified?"ready":"not_ready",
+    workspaceUrl=verified?Text(result,"workspaceUrl"):null, browserOpened=false };
   }
  }
  public static class Host {
@@ -55,10 +56,10 @@ namespace CogentSpecQwenWeb {
   static string Hash(string path) { using(var hash=SHA256.Create()) using(var file=File.OpenRead(path)) return BitConverter.ToString(hash.ComputeHash(file)).Replace("-","").ToLowerInvariant(); }
   static Dictionary<string,object> Connect(string context, Dictionary<string,object> config) {
    var helper = Protocol.Text(config,"helperPath");
-   if (!Path.IsPathRooted(helper) || Path.GetFileName(helper) != "start-workspace-beacon.ps1" || Hash(helper) != Protocol.Text(config,"helperSha256")) throw new InvalidDataException();
+   if (!Path.IsPathRooted(helper) || Path.GetFileName(helper) != "start-qwenweb.ps1" || Hash(helper) != Protocol.Text(config,"helperSha256")) throw new InvalidDataException();
    var start = new ProcessStartInfo {
     FileName=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System),"WindowsPowerShell","v1.0","powershell.exe"),
-    Arguments="-NoProfile -NonInteractive -ExecutionPolicy Bypass -File \""+helper+"\" -Surface qwen-web -Experience web -ContextKey "+context,
+    Arguments="-NoProfile -NonInteractive -ExecutionPolicy Bypass -File \""+helper+"\" -ContextKey "+context,
     WorkingDirectory=Path.GetDirectoryName(helper), UseShellExecute=false, CreateNoWindow=true,
     RedirectStandardOutput=true, RedirectStandardError=true
    };

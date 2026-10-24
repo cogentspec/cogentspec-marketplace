@@ -19,9 +19,21 @@ export async function commandBinding(message, sender, extensionId, digest = valu
     contextKey: 'ctx-' + [...new Uint8Array(hash)].map(byte => byte.toString(16).padStart(2, '0')).join('') };
 }
 
-export function verifiedReceipt(value) {
-  return value?.protocol === 'cogentspec-workspace-beacon-start-v1' && value.status === 'connected'
-    && value.workspaceConnected === true && value.acknowledgementVerified === true
-    && value.browserReused === true && value.browserOpened === false
-    && value.browserHandoff === 'authenticated-workspace-reuse' && value.surface === 'qwen-web' && value.experience === 'web';
+export function workspaceTab(raw) {
+  try {
+    const url = new URL(raw);
+    return url.origin === 'https://cogentspec.app' && !url.username && !url.password && url.pathname === '/stack'
+      && url.searchParams.get('surface') === 'qwen-web' && url.searchParams.get('experience') === 'web';
+  } catch { return false; }
+}
+
+export function verifiedHandoff(value, binding) {
+  if (value?.protocol !== 'cogentspec-qwenweb-navigation-v1' || value.status !== 'ready'
+    || value.requestId !== binding.requestId || value.browserOpened !== false || !workspaceTab(value.workspaceUrl)) return null;
+  const url = new URL(value.workspaceUrl);
+  if ([...url.searchParams].length !== 5 || new Set(url.searchParams.keys()).size !== 5
+    || url.searchParams.get('context') !== binding.contextKey || url.searchParams.get('open') !== 'web'
+    || !/^[a-f0-9]{32}$/.test(url.searchParams.get('nav') || '')
+    || !/^#desktop-web=cgw_[A-Za-z0-9_-]{32,200}$/.test(url.hash)) return null;
+  return url.href;
 }

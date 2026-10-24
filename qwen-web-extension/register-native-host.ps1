@@ -12,7 +12,7 @@ $manifestPath = @((Join-Path $package '.codex-plugin\plugin.json'),(Join-Path $p
 if (-not $manifestPath) { throw 'Choose the installed CogentSpec plugin root.' }
 $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
 if ($manifest.name -notin @('cogentspec','cogentstack')) { throw 'Invalid CogentSpec package identity.' }
-$helper = (Resolve-Path -LiteralPath (Join-Path $package "skills\$($manifest.name)\scripts\start-workspace-beacon.ps1")).Path
+$helper = (Resolve-Path -LiteralPath (Join-Path $package 'skills\qwenweb\scripts\start-qwenweb.ps1')).Path
 $candidates = if ($Browser -eq 'Chrome') {
     @("$env:ProgramFiles\Google\Chrome\Application\chrome.exe","${env:ProgramFiles(x86)}\Google\Chrome\Application\chrome.exe","$env:LOCALAPPDATA\Google\Chrome\Application\chrome.exe")
 } else { @("$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe","${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe") }

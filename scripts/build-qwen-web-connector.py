@@ -9,7 +9,7 @@ parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--output", type=Path, required=True)
 args = parser.parse_args()
 source = Path(__file__).resolve().parents[1] / "qwen-web-extension"
-files = ["manifest.json", "policy.mjs", "worker.mjs", "command.js", "NativeHost.cs", "register-native-host.ps1", "README.md"]
+files = ["manifest.json", "policy.mjs", "worker.mjs", "command.js", "workspace.js", "NativeHost.cs", "register-native-host.ps1", "README.md"]
 if args.output.suffix != ".zip":
     parser.error("Output must be a ZIP source bundle.")
 args.output.parent.mkdir(parents=True, exist_ok=True)

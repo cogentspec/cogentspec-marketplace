@@ -1,6 +1,6 @@
 interface:
-  display_name: "Qwen Web Bridge"
-  short_description: "Connect the listening Qwen Web work area."
-  default_prompt: "Run $qwenweb to connect this project to its existing listening Qwen Web tab."
+  display_name: "QwenWeb"
+  short_description: "Open the Qwen web workspace"
+  default_prompt: "Use $qwenweb to connect this project through CogentSpec Qwen Web."
 policy:
   allow_implicit_invocation: false

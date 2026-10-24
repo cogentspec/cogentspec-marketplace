@@ -7,7 +7,7 @@ $connect=[Func[string,Collections.Generic.Dictionary[string,object]]]{param($con
  if($context -cne ('ctx-'+('a'*64))){throw 'Wrong context'}
  $script:calls++
  $proof=[Collections.Generic.Dictionary[string,object]]::new()
- foreach($entry in @{protocol='cogentspec-workspace-beacon-start-v1';status='connected';surface='qwen-web';experience='web';workspaceConnected=$true;acknowledgementVerified=$true;browserReused=$true;browserOpened=$false;browserHandoff='authenticated-workspace-reuse';userMessage='PRIVATE_FIXTURE_DO_NOT_FORWARD'}.GetEnumerator()){$proof.Add($entry.Key,$entry.Value)}
+ foreach($entry in @{browserNavigationProtocol='cogentspec-qwenweb-navigation-v1';status='ready';contextKey=$context;contextIsolated=$true;accountState='signed_in';mcpState='not_required';projectDataConnection='authenticated_desktop_bridge';presenceVerified=$true;defaultDirectoryReady=$true;browserOpened=$false;workspaceUrl='PRIVATE_WORKSPACE_URL';userMessage='PRIVATE_FIXTURE_DO_NOT_FORWARD'}.GetEnumerator()){$proof.Add($entry.Key,$entry.Value)}
  return ,$proof
 }
 $bytes=[Text.Encoding]::UTF8.GetBytes($json.Serialize($request))
@@ -17,7 +17,7 @@ $read=[CogentSpecQwenWeb.Protocol]::Read($stream)
 $proof=[CogentSpecQwenWeb.Protocol]::Execute($read,$connect)
 $text=$json.Serialize($proof)
 if($text -match 'ctx-|PRIVATE_FIXTURE|cgw_|cga_'){throw 'Private material escaped'}
-if(-not ($text | ConvertFrom-Json).acknowledgementVerified -or $script:calls -ne 1){throw 'Handshake not verified'}
+if(($text | ConvertFrom-Json).status -ne 'ready' -or $script:calls -ne 1){throw 'Handshake not verified'}
 $stream.Dispose()
 foreach($change in @(@{command='powershell.exe'},@{contextKey='ctx-invalid'},@{protocol='wrong'},@{requestId='invalid'},@{helperPath='C:\arbitrary.ps1'})){
  $bad=$request.Clone();foreach($entry in $change.GetEnumerator()){$bad[$entry.Key]=$entry.Value}
@@ -31,10 +31,10 @@ foreach($bytes in @([byte[]]@(1,0),[byte[]]@(0,0,0,0),[byte[]]@(1,8,0,0),[byte[]
  if(-not $rejected){throw 'Malformed framing accepted'};$stream.Dispose()
 }
 $falseProof=[Func[string,Collections.Generic.Dictionary[string,object]]]{param($context)
- $proof=$connect.Invoke($context);$proof['acknowledgementVerified']=$false;return ,$proof
+ $proof=$connect.Invoke($context);$proof['presenceVerified']=$false;return ,$proof
 }
 $answer=[CogentSpecQwenWeb.Protocol]::Execute([Text.Encoding]::UTF8.GetBytes($json.Serialize($request)),$falseProof)
-if(($json.Serialize($answer)|ConvertFrom-Json).workspaceConnected){throw 'Unverified connection reported success'}
+if(($json.Serialize($answer)|ConvertFrom-Json).status -eq 'ready'){throw 'Unverified connection reported success'}
 $tokens=$null;$errors=$null
 [void][Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot 'register-native-host.ps1'),[ref]$tokens,[ref]$errors)
 if($errors.Count){throw 'Registration script syntax failed'}

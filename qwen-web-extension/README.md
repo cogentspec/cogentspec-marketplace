@@ -1,7 +1,7 @@
 # CogentSpec Qwen Web companion connector
 
 This companion connects the Qwen browser conversation (including a Qwen.ai frame
-inside a sidebar extension) to the existing CogentSpec Qwen Web listener. It does
+inside a sidebar extension) to the authenticated CogentSpec Qwen Web work area. It does
 not change or require a messaging API in the third-party Qwen sidebar extension.
 It is separate from Qwen Local and the Popout lifecycle extension.
 
@@ -19,14 +19,9 @@ install another extension, change policies or open tabs. After a package update,
 run the same registration with `-Update` to refresh that pin. The third-party
 extension ID `ophdppnnmjanpfpekojldpibobgegljk` is **not** the companion ID.
 
-In the existing CogentSpec **Qwen Web** work area, select **Initiate Bridge** and
-wait for the orange listening light. Copy `$qwenweb` into the Qwen composer and
-send it. The companion observes only the exact command on a real Send/Enter
-action. It lets Qwen create its conversation URL, derives a private task key from
-that URL, and invokes the fixed Qwen Web helper through native messaging. It
-does not read conversation replies or other messages. The work area's green
-light requires the live account/device/owner acknowledgement; the companion
-never opens, reloads, navigates or focuses any tab or window.
+Open exactly one intended CogentSpec **Qwen Web** work area. Copy `$qwenweb` into the Qwen composer and send it. No Initiate Bridge listener is required. The companion observes only the exact command on a real Send/Enter action, waits for the conversation URL, derives its isolated task key and runs the fixed `start-qwenweb.ps1` launcher through native messaging. The launcher verifies the account/device, starts or reuses the local worker and returns a one-use authenticated Web handoff.
+
+The companion requests confirmation in the intended work area before reloading it; cancel and save unfinished work first. It never selects between multiple work areas, navigates the Qwen conversation, or opens a replacement tab. Only the registered worker receives the private URL. After navigation it verifies the same context, consumed fragment, visible **Bridge connected** light and authorized project list before reporting connected. It reads no conversation replies. This requires refreshing the native registration with `-Update` after updating from the old listener-based connector.
 
 Supported send controls are native form submit, unmodified Enter and clearly
 identified Send buttons (`send-message-button`, `data-testid=send-button`,
