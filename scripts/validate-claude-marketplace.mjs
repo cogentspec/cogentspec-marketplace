@@ -44,37 +44,22 @@ const skill = await readFile(join(pluginRoot, "skills", "cogentspec", "SKILL.md"
 const scriptsRoot = join(pluginRoot, "skills", "cogentspec", "scripts");
 const codexScriptsRoot = join(repositoryRoot, "plugins", "cogentspec", "skills", "cogentspec", "scripts");
 
-const commandContracts = [
-  ["claudesnap", "split-screen", "webWorkspaceUrl", "Claude split-screen workspace is connected"],
-  ["claudedesk", "desktop", "chatgptWorkspaceUrl", "Claude Desktop workspace is ready"],
-  ["claudeweb", "web", "webWorkspaceUrl", "Claude web workspace is ready"],
-];
-for (const [root, mainSkill] of [[pluginRoot, "cogentspec"], [compatibilityRoot, "cogentstack"]]) {
-  for (const [command, experience, destination, confirmation] of commandContracts) {
-    const commandRoot = join(root, "skills", command);
-    const commandSkill = await readFile(join(commandRoot, "SKILL.md"), "utf8");
-    const commandMetadata = await readFile(join(commandRoot, "agents", "openai.yaml"), "utf8");
-    const markers = command === "claudeweb"
-      ? [`name: ${command}`, `../${mainSkill}/SKILL.md`, "start-claudeweb.ps1", "-Surface claude-desktop -Experience web", destination, "Claude web workspace is ready", "Bridge connected", "My projects", "cogentspec-claudeweb-navigation-v1"]
-      : [`name: ${command}`, `../${mainSkill}/SKILL.md`, `-Surface claude-desktop -Experience ${experience}`, destination, confirmation];
-    if (command === "claudesnap") {
-      for (const marker of ["cogentspec-claudesnap-navigation-v1", "claudeSnapTab", "browserNavigationCode", "live-claim", "Bridge connected", "My projects", "Never use `open_in_codex`"]) {
-        if (!commandSkill.includes(marker)) fail(`ClaudeSnap external split-screen delivery is missing ${marker}`);
-      }
+const commandContracts = [['claudesnap','split-screen'],['claudedesk','desktop-ui'],['claudeweb','web'],['qwenweb','web']];
+for (const root of [pluginRoot, compatibilityRoot]) {
+  for (const [command, experience] of commandContracts) {
+    const commandRoot=join(root,'skills',command);
+    const commandSkill=await readFile(join(commandRoot,'SKILL.md'),'utf8');
+    const metadata=await readFile(join(commandRoot,'agents','openai.yaml'),'utf8');
+    const executable=await readFile(join(commandRoot,'scripts',`start-${command}.ps1`),'utf8');
+    for(const marker of [`name: ${command}`,`start-${command}.ps1`,'Initiate Bridge','acknowledgementVerified: true','browserOpened: false','Never open']) {
+      if(!commandSkill.includes(marker)) fail(`${command} missing listener contract ${marker}`);
     }
-    for (const marker of markers) {
-      if (!commandSkill.includes(marker)) fail(`${command} is missing Claude destination marker: ${marker}`);
-    }
-    for (const marker of [`$${command}`, "allow_implicit_invocation: false"]) {
-      if (!commandMetadata.includes(marker)) fail(`${command} metadata is missing explicit-command marker: ${marker}`);
-    }
+    const surface=command==='qwenweb'?'qwen-web':'claude-desktop';
+    if(!executable.includes(`-Surface ${surface} -Experience ${experience}`)) fail(`${command} addresses the wrong listener`);
+    for(const marker of [`$${command}`,'allow_implicit_invocation: false']) if(!metadata.includes(marker)) fail(`${command} lacks explicit invocation metadata`);
   }
-  try {
-    await readFile(join(root, "skills", "claudepop", "SKILL.md"), "utf8");
-    fail("claudepop must remain unregistered until a verified Claude Popout exists");
-  } catch (error) {
-    if (error?.code !== "ENOENT") throw error;
-  }
+  try { await readFile(join(root,'skills','claudepop','SKILL.md'),'utf8');fail('Unverified Claude Popout must remain absent'); }
+  catch(error){if(error?.code!=='ENOENT')throw error;}
 }
 
 if (manifest.name !== "cogentspec") fail("canonical plugin manifest name must be cogentspec");
@@ -129,6 +114,7 @@ const requiredScripts = [
   "project-preview-readiness.ps1",
   "reset-cogentspec-update.ps1",
   "start-cogentstack-bridge.ps1",
+  "start-workspace-beacon.ps1",
   "watch-cogentstack-bridge.ps1",
 ];
 const actualScripts = (await readdir(scriptsRoot)).filter((name) => name.endsWith(".ps1")).sort();
@@ -153,9 +139,14 @@ const claudeWebLaunchers = [pluginRoot, compatibilityRoot].map(root => join(root
 const canonicalWebSource = await readFile(claudeWebLaunchers[0], "utf8");
 const compatibilityWebSource = await readFile(claudeWebLaunchers[1], "utf8");
 if (normalized(canonicalWebSource) !== normalized(compatibilityWebSource).replaceAll("..\\..\\cogentstack\\scripts", "..\\..\\cogentspec\\scripts")) fail("Claude Web launcher compatibility parity failed");
-for (const marker of ["-Surface claude-desktop -Experience web", "'claude-desktop'", "authenticated_desktop_bridge", "defaultDirectoryReady", "invalid_workspace_handoff", "cogentspec-claudeweb-navigation-v1", "await claudeWebTab.goto("]) {
+for (const marker of ["start-workspace-beacon.ps1", "-Surface claude-desktop -Experience web"]) {
   if (!canonicalWebSource.includes(marker)) fail(`Claude Web launcher missing ${marker}`);
 }
+const beacon=await readFile(join(scriptsRoot,'start-workspace-beacon.ps1'),'utf8');
+for(const marker of ['-ListenerOnly','workspace-reuse','acknowledgementVerified','browserOpened=$false','DataProtectionScope]::CurrentUser']) {
+  if(!beacon.includes(marker)) fail(`Shared listener helper lacks ${marker}`);
+}
+
 const syntaxPaths = [...requiredScripts.map((name) => join(scriptsRoot, name)), ...claudeWebLaunchers].map(path => `'${path.replaceAll("'", "''")}'`).join(", ");
 const syntaxCommand = `& { $failed = $false; foreach ($path in @(${syntaxPaths})) { $tokens = $null; $errors = $null; [void][System.Management.Automation.Language.Parser]::ParseFile($path, [ref]$tokens, [ref]$errors); if ($errors.Count -gt 0) { $failed = $true; $errors | ForEach-Object { [Console]::Error.WriteLine(\"$($path): $($_.Message)\") } } }; if ($failed) { exit 1 } }`;
 // Feed the parser script through stdin: a clean release export can have long
@@ -167,7 +158,7 @@ if (syntaxCheck.error) fail(`PowerShell syntax validation could not complete: ${
 if (syntaxCheck.status !== 0) fail(`one or more plugin scripts have invalid PowerShell syntax: ${syntaxCheck.stderr.trim()}`);
 
 const bridge = await readFile(join(scriptsRoot, "start-cogentstack-bridge.ps1"), "utf8");
-for (const marker of ["bridge = 'started'", "bridge = 'already_running'", "browserOpened = $false", "bridge-runtime\\$runtimeVersion", "[ValidateSet('chatgpt', 'claude-desktop')]", "surface=$([Uri]::EscapeDataString($Surface))", "-ContextKey $resolvedContext", "-WorkspaceGrant", "-RequestTimeoutSeconds 6", "Get-HostPowerShellExecutable", "launcherElapsedMs", "&open=web&nav=$navigationKey#desktop-web=", "&open=chatgpt&nav=$navigationKey#desktop-chatgpt="]) {
+for (const marker of ["bridge = 'started'", "bridge = 'already_running'", "browserOpened = $false", "bridge-runtime\\$runtimeVersion", "[ValidateSet('chatgpt', 'claude-desktop', 'qwen-web')]", "surface=$([Uri]::EscapeDataString($Surface))", "-ContextKey $resolvedContext", "-WorkspaceGrant", "-RequestTimeoutSeconds 6", "Get-HostPowerShellExecutable", "launcherElapsedMs", "&open=web&nav=$navigationKey#desktop-web=", "&open=chatgpt&nav=$navigationKey#desktop-chatgpt="]) {
   if (!bridge.includes(marker)) fail(`Desktop Bridge starter is missing required marker: ${marker}`);
 }
 if (!skill.includes("-Surface claude-desktop")) fail("Claude launcher must identify its desktop surface");

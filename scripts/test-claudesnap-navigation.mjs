@@ -105,16 +105,11 @@ foreach ($pair in @(@($url, 'unscoped', 'claude-desktop'), @($url, $key, 'chatgp
     ]) await assert.rejects(verifyDelivery({ ...good, browserNavigationCode: code }));
   });
 
-  test("both ClaudeSnap instructions prohibit embedded delivery and require claimed external verification", () => {
-    for (const pkg of ["cogentspec", "cogentstack"]) {
-      const skill = readFileSync(resolve(root, "claude-plugins", pkg, "skills/claudesnap/SKILL.md"), "utf8");
-      assert.ok(skill.includes("name: claudesnap"));
-      assert.ok(skill.includes("live-claim"));
-      assert.ok(skill.includes("Never use `open_in_codex`"));
-      assert.ok(skill.includes("cogentspec-claudesnap-navigation-v1"));
-      assert.ok(skill.includes("Bridge connected"));
-      assert.ok(skill.includes("My projects"));
-      assert.ok(!skill.includes("mcp__codex_app__open_in_codex"));
-    }
-  });
+  test("both ClaudeSnap instructions connect the explicitly listening Claude split work area", () => {
+  for(const plugin of ['cogentspec','cogentstack']) {
+    const skill=readFileSync(resolve(root,'claude-plugins',plugin,'skills/claudesnap/SKILL.md'),'utf8');
+    for(const marker of ['Initiate Bridge','claude-desktop / split-screen','acknowledgementVerified: true','browserOpened: false','Never open']) assert.ok(skill.includes(marker),marker);
+    assert.doesNotMatch(skill,/claudeSnapTab\.goto|open_in_codex/);
+  }
+});
 }

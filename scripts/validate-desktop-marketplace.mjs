@@ -186,34 +186,19 @@ const compatibilityDesktopUiWatcher = await readFile(join(compatibilityPluginPat
 const compatibilityDesktopUiHelper = await readFile(join(compatibilityPluginPath, "skills", "cogentstack", "scripts", "open-chatgpt-desktop-ui.ps1"), "utf8");
 const compatibilityPopoutNormalizer = await readFile(join(compatibilityPluginPath, "skills", "cogentstack", "scripts", "popout-window-normalizer.ps1"), "utf8");
 const compatibilityGptWebStarter = await readFile(join(compatibilityPluginPath, "skills", "gptweb", "scripts", "start-gptweb.ps1"), "utf8");
-const commandContracts = [
-  ["gptsnap", "split-screen", "webWorkspaceUrl", "CogentSpec GPT split-screen workspace"],
-  ["gptdesk", "desktop-ui", "chatgptWorkspaceUrl", "CogentSpec is connected beside this GPT conversation"],
-  ["gptweb", "web", "scripts/start-gptweb.ps1", "CogentSpec GPT web workspace is ready"],
-];
-for (const pluginPath of [sourcePluginPath, compatibilityPluginPath]) {
-  const alias = await readFile(join(pluginPath, "skills/gptpop/SKILL.md"), "utf8");
-  if (!alias.includes("../gptsnap/SKILL.md") || alias.includes("-Experience ")) fail("gptpop must delegate to gptsnap without a second launcher");
-  for (const [command, experience, destination, confirmation] of commandContracts) {
-    const commandRoot = join(pluginPath, "skills", command);
-    const commandSkill = await readFile(join(commandRoot, "SKILL.md"), "utf8");
-    const commandMetadata = await readFile(join(commandRoot, "agents", "openai.yaml"), "utf8");
-    if (command === "gptsnap") {
-      if (commandSkill.includes("mcp__codex_app__open_in_codex") || !commandSkill.includes("Never use open_in_codex") || !commandSkill.includes("Do not use browser-control tools")) {
-        fail("GPTSnap must delegate opening to its installed command, never agent browser control");
-      }
-      for (const marker of ["gptsnap-client.mjs", "protected acknowledgement", "registered owning tab"]) {
-        if (!commandSkill.includes(marker)) fail(`gptpop external delivery is missing ${marker}`);
-      }
-    }
-    for (const marker of [`name: ${command}`, `-Experience ${experience}`, destination, confirmation]) {
-      if (!commandSkill.includes(marker)) fail(`${command} is missing destination marker: ${marker}`);
-    }
-    for (const marker of [`$${command}`, "allow_implicit_invocation: false"]) {
-      if (!commandMetadata.includes(marker)) fail(`${command} metadata is missing explicit-command marker: ${marker}`);
-    }
+const commandContracts=[['gptsnap','split-screen'],['gptdesk','desktop-ui'],['gptweb','web'],['gptpop','popout'],['qwenweb','web']];
+for(const pluginPath of [sourcePluginPath,compatibilityPluginPath]) for(const [command,experience] of commandContracts) {
+  const commandRoot=join(pluginPath,'skills',command);
+  const skill=await readFile(join(commandRoot,'SKILL.md'),'utf8');
+  const metadata=await readFile(join(commandRoot,'agents','openai.yaml'),'utf8');
+  for(const marker of [`name: ${command}`,`start-${command}.ps1`,'acknowledgementVerified: true','browserOpened: false']) if(!skill.includes(marker)) fail(`${command} lacks ${marker}`);
+  for(const marker of [`$${command}`,'allow_implicit_invocation: false']) if(!metadata.includes(marker)) fail(`${command} lacks explicit invocation metadata`);
+  if(command!=='gptsnap') {
+    const source=await readFile(join(commandRoot,'scripts',`start-${command}.ps1`),'utf8');
+    if(!source.includes(`-Surface ${command==='qwenweb'?'qwen-web':'chatgpt'} -Experience ${experience}`)) fail(`${command} addresses wrong listener`);
   }
 }
+
 if (canonicalPopoutNormalizer !== compatibilityPopoutNormalizer) {
   fail("Desktop Window Normalizer scripts must be identical across GPT packages");
 }
@@ -251,52 +236,12 @@ for (const pluginPath of [sourcePluginPath, compatibilityPluginPath]) {
     if (!popoutSkill.includes(marker)) fail(`gptpop sizing instructions are missing ${marker}`);
   }
 }
-for (const [name, skill] of [["canonical skill", canonicalSkill], ["compatibility skill", compatibilitySkill]]) {
-  for (const marker of [
-    "Explicit one-word destination dispatch",
-    "before running any Bridge helper",
-    "../gptsnap/scripts/start-gptsnap.ps1",
-    "-Experience desktop-ui",
-    "-Experience web",
-    "../gptweb/scripts/start-gptweb.ps1",
-    "Treat `invalid_workspace_handoff` as a hard failure",
-    "Do not apply the Popout-only `currentConversationConnected` gate",
-    "[Open CogentSpec GPT web workspace](<URL>)",
-  ]) {
-    if (!skill.includes(marker)) fail(`${name} is missing explicit destination dispatch marker: ${marker}`);
+for(const [name,skill] of [['canonical',canonicalSkill],['compatibility',compatibilitySkill]]) {
+  for(const marker of ['Explicit one-word destination dispatch','before running any Bridge helper','Initiate Bridge','Never open another tab']) {
+    if(!skill.includes(marker)) fail(`${name} dispatch lacks ${marker}`);
   }
 }
-for (const [name, source] of [["canonical", canonicalGptWebStarter], ["compatibility", compatibilityGptWebStarter]]) {
-  for (const marker of [
-    "-Experience web",
-    "invalid_workspace_handoff",
-    "workspace_not_web_destination",
-    "workspace_selected_desktop_destination",
-    "workspace_url_contract_mismatch",
-    "bridge_ready_contract_mismatch",
-    "#desktop-web=",
-    "^#desktop=",
-    "^#desktop-chatgpt=",
-    "workspaceUrl = $workspaceUrl",
-  ]) {
-    if (!source.includes(marker)) fail(`${name} GPTWeb starter is missing fail-closed marker: ${marker}`);
-  }
-  if (source.includes("chatgptWorkspaceUrl = $chatgptWorkspaceUrl") || source.includes("webWorkspaceUrl = $webWorkspaceUrl")) {
-    fail(`${name} GPTWeb starter exposes an alternate private destination`);
-  }
-}
-for (const pluginPath of [sourcePluginPath, compatibilityPluginPath]) {
-  const desktopCommandSkill = await readFile(join(pluginPath, "skills", "gptdesk", "SKILL.md"), "utf8");
-  if (!desktopCommandSkill.includes('scripts/start-gptdesk.ps1') || !desktopCommandSkill.includes('self-contained')) {
-    fail('GPTDesk must use its dedicated one-shot startup entrypoint');
-  }
-  for (const marker of ['placement: "right"', "native two-column conversation/workspace split", "Omit `threadId` and `tabId`", "ensure-codex-sidebar-hidden.py", "--experience desktop-ui --ensure-split", "layoutVerified: true", "partial Desk result", "AFTER the native open"]) {
-    if (!desktopCommandSkill.includes(marker)) fail(`gptdesk is missing native split marker: ${marker}`);
-  }
-  if (desktopCommandSkill.includes("Omit `threadId`, `tabId`, and `placement`")) {
-    fail("gptdesk still opens an unplaced full-view browser tab");
-  }
-}
+
 const deskStartPath = (pluginPath) => join(pluginPath, 'skills', 'gptdesk', 'scripts', 'start-gptdesk.ps1');
 const snapStartPath = pluginPath => join(pluginPath, 'skills', 'gptsnap', 'scripts', 'start-gptsnap.ps1');
 const canonicalSnapStart = await readFile(snapStartPath(sourcePluginPath), 'utf8');
@@ -318,13 +263,11 @@ if (/SendInput|open_in_codex|openTabs|claimTab/.test(canonicalSnapStart)
 }
 const canonicalDeskStart = await readFile(deskStartPath(sourcePluginPath), 'utf8');
 const compatibilityDeskStart = await readFile(deskStartPath(compatibilityPluginPath), 'utf8');
-if (canonicalDeskStart !== compatibilityDeskStart) fail('GPTDesk startup supervisors must match across GPT packages');
-for (const marker of ['conversationVerification', 'conversationConnectionReason', 'conversationUserMessage']) {
-  if (!canonicalDeskStart.includes(marker)) fail(`GPTDesk startup does not preserve ${marker}`);
+if (canonicalDeskStart !== compatibilityDeskStart.replaceAll('..\\..\\cogentstack\\scripts','..\\..\\cogentspec\\scripts')) fail('GPTDesk startup supervisors must match across GPT packages');
+for(const marker of ['start-workspace-beacon.ps1','-Surface chatgpt -Experience desktop-ui']) {
+  if(!canonicalDeskStart.includes(marker)) fail(`GPTDesk lacks ${marker}`);
 }
-if (/SendInput|open_in_codex|ensure-codex-sidebar-hidden\.py/.test(canonicalDeskStart)) {
-  fail('GPTDesk startup must leave native opening and permitted UI checks to the host');
-}
+
 const canonicalSidebarHelper = await readFile(join(sourcePluginPath, "skills", "cogentspec", "scripts", "ensure-codex-sidebar-hidden.py"), "utf8");
 const compatibilitySidebarHelper = await readFile(join(compatibilityPluginPath, "skills", "cogentstack", "scripts", "ensure-codex-sidebar-hidden.py"), "utf8");
 for (const [name, helper] of [["canonical", canonicalSidebarHelper], ["compatibility", compatibilitySidebarHelper]]) {

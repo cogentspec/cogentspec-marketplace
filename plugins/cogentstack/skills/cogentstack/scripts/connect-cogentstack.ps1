@@ -4,10 +4,12 @@ param(
 
     [string]$InstallationRequest = '',
 
-    [ValidateSet('chatgpt', 'claude-desktop')]
+    [ValidateSet('chatgpt', 'claude-desktop', 'qwen-web')]
     [string]$Surface = 'chatgpt',
 
     [string]$ContextKey = '',
+
+    [ValidateSet('legacy','web','split-screen','popout','desktop','desktop-ui')][string]$Experience = 'legacy',
 
     [switch]$WorkspaceGrant,
 
@@ -134,7 +136,7 @@ function New-CogentSpecWorkspaceGrant([string]$Token, [string]$GrantContextKey, 
         -Uri "$serviceUrl/api/device-authorization/browser-grant" `
         -ContentType 'application/json' `
         -Headers @{ Accept = 'application/json'; Authorization = "Bearer $Token" } `
-        -Body (@{ contextKey = $GrantContextKey; surface = $GrantSurface } | ConvertTo-Json -Compress) `
+        -Body (@{ contextKey = $GrantContextKey; surface = $GrantSurface; experience = $(if ($Experience -ne 'legacy') { $Experience } else { $null }) } | ConvertTo-Json -Compress) `
         -TimeoutSec $RequestTimeoutSeconds
 }
 

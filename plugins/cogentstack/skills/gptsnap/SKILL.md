@@ -27,4 +27,4 @@ The command validates the existing cogentspec-gptsnap-approval-v1 packet without
 
 Keep the returned context/expiry private. Poll ../cogentspec/scripts/connect-cogentstack.ps1 -Mode complete -BrowserApproval -ContextKey <same context> -Surface chatgpt -RequestTimeoutSeconds 6 no faster than the returned interval (at least five seconds), using the same pending request. Stop at expiry, denial or any failure. On authorized with browserAuthorizationCompleted: true, run scripts/start-gptsnap.ps1 beneath refreshedPluginPath once with -ResumeApproval -ContextKey <same context>. It skips repeated update/context and cannot start another approval. It reconnects only the registered existing workspace and requires the protected acknowledgement before success.
 
-$gptpop is an alias for this flow.
+The Popout work area uses its own $gptpop listener command.

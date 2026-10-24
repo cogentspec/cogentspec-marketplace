@@ -1,0 +1,11 @@
+{
+  "manifest_version": 3,
+  "name": "CogentSpec Qwen Web Bridge",
+  "version": "0.1.0",
+  "description": "Connect an explicitly listening CogentSpec Qwen Web work area when you send $qwenweb in Qwen.",
+  "minimum_chrome_version": "120",
+  "permissions": ["nativeMessaging"],
+  "host_permissions": ["https://qwen.ai/*", "https://*.qwen.ai/*"],
+  "background": {"service_worker": "worker.mjs", "type": "module"},
+  "content_scripts": [{"matches": ["https://qwen.ai/*", "https://*.qwen.ai/*"], "all_frames": true, "run_at": "document_idle", "js": ["command.js"]}]
+}

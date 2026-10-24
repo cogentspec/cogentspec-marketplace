@@ -2,11 +2,13 @@
 param(
     [string]$ContextKey = '',
 
-    [ValidateSet('chatgpt', 'claude-desktop')]
+    [ValidateSet('chatgpt', 'claude-desktop', 'qwen-web')]
     [string]$Surface = 'chatgpt',
 
     [ValidateSet('legacy', 'popout', 'desktop-ui', 'web', 'split-screen')]
     [string]$Experience = 'legacy',
+
+    [switch]$ListenerOnly,
 
     [switch]$ResumeApproval
 )
@@ -221,6 +223,7 @@ function Read-FreshPopoutInspection([string]$HelperPath) {
 }
 
 function Confirm-StandalonePopoutConnection([string]$SurfaceName, [string]$ConnectedContextKey, [string]$ConnectedThreadId) {
+    if ($ListenerOnly) { return [ordered]@{ confirmed = $false; popoutConfirmed = $false; reason = 'authenticated_workspace'; verification = 'authenticated_workspace'; userMessage = 'The owning workspace listener confirms this connection.' } }
     if ($SurfaceName -ne 'chatgpt') { return [ordered]@{ confirmed = $false; reason = 'not_applicable' } }
     $token = ''
     try {
@@ -453,7 +456,7 @@ if (-not (Test-Path -LiteralPath $connectionScript -PathType Leaf) -or @($source
 }
 
 $powershellExecutable = Get-HostPowerShellExecutable
-$connectionOutput = @(& $connectionScript -Mode status -Surface $Surface -ContextKey $resolvedContext -WorkspaceGrant -RequestTimeoutSeconds 6 2>&1)
+$connectionOutput = @(& $connectionScript -Mode status -Surface $Surface -ContextKey $resolvedContext -Experience $Experience -WorkspaceGrant -RequestTimeoutSeconds 6 2>&1)
 $connectionJson = @($connectionOutput | ForEach-Object { $_.ToString() } | Where-Object { $_.Trim().StartsWith('{') } | Select-Object -Last 1)
 if (-not $connectionJson) { throw 'Desktop Bridge could not verify the account-bound installation.' }
 $connection = $connectionJson | ConvertFrom-Json
@@ -526,7 +529,7 @@ $mcpState = 'not_required'
 # The authenticated device check and browser grant above, plus fresh worker
 # acknowledgement below, authorize Web. A separate CLI tool login is not a
 # prerequisite for opening that workspace. Desk/Popout keep their existing gate.
-$requiresCodexMcp = $Surface -eq 'chatgpt' -and $Experience -notin @('web', 'split-screen')
+$requiresCodexMcp = -not $ListenerOnly -and $Surface -eq 'chatgpt' -and $Experience -notin @('web', 'split-screen')
 $projectDataConnection = if ($requiresCodexMcp) { 'codex_mcp' } else { 'authenticated_desktop_bridge' }
 if ($requiresCodexMcp) {
     $mcpSetupScript = Join-Path $PSScriptRoot 'ensure-cogentspec-mcp.ps1'

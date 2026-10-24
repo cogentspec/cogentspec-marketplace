@@ -1,22 +1,16 @@
 import assert from 'node:assert/strict';
-import { runInNewContext } from 'node:vm';
+import test from 'node:test';
+import {readFile} from 'node:fs/promises';
 
-// The launcher fixture is piped directly from PowerShell. No private URL is
-// written to a file, clipboard, local server, or console output.
-let raw = '';
-for await (const chunk of process.stdin) raw += chunk;
-const result = JSON.parse(raw.replace(/^\uFEFF/, ''));
-assert.equal(result.browserNavigationProtocol, 'cogentspec-gptweb-navigation-v1');
-let calls = 0;
-const tab = { async goto(url) {
-  calls++;
-  assert.equal(url, result.workspaceUrl, 'Navigation must preserve the entire verified URL');
-  const target = new URL(url);
-  assert.equal(target.searchParams.get('context'), result.contextKey);
-  assert.equal(target.searchParams.get('experience'), 'web');
-  assert.equal(target.searchParams.get('open'), 'web');
-  assert.match(target.hash, /^#desktop-web=cgw_[A-Za-z0-9_-]{32,}$/);
-}};
-await runInNewContext('(async () => {' + result.browserNavigationCode + '})()', { gptWebTab: tab }, { timeout: 1000 });
-assert.equal(calls, 1, 'The prepared browser call must navigate exactly once');
-console.log('DIRECT_BROWSER_NAVIGATION_VERIFIED=true');
+test('gptweb dispatches only its existing owning listener; shared handshake cases cover unsafe handoffs',async()=>{
+  for(const plugin of ['cogentspec','cogentstack']) {
+    const root=new URL('../plugins/'+plugin+'/skills/gptweb/',import.meta.url);
+    const skill=await readFile(new URL('SKILL.md',root),'utf8');
+    const script=await readFile(new URL('scripts/start-gptweb.ps1',root),'utf8');
+    assert.ok(skill.includes('acknowledgementVerified: true'));
+    assert.ok(skill.includes('browserOpened: false'));
+    assert.ok(skill.includes('Initiate Bridge'));
+    assert.match(script,/-Surface chatgpt -Experience web/);
+    assert.doesNotMatch(script,/goto\(|Start-Process|open_in_codex|browserNavigationCode/);
+  }
+});

@@ -29,15 +29,15 @@ Choose this scope before running a helper, rather than attempting it in the sand
 
 ### Explicit one-word destination dispatch
 
-Determine the requested destination before running any Bridge helper. An explicit `$gptsnap` (or its `$gptpop` compatibility alias), `$gptdesk`, or `$gptweb` command overrides the generic `$cogentspec` launcher and reporting steps below. Follow the shared update, project-context, privacy, account, and ready-contract requirements, but run exactly one destination-specific launcher and response flow. Never first run the generic launcher and never silently substitute a different destination.
+Determine the requested destination before running any Bridge helper. An explicit command overrides the generic connection and opening steps below. Read its self-contained skill once and invoke its installed helper once from the invoking project. Preserve trusted updates, isolated context, current account/device checks and private output.
 
-- For `$gptsnap` or `$gptpop`, follow `../gptsnap/SKILL.md` and run `../gptsnap/scripts/start-gptsnap.ps1` once. It owns update/context/Bridge validation, authenticated reconnection to the registered owning workspace tab, and protected acknowledgement. Neither the agent nor the installed command opens a new tab, window, work area or approval page, even if no page responds. A second tab can take ownership only through its explicit user control. No agent browser discovery, tab listing/claiming, navigation callback, browser session naming, UI inspection, screenshots or generic connection flow. Report connected only from its verified final result.
-- For `$gptdesk`, follow the self-contained `../gptdesk/SKILL.md` and run `../gptdesk/scripts/start-gptdesk.ps1` once. It combines the update/context/launcher checks, with `-Experience desktop-ui` handled internally; do not run the generic connection sequence or its helpers separately. Continue with one native open using `placement: "right"` and the Desk skill's permitted layout verification. Do not reload this multi-purpose skill after an update during that Desk-only connection. Use the independent `webWorkspaceUrl` only when native opening is unavailable.
-- For `$gptweb`, invoke `../gptweb/scripts/start-gptweb.ps1` exactly once from the invoking workspace with `-Experience web` handled internally. Require its ready result and private `workspaceUrl` to carry the resolved context and web handoff. Treat `invalid_workspace_handoff` as a hard failure. Do not apply the Popout-only `currentConversationConnected` gate. Follow `../gptweb/SKILL.md` for browser delivery and visible verification: navigate the selected CogentSpec Web tab to the complete returned URL, then check the LED and project library. Bridge readiness alone is not a connected browser. Use `[Open CogentSpec GPT web workspace](<URL>)` only when browser delivery is unavailable; explain that opening it is required.
+- For `$gptsnap`, follow `../gptsnap/SKILL.md` and `../gptsnap/scripts/start-gptsnap.ps1`.
+- For `$gptpop`, follow `../gptpop/SKILL.md` and `../gptpop/scripts/start-gptpop.ps1`.
+- For `$gptdesk`, follow `../gptdesk/SKILL.md` and `../gptdesk/scripts/start-gptdesk.ps1`.
+- For `$gptweb`, follow `../gptweb/SKILL.md` and `../gptweb/scripts/start-gptweb.ps1`.
+- For `$qwenweb`, follow `../qwenweb/SKILL.md` and `../qwenweb/scripts/start-qwenweb.ps1`.
 
-Keep `$cogentspec` as the backward-compatible default. These commands change only presentation and opening behavior; they share the same context, project state, Bridge worker, and protected action flow. The compact Desktop layout is identified only by `experience=desktop-ui`; it must not alter Popout geometry or the ordinary web workspace.
-
-The Web and split-screen ready contracts use `projectDataConnection: authenticated_desktop_bridge` and `mcpState: not_required`, backed by the existing signed-in device, protected browser grant, and fresh verified worker. A separate Codex tool-login check is not required for those browser workspaces. The generic, Desk, and native Popout routes retain their existing project-data-tool gate. Follow the requested destination's readiness contract.
+Every destination requires the user to select **Initiate Bridge** in the intended existing work area first. Require its protected acknowledgement before reporting connected. Never open another tab or window, use browser control, change the destination, or infer success from worker readiness. GPTSnap retains its installed bounded startup command.
 
 ## Connect the current AI project
 

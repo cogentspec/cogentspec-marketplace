@@ -306,6 +306,11 @@ try {
     $sourceManifestPath = Join-Path $sourcePluginPath '.codex-plugin\plugin.json'
     $sourceManifest = Get-Content -LiteralPath $sourceManifestPath -Raw | ConvertFrom-Json
     $allowedFiles = @(
+        'skills/cogentstack/scripts/start-workspace-beacon.ps1',
+        'skills/gptpop/scripts/start-gptpop.ps1',
+        'skills/qwenweb/SKILL.md',
+        'skills/qwenweb/agents/openai.yaml',
+        'skills/qwenweb/scripts/start-qwenweb.ps1',
         '.codex-plugin/plugin.json',
         '.mcp.json',
         'assets/icon.png',
