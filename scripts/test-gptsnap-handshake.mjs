@@ -8,7 +8,7 @@ import { spawn } from 'node:child_process';
 const repository=resolve(import.meta.dirname,'..'),context='ctx-'+'a'.repeat(64);
 const url=`https://cogentspec.app/stack?surface=chatgpt&context=${context}&experience=split-screen&open=web&nav=${'b'.repeat(32)}#desktop-web=cgw_${'c'.repeat(40)}`;
 for(const plugin of ['cogentspec','cogentstack']) {
-  for(const scenario of ['reused','owner_unavailable','owner_changed','busy','offline','wrong-context','unverified','open_required','unsafe-destination','approval','unsafe-approval','resume']) {
+  for(const scenario of ['reused','owner_unavailable','owner_changed','busy','offline','wrong-context','unverified','open_required','unsafe-destination','approval','unsafe-approval','resume','confirmation','confirmation-cancel','confirmation-expire']) {
     const root=await mkdtemp(join(tmpdir(),'gptsnap existing workspace fixture '));
     try {
       const skill=join(root,'skills','gptsnap','scripts'),core=join(root,'skills',plugin,'scripts');
@@ -21,10 +21,17 @@ for(const plugin of ['cogentspec','cogentstack']) {
         if(file==='start-gptsnap.ps1') {
           assert.ok(!/Open-GptSnapBrowser|UseShellExecute\s*=\s*\$true|Start-Process/.test(source),'No OS browser-opening boundary is permitted');
           source=source.replace('function Request-GptSnapReuse(','function FixtureUnusedReuse(');
-          source=source.replace('function Value(',`function Request-GptSnapReuse([string]$Code,[string]$Context) {
+          source=source.replace('function Value(',`function Request-GptSnapReuse([string]$Code,[string]$Context,[string]$ConfirmationId='') {
             Add-Content -LiteralPath '${quotedTrace}' -Value 'workspace-reuse'
             if ($Code -cne 'cgw_${'c'.repeat(40)}' -or $Context -cne '${context}') { throw 'Wrong reuse binding' }
             ${scenario==='offline'?"throw 'Offline'":''}
+            ${scenario.startsWith('confirmation')?`if ($ConfirmationId) {
+              if ($ConfirmationId -cne '11111111-1111-4111-8111-111111111111') { throw 'Wrong continuation' }
+              return ('${JSON.stringify({protocol:'cogentspec-workspace-reuse-v1',status:scenario==='confirmation'?'reused':scenario==='confirmation-cancel'?'confirmation_cancelled':'confirmation_expired',
+               contextKey:context,surface:'chatgpt',experience:'split-screen',acknowledgementVerified:scenario==='confirmation'})}' | ConvertFrom-Json)
+            }
+            return ('${JSON.stringify({protocol:'cogentspec-workspace-reuse-v1',status:'confirmation_required',contextKey:context,surface:'chatgpt',experience:'split-screen',acknowledgementVerified:false,
+              confirmationId:'11111111-1111-4111-8111-111111111111',confirmationExpiresAt:new Date(Date.now()+120000).toISOString(),pollAfterSeconds:5})}' | ConvertFrom-Json)` : ''}
             return ('${JSON.stringify({protocol:'cogentspec-workspace-reuse-v1',
               status:['reused','resume','unverified'].includes(scenario)?'reused':scenario,
               contextKey:scenario==='wrong-context'?'ctx-'+'d'.repeat(64):context,surface:'chatgpt',experience:'split-screen',
@@ -49,7 +56,7 @@ for(const plugin of ['cogentspec','cogentstack']) {
       const result=await connectGptSnap({cwd:root,spawnCommand:(exe,args,options)=>{
         const child=spawn(exe,args,options);child.stdout.on('data',chunk=>{output+=chunk;});return child;
       },...(scenario==='resume'?{resumeApproval:{contextKey:context}}:{}),openWorkspace:async target=>{callbacks.push(target);throw Error('Agent callback forbidden');}});
-      const expected=['reused','resume'].includes(scenario)?'connected':scenario==='approval'?'approval_required':
+      const expected=scenario.startsWith('confirmation')?'tab_confirmation_required':['reused','resume'].includes(scenario)?'connected':scenario==='approval'?'approval_required':
         ['owner_unavailable','owner_changed','busy','open_required'].includes(scenario)?'not_connected':'failed';
       assert.equal(result.status,expected,JSON.stringify(result));assert.deepEqual(callbacks,[]);
       assert.ok(!/cgw_|https:\/\/|gptPopTab/.test(output),'No browser handoff in normal stdout');
@@ -58,6 +65,20 @@ for(const plugin of ['cogentspec','cogentstack']) {
         ['check-cogentspec-update.ps1','project-context.ps1','start-cogentstack-bridge.ps1'];
       if(!approval&&scenario!=='unsafe-destination')expectedCalls.push('workspace-reuse');
       assert.deepEqual(invocations,expectedCalls,'One preparation/reuse only, no open or receipt fallback');
+      if(scenario.startsWith('confirmation')){
+        assert.ok(!result.confirmationPacket.includes('cgw_'));assert.ok(Date.parse(result.expiresAt)>Date.now());
+        const resumed=await connectGptSnap({cwd:root,resumeTabConfirmation:result});
+        assert.equal(resumed.status,scenario==='confirmation'?'connected':'not_connected',JSON.stringify(resumed));
+        if(scenario==='confirmation-cancel')assert.match(resumed.userMessage,/cancelled/);
+        if(scenario==='confirmation-expire')assert.match(resumed.userMessage,/expired/);
+        const resumedCalls=(await readFile(trace,'utf8')).trim().split(/\r?\n/);
+        assert.deepEqual(resumedCalls,[...expectedCalls,'workspace-reuse'],'Resume must never repeat startup or issue another grant');
+        const wrongDirectory=await connectGptSnap({cwd:repository,resumeTabConfirmation:result,spawnCommand:(exe,args,options)=>spawn(exe,args,options)});
+        assert.equal(wrongDirectory.status,'failed');
+        assert.deepEqual((await readFile(trace,'utf8')).trim().split(/\r?\n/),resumedCalls);
+        const tampered=await connectGptSnap({cwd:root,resumeTabConfirmation:{confirmationPacket:result.confirmationPacket.slice(0,-12)+'AAAAAAAAAAAA'}});
+        assert.equal(tampered.status,'failed');
+      }
       console.log(`${plugin}: ${scenario} existing-workspace-only handshake passed`);
     } finally {await rm(root,{recursive:true,force:true,maxRetries:10,retryDelay:100});}
   }

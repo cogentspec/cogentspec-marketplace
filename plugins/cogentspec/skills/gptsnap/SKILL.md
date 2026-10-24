@@ -21,6 +21,12 @@ Keep helper output, context keys and private protocol material out of ordinary r
 
 On success reply **GPTSnap connected.** On any failure show only the command's plain userMessage and stop. No automatic retry, reinstall, browser-control fallback, credentials request or success inferred from an accepted browser launch. Normal startup/acknowledgement has a 50-second budget; a required verified update has a separate bounded allowance. Do not describe helper timing as the entire conversational wait.
 
+## Only if the existing tab requires ownership confirmation
+
+`tab_confirmation_required` is a pending human decision, not a connection failure. Show its plain `userMessage` immediately: the user must choose **Use this tab** in the existing **Move Bridge to this tab?** dialog. Never click, approve, or transfer ownership for the user. Keep the returned CurrentUser-protected `confirmationPacket`, expiry and package path private.
+
+While that decision is pending, invoke `scripts/start-gptsnap.ps1` beneath `refreshedPluginPath` with `-ResumeTabConfirmation -ConfirmationPacket <same protected packet>` no faster than the returned `pollAfterSeconds` (at least five seconds). This continuation checks only that exact pending handoff; it does not repeat update, context resolution, worker startup, registration, or create another challenge. Preserve the invoking workspace directory. Stop at connected, cancellation, expiry, denial or any failure. A pending decision may outlast the normal startup budget, up to its fixed server expiry; elapsed time is never approval. Say **GPTSnap connected.** only after the continuation returns the full verified connected result. Do not ask the user to send another `$gptsnap` while the same confirmation remains pending.
+
 ## Only if computer approval is required
 
 The command validates the existing cogentspec-gptsnap-approval-v1 packet without opening it. On approval_required, ask the user to approve this computer in the already-open CogentSpec page. Do not open, inspect or click that page yourself, request credentials, approve access/replacement, or send the user to /install.

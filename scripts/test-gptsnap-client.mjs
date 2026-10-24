@@ -13,6 +13,21 @@ const ready = { protocol, status: 'workspace_ready', contextKey: context, worksp
 const confirmed = { protocol, status: 'connected', contextKey: context, workspaceConnected: true,
   acknowledgementVerified: true, browserOpened: false, browserReused: true, browserHandoff: 'authenticated-workspace-reuse' };
 
+test('a pending tab decision is returned as pending and resumes only its protected packet',async()=>{
+ const pending={protocol,status:'tab_confirmation_required',workspaceConnected:false,acknowledgementVerified:false,browserOpened:false,
+  browserHandoff:'existing-workspace-only',confirmationPacket:'A'.repeat(160),expiresAt:new Date(Date.now()+120000).toISOString(),pollAfterSeconds:5,
+  refreshedPluginPath:'C:\\Fixture\\cogentspec',userMessage:'Waiting for your confirmation.'};
+ const result=await connectGptSnap({cwd:process.cwd(),...fakeCommand([pending])});
+ assert.equal(result.status,'tab_confirmation_required');
+ await connectGptSnap({cwd:process.cwd(),resumeTabConfirmation:result,...fakeCommand([confirmed],args=>{
+  assert.ok(args.includes('-ResumeTabConfirmation'));assert.ok(args.includes(result.confirmationPacket));assert.ok(!args.includes('-ResumeApproval'));
+ })});
+ for(const patch of [{workspaceConnected:true},{acknowledgementVerified:true},{browserOpened:true},{confirmationPacket:'cgw_secret'},
+  {pollAfterSeconds:1},{expiresAt:'2000-01-01T00:00:00Z'}]){
+  assert.equal((await connectGptSnap({cwd:process.cwd(),...fakeCommand([{...pending,...patch}])})).status,'not_connected');
+ }
+});
+
 function fakeCommand(frames, onSpawn = () => {}) {
   let child;
   return { spawnCommand(_exe, args, options) {

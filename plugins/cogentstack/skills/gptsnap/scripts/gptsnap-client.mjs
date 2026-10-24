@@ -5,13 +5,14 @@ import { fileURLToPath } from 'node:url';
 
 // Process adapter only. The installed command reconnects an existing workspace;
 // no browser object, tab discovery or URL-opening callback is used.
-export async function connectGptSnap({ cwd, resumeApproval, spawnCommand = spawn,
+export async function connectGptSnap({ cwd, resumeApproval, resumeTabConfirmation, spawnCommand = spawn,
   systemDirectory = 'C:\\Windows\\System32' } = {}) {
   if (!cwd || !isAbsolute(cwd)) return { status: 'failed', userMessage: 'GPTSnap needs the invoking workspace directory.' };
   const started = Date.now();
   const helper = join(dirname(fileURLToPath(import.meta.url)), 'start-gptsnap.ps1');
   const args = ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', helper];
   if (resumeApproval) args.push('-ResumeApproval', '-ContextKey', resumeApproval.contextKey);
+  if (resumeTabConfirmation) args.push('-ResumeTabConfirmation', '-ConfirmationPacket', resumeTabConfirmation.confirmationPacket);
   let child;
   try {
     child = spawnCommand(join(systemDirectory, 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
@@ -56,6 +57,13 @@ export async function connectGptSnap({ cwd, resumeApproval, spawnCommand = spawn
           if (!/^ctx-[a-f0-9]{64}$/.test(value.contextKey) || !reused || value.workspaceConnected !== true
             || value.acknowledgementVerified !== true) throw new Error('Unverified connection');
           finish({status:'connected',userMessage:'GPTSnap connected.',elapsedMs:Date.now()-started});
+        } else if (value.status === 'tab_confirmation_required') {
+          if(value.browserOpened!==false||value.workspaceConnected!==false||value.acknowledgementVerified!==false
+            ||value.browserHandoff!=='existing-workspace-only'||typeof value.confirmationPacket!=='string'
+            ||! /^[A-Za-z0-9+/=]{40,16384}$/.test(value.confirmationPacket)||!(Date.parse(value.expiresAt)>Date.now())
+            ||value.pollAfterSeconds<5||typeof value.refreshedPluginPath!=='string')throw new Error('Invalid tab confirmation');
+          finish({status:value.status,userMessage:value.userMessage,confirmationPacket:value.confirmationPacket,
+            expiresAt:value.expiresAt,pollAfterSeconds:value.pollAfterSeconds,refreshedPluginPath:value.refreshedPluginPath});
         } else if (value.status === 'approval_required') {
           if (value.approvalProtocol !== 'cogentspec-gptsnap-approval-v1' || value.browserOpened !== false
             || value.browserHandoff !== 'existing-workspace-only' || value.approvalUrl || value.browserNavigationCode

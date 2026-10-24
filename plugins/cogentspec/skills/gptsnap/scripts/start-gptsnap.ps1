@@ -6,7 +6,11 @@ param(
     [Parameter(Mandatory = $true, ParameterSetName = 'Resume')]
     [switch]$ResumeApproval,
     [Parameter(Mandatory = $true, ParameterSetName = 'Resume')]
-    [ValidatePattern('^ctx-[a-f0-9]{64}$')][string]$ContextKey
+    [ValidatePattern('^ctx-[a-f0-9]{64}$')][string]$ContextKey,
+    [Parameter(Mandatory = $true, ParameterSetName = 'TabConfirmation')]
+    [switch]$ResumeTabConfirmation,
+    [Parameter(Mandatory = $true, ParameterSetName = 'TabConfirmation')]
+    [ValidateLength(1, 16384)][string]$ConfirmationPacket
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -20,7 +24,7 @@ $installerVerified = $false
 $timedOut = $false
 $browserOpened = $false
 
-function Request-GptSnapReuse([string]$Code, [string]$Context) {
+function Request-GptSnapReuse([string]$Code, [string]$Context, [string]$ConfirmationId = '') {
     # Use the installing user's existing credential only at the fixed protected
     # endpoint. No browser discovery, credentials rotation or shared-helper change.
     Add-Type -AssemblyName System.Security -ErrorAction Stop
@@ -32,9 +36,11 @@ function Request-GptSnapReuse([string]$Code, [string]$Context) {
         $bytes = [Security.Cryptography.ProtectedData]::Unprotect([Convert]::FromBase64String([string]$credential.token),
             $null, [Security.Cryptography.DataProtectionScope]::CurrentUser)
         $token = [Text.Encoding]::UTF8.GetString($bytes)
+        $body = @{code = $Code; contextKey = $Context; surface = 'chatgpt'; experience = 'split-screen'}
+        if ($ConfirmationId) { $body.confirmationId = $ConfirmationId }
         return Invoke-RestMethod -Method Post -Uri 'https://cogentspec.com/api/device-authorization/workspace-reuse' `
             -ContentType 'application/json' -Headers @{ Authorization = "Bearer $token"; Accept = 'application/json' } `
-            -Body (@{code = $Code; contextKey = $Context; surface = 'chatgpt'; experience = 'split-screen'} | ConvertTo-Json -Compress) `
+            -Body ($body | ConvertTo-Json -Compress) `
             -TimeoutSec ([Math]::Min(20, [Math]::Max(1, [int]((Remaining) / 1000))))
     } finally {
         $token = $null
@@ -198,6 +204,45 @@ function Safe-Origin([Uri]$Uri, [string]$HostName, [string]$Path) {
     return $Uri.Scheme -ceq 'https' -and $Uri.Host -ceq $HostName -and
         $Uri.Port -eq 443 -and -not $Uri.UserInfo -and $Uri.AbsolutePath -ceq $Path
 }
+function Complete-GptSnapReuse($Reuse, [string]$Code, [string]$Context) {
+    if ((Value $Reuse 'protocol') -cne 'cogentspec-workspace-reuse-v1' -or
+        (Value $Reuse 'contextKey') -cne $Context -or (Value $Reuse 'surface') -cne 'chatgpt' -or
+        (Value $Reuse 'experience') -cne 'split-screen') { throw 'invalid_workspace_reuse' }
+    if ((Value $Reuse 'status') -ceq 'reused' -and (Value $Reuse 'acknowledgementVerified') -ceq $true) {
+        Finish ([pscustomobject]@{ status = 'connected'; workspaceConnected = $true; browserOpened = $false;
+            browserReused = $true; browserHandoff = 'authenticated-workspace-reuse'; contextKey = $Context;
+            acknowledgementVerified = $true; userMessage = 'GPTSnap connected.' }); return
+    }
+    if ((Value $Reuse 'acknowledgementVerified') -cne $false) { throw 'invalid_workspace_reuse' }
+    if ((Value $Reuse 'status') -ceq 'confirmation_required') {
+        $expiry = [DateTimeOffset](Value $Reuse 'confirmationExpiresAt')
+        $id = [string](Value $Reuse 'confirmationId')
+        if ($id -notmatch '^[a-f0-9-]{36}$' -or $expiry -le [DateTimeOffset]::UtcNow -or
+            $expiry -gt [DateTimeOffset]::UtcNow.AddMinutes(3) -or (Value $Reuse 'pollAfterSeconds') -lt 5) { throw 'invalid_tab_confirmation' }
+        Add-Type -AssemblyName System.Security -ErrorAction Stop
+        $packetBytes = [Text.Encoding]::UTF8.GetBytes((@{protocol='cogentspec-gptsnap-tab-confirmation-v1';
+            code=$Code;contextKey=$Context;confirmationId=$id;expiresAt=$expiry.ToString('o');pluginId=$pluginId;
+            workspaceDirectory=(Get-Location).ProviderPath} | ConvertTo-Json -Compress))
+        try {
+            $protectedPacket = [Convert]::ToBase64String([Security.Cryptography.ProtectedData]::Protect($packetBytes,
+                [Text.Encoding]::UTF8.GetBytes('cogentspec-gptsnap-tab-confirmation-v1'), [Security.Cryptography.DataProtectionScope]::CurrentUser))
+        } finally { [Array]::Clear($packetBytes, 0, $packetBytes.Length) }
+        Finish ([pscustomobject]@{status='tab_confirmation_required';workspaceConnected=$false;acknowledgementVerified=$false;
+            browserOpened=$false;browserHandoff='existing-workspace-only';confirmationPacket=$protectedPacket;
+            expiresAt=$expiry.ToString('o');pollAfterSeconds=[int]$Reuse.pollAfterSeconds;refreshedPluginPath=$pluginRoot;
+            userMessage='Waiting for your confirmation. In the existing CogentSpec tab, choose Use this tab in Move Bridge to this tab? to finish connecting GPTSnap.'}); return
+    }
+    if ((Value $Reuse 'status') -notin @('owner_unavailable', 'owner_changed', 'busy', 'open_required', 'confirmation_cancelled', 'confirmation_expired')) {
+        throw 'workspace_reuse_unavailable'
+    }
+    Finish ([pscustomobject]@{status='not_connected';workspaceConnected=$false;browserOpened=$false;
+        browserHandoff='existing-workspace-only';acknowledgementVerified=$false;
+        userMessage=if ($Reuse.status -ceq 'confirmation_cancelled') {'GPTSnap connection was cancelled in the existing tab. Bridge ownership was not changed.'}
+          elseif ($Reuse.status -ceq 'confirmation_expired') {'The tab confirmation expired before it was approved. Bridge ownership was not changed.'}
+          elseif ($Reuse.status -ceq 'owner_changed') {'Bridge ownership changed during connection. No other work area was opened. Run GPTSnap again when the transfer is complete.'}
+          elseif ($Reuse.status -ceq 'busy') {'A connection request is already in progress. No other work area was opened.'}
+          else {'GPTSnap could not reach the registered work area. Check its connection in your existing CogentSpec tab. No other work area was opened.'}})
+}
 try {
     $pluginRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..\..')).Path
     $manifest = Get-Content -LiteralPath (Join-Path $pluginRoot '.codex-plugin\plugin.json') -Raw | ConvertFrom-Json
@@ -205,6 +250,24 @@ try {
     if ($pluginId -notin @('cogentspec', 'cogentstack')) { throw 'package_identity_invalid' }
     $coreScripts = Join-Path $pluginRoot "skills\$pluginId\scripts"
     $script:powerShellPath = (Get-Process -Id $PID).Path
+    if ($ResumeTabConfirmation) {
+        $stage = 'tab_confirmation'
+        Add-Type -AssemblyName System.Security -ErrorAction Stop
+        $packetBytes = [Security.Cryptography.ProtectedData]::Unprotect([Convert]::FromBase64String($ConfirmationPacket),
+            [Text.Encoding]::UTF8.GetBytes('cogentspec-gptsnap-tab-confirmation-v1'), [Security.Cryptography.DataProtectionScope]::CurrentUser)
+        try { $packet = [Text.Encoding]::UTF8.GetString($packetBytes) | ConvertFrom-Json }
+        finally { [Array]::Clear($packetBytes, 0, $packetBytes.Length) }
+        if ($PrepareOnly -or $packet.protocol -cne 'cogentspec-gptsnap-tab-confirmation-v1' -or $packet.pluginId -cne $pluginId -or
+            $packet.workspaceDirectory -ine (Get-Location).ProviderPath -or $packet.contextKey -notmatch '^ctx-[a-f0-9]{64}$' -or
+            $packet.code -notmatch '^cgw_[A-Za-z0-9_-]{32,200}$' -or $packet.confirmationId -notmatch '^[a-f0-9-]{36}$') { throw 'invalid_tab_confirmation' }
+        if ([DateTimeOffset]$packet.expiresAt -le [DateTimeOffset]::UtcNow) {
+            Finish ([pscustomobject]@{status='not_connected';userMessage='The tab confirmation expired before it was approved. Bridge ownership was not changed.';browserOpened=$false}); return
+        }
+        $update = [pscustomobject]@{status='not_repeated_after_tab_confirmation'}
+        $reuse = Request-GptSnapReuse $packet.code $packet.contextKey $packet.confirmationId
+        Complete-GptSnapReuse $reuse $packet.code $packet.contextKey
+        return
+    }
     if ($ResumeApproval) {
         # Resume the same server-bound pending context; never update or create a replacement request.
         $resolvedContext = $ContextKey
@@ -308,25 +371,7 @@ try {
     $stage = 'workspace_reuse'
     $reuse = Request-GptSnapReuse $workspaceCode $resolvedContext
     [void](Remaining)
-    if ((Value $reuse 'protocol') -cne 'cogentspec-workspace-reuse-v1' -or
-        (Value $reuse 'contextKey') -cne $resolvedContext -or (Value $reuse 'surface') -cne 'chatgpt' -or
-        (Value $reuse 'experience') -cne 'split-screen') { throw 'invalid_workspace_reuse' }
-    if ((Value $reuse 'status') -ceq 'reused' -and (Value $reuse 'acknowledgementVerified') -ceq $true) {
-        Finish ([pscustomobject]@{ status = 'connected'; workspaceConnected = $true; browserOpened = $false;
-            browserReused = $true; browserHandoff = 'authenticated-workspace-reuse'; contextKey = $resolvedContext;
-            acknowledgementVerified = $true; userMessage = 'GPTSnap connected.' }); return
-    }
-    # Missing registration is not permission to open another tab. Fail closed
-    # even against an older service that still returns open_required.
-    if ((Value $reuse 'status') -notin @('owner_unavailable', 'owner_changed', 'busy', 'open_required') -or
-        (Value $reuse 'acknowledgementVerified') -cne $false) {
-        throw 'workspace_reuse_unavailable'
-    }
-    Finish ([pscustomobject]@{ status = 'not_connected'; workspaceConnected = $false; browserOpened = $false;
-        browserHandoff = 'existing-workspace-only'; acknowledgementVerified = $false;
-        userMessage = if ((Value $reuse 'status') -ceq 'owner_changed') { 'Bridge ownership changed during connection. No other work area was opened. Run GPTSnap again when the transfer is complete.' }
-          elseif ((Value $reuse 'status') -ceq 'busy') { 'A connection request is already in progress. No other work area was opened.' }
-          else { 'GPTSnap could not reach the registered work area. Check its connection in your existing CogentSpec tab. No other work area was opened.' } })
+    Complete-GptSnapReuse $reuse $workspaceCode $resolvedContext
 } catch {
     Finish ([pscustomobject]@{
         status = 'failed'; failureStage = $stage; workflowTimedOut = $timedOut; browserOpened = $browserOpened

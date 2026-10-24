@@ -191,7 +191,9 @@ for(const pluginPath of [sourcePluginPath,compatibilityPluginPath]) for(const [c
   const commandRoot=join(pluginPath,'skills',command);
   const skill=await readFile(join(commandRoot,'SKILL.md'),'utf8');
   const metadata=await readFile(join(commandRoot,'agents','openai.yaml'),'utf8');
-  for(const marker of [`name: ${command}`,`start-${command}.ps1`,...(experience==='web'?['status: ready','browserOpened: false']:['acknowledgementVerified: true','browserOpened: false'])]) if(!skill.includes(marker)) fail(`${command} lacks ${marker}`);
+  const resultMarkers=command==='gptweb'?['self-contained browser procedure','Bridge connected','My projects','No ChatGPT plugin']
+    :experience==='web'?['status: ready','browserOpened: false']:['acknowledgementVerified: true','browserOpened: false'];
+  for(const marker of [`name: ${command}`,`start-${command}.ps1`,...resultMarkers]) if(!skill.includes(marker)) fail(`${command} lacks ${marker}`);
   for(const marker of [`$${command}`,'allow_implicit_invocation: false']) if(!metadata.includes(marker)) fail(`${command} lacks explicit invocation metadata`);
   if(command!=='gptsnap') {
     const source=await readFile(join(commandRoot,'scripts',`start-${command}.ps1`),'utf8');
