@@ -36,7 +36,7 @@ function Request-GptSnapReuse([string]$Code, [string]$Context, [string]$Confirma
         $bytes = [Security.Cryptography.ProtectedData]::Unprotect([Convert]::FromBase64String([string]$credential.token),
             $null, [Security.Cryptography.DataProtectionScope]::CurrentUser)
         $token = [Text.Encoding]::UTF8.GetString($bytes)
-        $body = @{code = $Code; contextKey = $Context; surface = 'chatgpt'; experience = 'split-screen'}
+        $body = @{code = $Code; contextKey = $Context; surface = 'chatgpt'; experience = 'split-screen'; supportsTabConfirmation = $true}
         if ($ConfirmationId) { $body.confirmationId = $ConfirmationId }
         return Invoke-RestMethod -Method Post -Uri 'https://cogentspec.com/api/device-authorization/workspace-reuse' `
             -ContentType 'application/json' -Headers @{ Authorization = "Bearer $token"; Accept = 'application/json' } `
