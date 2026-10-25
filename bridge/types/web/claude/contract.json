@@ -1,0 +1,6 @@
+{
+  "id": "web/claude",
+  "type": "web",
+  "provider": "claude",
+  "command": "$claudeweb"
+}

@@ -1,0 +1,6 @@
+{
+  "id": "desk/claude",
+  "type": "desk",
+  "provider": "claude",
+  "command": "$claudedesk"
+}

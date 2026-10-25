@@ -1,0 +1,6 @@
+{
+  "id": "local/qwen",
+  "type": "local",
+  "provider": "qwen",
+  "command": "$qwenlocal"
+}

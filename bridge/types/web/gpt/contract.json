@@ -1,0 +1,6 @@
+{
+  "id": "web/gpt",
+  "type": "web",
+  "provider": "gpt",
+  "command": "$gptweb"
+}

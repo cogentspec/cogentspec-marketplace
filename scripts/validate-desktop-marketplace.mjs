@@ -1,8 +1,10 @@
 import { readFile, readdir } from "node:fs/promises";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
+import { verify } from './bridge-firewall.mjs';
 
 const repositoryRoot = dirname(dirname(fileURLToPath(import.meta.url)));
+verify(repositoryRoot);
 const manifestPath = join(repositoryRoot, "desktop", "marketplace.json");
 const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
 const installInstructions = await readFile(join(repositoryRoot, ".agents", "plugins", "INSTALL.md"), "utf8");

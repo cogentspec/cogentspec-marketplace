@@ -1,0 +1,212 @@
+{
+  "protocol": "cogentspec-bridge-firewall-v1",
+  "command": "$qwenlocal",
+  "id": "local/qwen",
+  "type": "local",
+  "provider": "qwen",
+  "sourceHash": "sha256-git-text-lf-v1",
+  "groups": {
+    "local-qwen": {
+      "kind": "command",
+      "consumers": [
+        "local/qwen"
+      ],
+      "files": {
+        "bridge/types/local/qwen/contract.json": "42165b57a79810187be4bda73fbc579351b5a3589048ca41fdb4dd69e5c85b8b",
+        "claude-plugins/cogentspec/skills/qwenlocal/SKILL.md": "efb4308225dc457205bbb46deac488aa46a59ad3dd60e223d81cd1df8c0cb298",
+        "claude-plugins/cogentspec/skills/qwenlocal/command.json": "0cc65d3c3177ac4072c2502beb44701cebe73a70399657d4908e0580d6d0197f",
+        "claude-plugins/cogentspec/skills/qwenlocal/scripts/build-qwen-launcher.ps1": "f6ad341f0bb2d544b53832fc5169f6471a19ca236fbb7a77629742bc352a163f",
+        "claude-plugins/cogentspec/skills/qwenlocal/scripts/install-qwenlocal.ps1": "d3157254b5779694e827f7acbd18e2643728f386841bb9f879e45bdd1f41e0c1",
+        "claude-plugins/cogentspec/skills/qwenlocal/scripts/prepare-qwen-runtime.ps1": "2fc193595c66af13c342e4dbeefd25640e6278ca0e1efb3e2e2372284c4b5f8e",
+        "claude-plugins/cogentspec/skills/qwenlocal/scripts/qwen-runtime.mjs": "a0ac99ef90a77f2c032a18c80b8333870b1ebb77668f04721ee491e57a9449fa",
+        "claude-plugins/cogentspec/skills/qwenlocal/scripts/qwen-windowless-launcher.cs": "be8db7f40eadd8aea49e889501522f0e7310f5b8ce8f4c5d70604ac9004dfb6e",
+        "claude-plugins/cogentspec/skills/qwenlocal/scripts/start-qwenlocal.ps1": "93064ff6d672b2a6f745a728cdae0a7f874313fbf7bf22adcf77b9157dfbd540",
+        "claude-plugins/cogentstack/skills/qwenlocal/SKILL.md": "efb4308225dc457205bbb46deac488aa46a59ad3dd60e223d81cd1df8c0cb298",
+        "claude-plugins/cogentstack/skills/qwenlocal/command.json": "0cc65d3c3177ac4072c2502beb44701cebe73a70399657d4908e0580d6d0197f",
+        "claude-plugins/cogentstack/skills/qwenlocal/scripts/build-qwen-launcher.ps1": "f6ad341f0bb2d544b53832fc5169f6471a19ca236fbb7a77629742bc352a163f",
+        "claude-plugins/cogentstack/skills/qwenlocal/scripts/install-qwenlocal.ps1": "d3157254b5779694e827f7acbd18e2643728f386841bb9f879e45bdd1f41e0c1",
+        "claude-plugins/cogentstack/skills/qwenlocal/scripts/prepare-qwen-runtime.ps1": "2fc193595c66af13c342e4dbeefd25640e6278ca0e1efb3e2e2372284c4b5f8e",
+        "claude-plugins/cogentstack/skills/qwenlocal/scripts/qwen-runtime.mjs": "a0ac99ef90a77f2c032a18c80b8333870b1ebb77668f04721ee491e57a9449fa",
+        "claude-plugins/cogentstack/skills/qwenlocal/scripts/qwen-windowless-launcher.cs": "be8db7f40eadd8aea49e889501522f0e7310f5b8ce8f4c5d70604ac9004dfb6e",
+        "claude-plugins/cogentstack/skills/qwenlocal/scripts/start-qwenlocal.ps1": "93064ff6d672b2a6f745a728cdae0a7f874313fbf7bf22adcf77b9157dfbd540",
+        "plugins/cogentspec/skills/qwenlocal/SKILL.md": "efb4308225dc457205bbb46deac488aa46a59ad3dd60e223d81cd1df8c0cb298",
+        "plugins/cogentspec/skills/qwenlocal/command.json": "0cc65d3c3177ac4072c2502beb44701cebe73a70399657d4908e0580d6d0197f",
+        "plugins/cogentspec/skills/qwenlocal/scripts/build-qwen-launcher.ps1": "f6ad341f0bb2d544b53832fc5169f6471a19ca236fbb7a77629742bc352a163f",
+        "plugins/cogentspec/skills/qwenlocal/scripts/install-qwenlocal.ps1": "d3157254b5779694e827f7acbd18e2643728f386841bb9f879e45bdd1f41e0c1",
+        "plugins/cogentspec/skills/qwenlocal/scripts/prepare-qwen-runtime.ps1": "2fc193595c66af13c342e4dbeefd25640e6278ca0e1efb3e2e2372284c4b5f8e",
+        "plugins/cogentspec/skills/qwenlocal/scripts/qwen-runtime.mjs": "a0ac99ef90a77f2c032a18c80b8333870b1ebb77668f04721ee491e57a9449fa",
+        "plugins/cogentspec/skills/qwenlocal/scripts/qwen-windowless-launcher.cs": "be8db7f40eadd8aea49e889501522f0e7310f5b8ce8f4c5d70604ac9004dfb6e",
+        "plugins/cogentspec/skills/qwenlocal/scripts/start-qwenlocal.ps1": "93064ff6d672b2a6f745a728cdae0a7f874313fbf7bf22adcf77b9157dfbd540",
+        "plugins/cogentstack/skills/qwenlocal/SKILL.md": "efb4308225dc457205bbb46deac488aa46a59ad3dd60e223d81cd1df8c0cb298",
+        "plugins/cogentstack/skills/qwenlocal/command.json": "0cc65d3c3177ac4072c2502beb44701cebe73a70399657d4908e0580d6d0197f",
+        "plugins/cogentstack/skills/qwenlocal/scripts/build-qwen-launcher.ps1": "f6ad341f0bb2d544b53832fc5169f6471a19ca236fbb7a77629742bc352a163f",
+        "plugins/cogentstack/skills/qwenlocal/scripts/install-qwenlocal.ps1": "d3157254b5779694e827f7acbd18e2643728f386841bb9f879e45bdd1f41e0c1",
+        "plugins/cogentstack/skills/qwenlocal/scripts/prepare-qwen-runtime.ps1": "2fc193595c66af13c342e4dbeefd25640e6278ca0e1efb3e2e2372284c4b5f8e",
+        "plugins/cogentstack/skills/qwenlocal/scripts/qwen-runtime.mjs": "a0ac99ef90a77f2c032a18c80b8333870b1ebb77668f04721ee491e57a9449fa",
+        "plugins/cogentstack/skills/qwenlocal/scripts/qwen-windowless-launcher.cs": "be8db7f40eadd8aea49e889501522f0e7310f5b8ce8f4c5d70604ac9004dfb6e",
+        "plugins/cogentstack/skills/qwenlocal/scripts/start-qwenlocal.ps1": "93064ff6d672b2a6f745a728cdae0a7f874313fbf7bf22adcf77b9157dfbd540"
+      }
+    },
+    "package-identities": {
+      "kind": "packaging",
+      "consumers": [
+        "desk/claude",
+        "desk/gpt",
+        "local/qwen",
+        "snap/claude",
+        "snap/gpt",
+        "web/claude",
+        "web/gpt",
+        "web/qwen"
+      ],
+      "files": {
+        "claude-plugins/cogentspec/.claude-plugin/plugin.json": "980f80424f22c4d85030bbfe1ebce6d6ded1a5c9ec90b10a161247bd77212681",
+        "claude-plugins/cogentstack/.claude-plugin/plugin.json": "12e1f71e142964229d8b9daff5a6cdcd045173a55ca7391e5c295978ce9150c0",
+        "plugins/cogentspec/.codex-plugin/plugin.json": "700dee6962565b1cd1088b35aac503c45a03cea9946ec1cd50cb2daea304ecb8",
+        "plugins/cogentstack/.codex-plugin/plugin.json": "129ca8a0aaac8db6cd88d8ebabb9705d2a63b98e07ee3e33d34cff9020855c7e"
+      }
+    },
+    "trusted-installation": {
+      "kind": "packaging",
+      "consumers": [
+        "desk/claude",
+        "desk/gpt",
+        "local/qwen",
+        "snap/claude",
+        "snap/gpt",
+        "web/claude",
+        "web/gpt",
+        "web/qwen"
+      ],
+      "files": {
+        ".agents/plugins/INSTALL.md": "0aecf73a5e4aa81f617ebb7d2e081b4675f8967826ff42748f849a557c42a142",
+        ".agents/plugins/INSTALL.v3.md": "0aecf73a5e4aa81f617ebb7d2e081b4675f8967826ff42748f849a557c42a142",
+        ".agents/plugins/UPDATE.CLAUDE.v1.md": "f38836cb71cf744d79e4be5435113b52fc4773ee005ecf8936fc6a7d9323641c",
+        ".agents/plugins/UPDATE.v1.md": "472d302447232c3777fdd9f70a2bdb717bd4523d6c33c26ae9c7161d3447d7d1",
+        ".agents/plugins/install-cogentspec.ps1": "0bde6bfb494c895c82aad61d52681a572f78616ea89b28535414c40efcffc4e9",
+        ".agents/plugins/install-cogentstack.ps1": "81b2465ce19b274260528b180d94b9b010668dad207c01c7569d81d8bec626f6",
+        ".agents/plugins/marketplace.json": "654ea1f6923f99ae1b58d1d25b61f7b874194ff04dd1868dfb1843e7c3e6277a",
+        ".claude-plugin/INSTALL.md": "bcf8b3032709066ed708832c7d712836b091957b136cf2359e68fff2c47c6b4d",
+        ".claude-plugin/marketplace.json": "bff8319e71dd7ed573a9751ac3cd836fcda2b41e2ce6f4383067391bff006fcf",
+        "desktop/marketplace.json": "3938349dc33dd506327f964f3bcf88afa72db17cf5fe5e9c19562cff8aeeeb17"
+      }
+    },
+    "legacy-package-skills": {
+      "kind": "packaging",
+      "consumers": [
+        "desk/claude",
+        "desk/gpt",
+        "local/qwen",
+        "snap/claude",
+        "snap/gpt",
+        "web/claude",
+        "web/gpt",
+        "web/qwen"
+      ],
+      "files": {
+        "claude-plugins/cogentspec/skills/cogentspec/SKILL.md": "bf58430180693bb4d5399e5b07038716cb78cbf545cab7ca0458ce9ae24730b5",
+        "claude-plugins/cogentstack/skills/cogentstack/SKILL.md": "ec11c4110646cd5a0097fa3bf3dadd6c974dd58a01b515de6b191764a3cc1127",
+        "plugins/cogentspec/skills/cogentspec/SKILL.md": "cb34075ee3ac02574ab3d73ae00dae298e5c6a2df7dc4c4ca291db021c6ad539",
+        "plugins/cogentspec/skills/cogentspec/agents/openai.yaml": "9daa881fe43150e69ba8afb54c1ab735541073029181e5e2522726f4db776a77",
+        "plugins/cogentspec/skills/gptpop/SKILL.md": "bd8505d021c5caead35be62141471500cc0fc9721f9e40ba1c237b18155bdffc",
+        "plugins/cogentspec/skills/gptpop/agents/openai.yaml": "b90a3e486638eb9c4e1ec1e983692d6205a8d9cbac3bcdbf22ef7d64f7cb64b1",
+        "plugins/cogentspec/skills/gptpop/scripts/start-gptpop.ps1": "a0026485d177335e9f596f2da4030947a64e7e9a03cf2e883cf929e2d1c91ecb",
+        "plugins/cogentstack/skills/cogentstack/SKILL.md": "790ef7abb7e519a534fcfaa1edff73f62c620e0d989d7902e72ea42486f56aa4",
+        "plugins/cogentstack/skills/cogentstack/agents/openai.yaml": "908eabc7a75fb0325215d371c54020a502a20a24e27cdcb27e97393ede862057",
+        "plugins/cogentstack/skills/gptpop/SKILL.md": "1d644f93f1034c320d2a6626ad3e23aadac0e0fa5bc2a5f1be0a296d9a0f41f8",
+        "plugins/cogentstack/skills/gptpop/agents/openai.yaml": "b90a3e486638eb9c4e1ec1e983692d6205a8d9cbac3bcdbf22ef7d64f7cb64b1",
+        "plugins/cogentstack/skills/gptpop/scripts/start-gptpop.ps1": "e02651747f546757a69334fbe8daed6cc2e75900944e96c4a245312e1b29e0db"
+      }
+    },
+    "firewall": {
+      "kind": "firewall",
+      "consumers": [
+        "desk/claude",
+        "desk/gpt",
+        "local/qwen",
+        "snap/claude",
+        "snap/gpt",
+        "web/claude",
+        "web/gpt",
+        "web/qwen"
+      ],
+      "files": {
+        ".github/workflows/bridge-firewall.yml": "fc8bec165e9c967f210cb373e23fd9992f8cf8ac6967000340f3d4769487a4f1",
+        "AGENTS.md": "0b30d64f13697e9b08c1deac6abe50885efab629fedf424001d1f1388dbb005b",
+        "bridge/firewall.json": "c3cba8f2ee332653efd0908c84cb2b5a9c527fc493e47f95c84c7b28f1c3d26e",
+        "bridge/registry.mjs": "1bb94e76bf77d412b68dfb98be3e68a3adb22dd25f4ab48c3db47f635b84f3d1",
+        "docs/bridge-firewall.md": "a9f1df7707aa83f5c81869bd8b863e4f385da4367714059462bc6f71d04b0c8b",
+        "package-lock.json": "4a64347f61f3703e9e646971662d33fca3d14f5d17ef78fd199f90a3d21495aa",
+        "package.json": "021e34dc88678cb9f56cebf1edb822dc9412135a17bf992bf8e9d48773006bd8",
+        "scripts/bridge-firewall.mjs": "0a9e8cb4fcf13c02ee473598fae553959bc87af74227bca3df4a9f0a39367207",
+        "scripts/test-bridge-firewall.mjs": "c5d287b6828b590013b6e5c70c636098fc7c06fa52f4c28098fe94dd4fb6dce9",
+        "scripts/validate-claude-marketplace.mjs": "82d9ec7ba34f2d0552a0cb451fc3b22ee9ec39a96bab8f1b68f6487f5c475c21",
+        "scripts/validate-desktop-marketplace.mjs": "2dd5e6c6ee9af8c0069d59ccee1d02b2afe3f7b3d7ee2ed22f01b1f01f40a2f1"
+      }
+    },
+    "contract-suites": {
+      "kind": "firewall",
+      "consumers": [
+        "desk/claude",
+        "desk/gpt",
+        "local/qwen",
+        "snap/claude",
+        "snap/gpt",
+        "web/claude",
+        "web/gpt",
+        "web/qwen"
+      ],
+      "files": {
+        "scripts/test-bridge-command-packages.mjs": "0889768863b46f76470ac2c530ec66c1e8d728585701d0b687290d670dcbedf3",
+        "scripts/test-claudeweb-launcher.mjs": "b71cf8254b3aac86adc4c65001b2cb089ada257285b1aa431ed2dc28b6f6c082",
+        "scripts/test-desktop-ui-bridge.mjs": "d03f828eb131e36e8570c0cef422ca71b1f55cd10888c76aae77ece4ed34168c",
+        "scripts/test-gptdesk-start.mjs": "7a253920dbb5addcc1f9721ec39cc4f0a94beb81a3d44ef5bb5ccfd64a16f701",
+        "scripts/test-gptsnap-client.mjs": "e34aea9f4c40f587ca6ebeeecf85bd1ae2e4e4d3aaf06f8208319d312f87b7fa",
+        "scripts/test-gptsnap-handshake.mjs": "db78b3d81bab7bd66c4ed6c36bca3cd0174afa4fb09e7909f7c78f2429290395",
+        "scripts/test-gptsnap-start.mjs": "46de0a4f2d4089c8ed4cff850d70001b1f18d5c4d07d916a7d1d5cbcdf1e6c8f",
+        "scripts/test-gptweb-browser-procedure.mjs": "d09e8e6167db373b383e7d19de9ae20d3e57bec4fb10ebfcc9d9c329e4be1fe3",
+        "scripts/test-qwenlocal-command.mjs": "e3134c51eaa66a553e1bfb526df0eb0b95e9cffa083116ec18e5f6bec06c683f",
+        "scripts/test-standalone-gptweb.mjs": "e7983cb0bc583e47cb053530165584d56258f6845bbc6ea5dc7d5a0ada88aa92",
+        "scripts/test-web-handoff.mjs": "acaf1e04dbfe13028d345beb5df0a643554aa2ffc3264c0f90597b8cf76610e0"
+      }
+    },
+    "legacy-package-metadata": {
+      "kind": "packaging",
+      "consumers": [
+        "desk/claude",
+        "desk/gpt",
+        "local/qwen",
+        "snap/claude",
+        "snap/gpt",
+        "web/claude",
+        "web/gpt",
+        "web/qwen"
+      ],
+      "files": {
+        "plugins/cogentspec/.mcp.json": "ba2656f6edccedbfa2c8d4522b6c0e03efe658d0debfd14afb9d040e3b300146",
+        "plugins/cogentspec/assets/icon.png": "5af665628394827cfaafc86ae2e645900fd8a25c4d1ef8d6848db67a945d2712",
+        "plugins/cogentspec/assets/logo.png": "9c3c68c79005408432724ee1ba4f60f5987e1159ab9c6a19587e3c0d7a3ce900",
+        "plugins/cogentstack/.mcp.json": "ba2656f6edccedbfa2c8d4522b6c0e03efe658d0debfd14afb9d040e3b300146",
+        "plugins/cogentstack/assets/icon.png": "5af665628394827cfaafc86ae2e645900fd8a25c4d1ef8d6848db67a945d2712",
+        "plugins/cogentstack/assets/logo.png": "9c3c68c79005408432724ee1ba4f60f5987e1159ab9c6a19587e3c0d7a3ce900"
+      }
+    },
+    "provider-entrypoint-contracts": {
+      "kind": "firewall",
+      "consumers": [
+        "desk/claude",
+        "desk/gpt",
+        "local/qwen",
+        "snap/claude",
+        "snap/gpt",
+        "web/claude",
+        "web/gpt",
+        "web/qwen"
+      ],
+      "files": {
+        "scripts/test-command-destinations.mjs": "678770d60310bb2069fd7fe9f6243a1f83c31c16dc4913d361842cb7ccc13dc4"
+      }
+    }
+  },
+  "artifactDigest": "f9c24c466d462121c9dab8b29e6545e7e2c97c9d2b546d61c6438a2026aa8c82"
+}

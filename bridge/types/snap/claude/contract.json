@@ -1,0 +1,6 @@
+{
+  "id": "snap/claude",
+  "type": "snap",
+  "provider": "claude",
+  "command": "$claudesnap"
+}

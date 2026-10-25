@@ -1,0 +1,6 @@
+{
+  "id": "snap/gpt",
+  "type": "snap",
+  "provider": "gpt",
+  "command": "$gptsnap"
+}

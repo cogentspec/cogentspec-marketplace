@@ -1,0 +1,598 @@
+{
+  "protocol": "cogentspec-bridge-firewall-v1",
+  "sourceHash": "sha256-git-text-lf-v1",
+  "component": "marketplace",
+  "baseline": "homerun02",
+  "packageRoots": [
+    "plugins/cogentspec",
+    "plugins/cogentstack",
+    "claude-plugins/cogentspec",
+    "claude-plugins/cogentstack"
+  ],
+  "commands": [
+    {
+      "id": "snap/gpt",
+      "type": "snap",
+      "provider": "gpt",
+      "command": "$gptsnap",
+      "suites": [
+        {
+          "executable": "node",
+          "args": [
+            "--test",
+            "scripts/test-gptsnap-handshake.mjs",
+            "scripts/test-gptsnap-client.mjs"
+          ]
+        },
+        {
+          "executable": "node",
+          "args": [
+            "scripts/test-gptsnap-start.mjs",
+            "current",
+            "offline",
+            "update",
+            "permission",
+            "resume-approved",
+            "resume-approval-loop"
+          ]
+        },
+        {
+          "executable": "node",
+          "args": [
+            "scripts/validate-desktop-marketplace.mjs"
+          ]
+        },
+        {
+          "executable": "node",
+          "args": [
+            "scripts/validate-claude-marketplace.mjs"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "snap/claude",
+      "type": "snap",
+      "provider": "claude",
+      "command": "$claudesnap",
+      "suites": [
+        {
+          "executable": "node",
+          "args": [
+            "--test",
+            "scripts/test-bridge-command-packages.mjs"
+          ]
+        },
+        {
+          "executable": "node",
+          "args": [
+            "--test",
+            "scripts/test-command-destinations.mjs"
+          ]
+        },
+        {
+          "executable": "node",
+          "args": [
+            "scripts/validate-desktop-marketplace.mjs"
+          ]
+        },
+        {
+          "executable": "node",
+          "args": [
+            "scripts/validate-claude-marketplace.mjs"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "web/gpt",
+      "type": "web",
+      "provider": "gpt",
+      "command": "$gptweb",
+      "suites": [
+        {
+          "executable": "node",
+          "args": [
+            "--test",
+            "scripts/test-gptweb-browser-procedure.mjs",
+            "scripts/test-standalone-gptweb.mjs"
+          ]
+        },
+        {
+          "executable": "node",
+          "args": [
+            "scripts/validate-desktop-marketplace.mjs"
+          ]
+        },
+        {
+          "executable": "node",
+          "args": [
+            "scripts/validate-claude-marketplace.mjs"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "web/claude",
+      "type": "web",
+      "provider": "claude",
+      "command": "$claudeweb",
+      "suites": [
+        {
+          "executable": "node",
+          "args": [
+            "--test",
+            "scripts/test-claudeweb-launcher.mjs",
+            "scripts/test-web-handoff.mjs"
+          ]
+        },
+        {
+          "executable": "node",
+          "args": [
+            "--test",
+            "scripts/test-command-destinations.mjs"
+          ]
+        },
+        {
+          "executable": "node",
+          "args": [
+            "scripts/validate-desktop-marketplace.mjs"
+          ]
+        },
+        {
+          "executable": "node",
+          "args": [
+            "scripts/validate-claude-marketplace.mjs"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "web/qwen",
+      "type": "web",
+      "provider": "qwen",
+      "command": "$qwenweb",
+      "suites": [
+        {
+          "executable": "node",
+          "args": [
+            "--test",
+            "scripts/test-bridge-command-packages.mjs"
+          ]
+        },
+        {
+          "executable": "node",
+          "args": [
+            "--test",
+            "scripts/test-command-destinations.mjs"
+          ]
+        },
+        {
+          "executable": "node",
+          "args": [
+            "scripts/validate-desktop-marketplace.mjs"
+          ]
+        },
+        {
+          "executable": "node",
+          "args": [
+            "scripts/validate-claude-marketplace.mjs"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "desk/gpt",
+      "type": "desk",
+      "provider": "gpt",
+      "command": "$gptdesk",
+      "suites": [
+        {
+          "executable": "node",
+          "args": [
+            "--test",
+            "scripts/test-gptdesk-start.mjs",
+            "scripts/test-desktop-ui-bridge.mjs"
+          ]
+        },
+        {
+          "executable": "node",
+          "args": [
+            "--test",
+            "scripts/test-command-destinations.mjs"
+          ]
+        },
+        {
+          "executable": "node",
+          "args": [
+            "scripts/validate-desktop-marketplace.mjs"
+          ]
+        },
+        {
+          "executable": "node",
+          "args": [
+            "scripts/validate-claude-marketplace.mjs"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "desk/claude",
+      "type": "desk",
+      "provider": "claude",
+      "command": "$claudedesk",
+      "suites": [
+        {
+          "executable": "node",
+          "args": [
+            "--test",
+            "scripts/test-bridge-command-packages.mjs",
+            "scripts/test-desktop-ui-bridge.mjs"
+          ]
+        },
+        {
+          "executable": "node",
+          "args": [
+            "--test",
+            "scripts/test-command-destinations.mjs"
+          ]
+        },
+        {
+          "executable": "node",
+          "args": [
+            "scripts/validate-desktop-marketplace.mjs"
+          ]
+        },
+        {
+          "executable": "node",
+          "args": [
+            "scripts/validate-claude-marketplace.mjs"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "local/qwen",
+      "type": "local",
+      "provider": "qwen",
+      "command": "$qwenlocal",
+      "suites": [
+        {
+          "executable": "node",
+          "args": [
+            "--test",
+            "scripts/test-qwenlocal-command.mjs"
+          ]
+        },
+        {
+          "executable": "node",
+          "args": [
+            "scripts/validate-desktop-marketplace.mjs"
+          ]
+        },
+        {
+          "executable": "node",
+          "args": [
+            "scripts/validate-claude-marketplace.mjs"
+          ]
+        }
+      ]
+    }
+  ],
+  "groups": [
+    {
+      "id": "snap-gpt",
+      "kind": "command",
+      "consumers": [
+        "snap/gpt"
+      ],
+      "roots": [
+        "plugins/cogentspec/skills/gptsnap",
+        "plugins/cogentstack/skills/gptsnap",
+        "bridge/types/snap/gpt"
+      ],
+      "command": "snap/gpt"
+    },
+    {
+      "id": "snap-claude",
+      "kind": "command",
+      "consumers": [
+        "snap/claude"
+      ],
+      "roots": [
+        "claude-plugins/cogentspec/skills/claudesnap",
+        "claude-plugins/cogentstack/skills/claudesnap",
+        "bridge/types/snap/claude"
+      ],
+      "command": "snap/claude"
+    },
+    {
+      "id": "web-gpt",
+      "kind": "command",
+      "consumers": [
+        "web/gpt"
+      ],
+      "roots": [
+        "plugins/cogentspec/skills/gptweb",
+        "plugins/cogentstack/skills/gptweb",
+        "bridge/types/web/gpt"
+      ],
+      "command": "web/gpt"
+    },
+    {
+      "id": "web-claude",
+      "kind": "command",
+      "consumers": [
+        "web/claude"
+      ],
+      "roots": [
+        "claude-plugins/cogentspec/skills/claudeweb",
+        "claude-plugins/cogentstack/skills/claudeweb",
+        "bridge/types/web/claude"
+      ],
+      "command": "web/claude"
+    },
+    {
+      "id": "web-qwen",
+      "kind": "command",
+      "consumers": [
+        "web/qwen"
+      ],
+      "roots": [
+        "plugins/cogentspec/skills/qwenweb",
+        "plugins/cogentstack/skills/qwenweb",
+        "claude-plugins/cogentspec/skills/qwenweb",
+        "claude-plugins/cogentstack/skills/qwenweb",
+        "bridge/types/web/qwen"
+      ],
+      "command": "web/qwen"
+    },
+    {
+      "id": "desk-gpt",
+      "kind": "command",
+      "consumers": [
+        "desk/gpt"
+      ],
+      "roots": [
+        "plugins/cogentspec/skills/gptdesk",
+        "plugins/cogentstack/skills/gptdesk",
+        "bridge/types/desk/gpt"
+      ],
+      "command": "desk/gpt"
+    },
+    {
+      "id": "desk-claude",
+      "kind": "command",
+      "consumers": [
+        "desk/claude"
+      ],
+      "roots": [
+        "claude-plugins/cogentspec/skills/claudedesk",
+        "claude-plugins/cogentstack/skills/claudedesk",
+        "bridge/types/desk/claude"
+      ],
+      "command": "desk/claude"
+    },
+    {
+      "id": "local-qwen",
+      "kind": "command",
+      "consumers": [
+        "local/qwen"
+      ],
+      "roots": [
+        "plugins/cogentspec/skills/qwenlocal",
+        "plugins/cogentstack/skills/qwenlocal",
+        "claude-plugins/cogentspec/skills/qwenlocal",
+        "claude-plugins/cogentstack/skills/qwenlocal",
+        "bridge/types/local/qwen"
+      ],
+      "command": "local/qwen"
+    },
+    {
+      "id": "legacy-shared-runtime",
+      "kind": "shared-runtime",
+      "consumers": [
+        "snap/gpt",
+        "snap/claude",
+        "web/gpt",
+        "web/claude",
+        "web/qwen",
+        "desk/gpt",
+        "desk/claude"
+      ],
+      "roots": [
+        "plugins/cogentspec/skills/cogentspec/scripts",
+        "plugins/cogentstack/skills/cogentstack/scripts",
+        "claude-plugins/cogentspec/skills/cogentspec/scripts",
+        "claude-plugins/cogentstack/skills/cogentstack/scripts"
+      ]
+    },
+    {
+      "id": "package-identities",
+      "kind": "packaging",
+      "consumers": [
+        "snap/gpt",
+        "snap/claude",
+        "web/gpt",
+        "web/claude",
+        "web/qwen",
+        "desk/gpt",
+        "desk/claude",
+        "local/qwen"
+      ],
+      "roots": [
+        "plugins/cogentspec/.codex-plugin/plugin.json",
+        "plugins/cogentstack/.codex-plugin/plugin.json",
+        "claude-plugins/cogentspec/.claude-plugin/plugin.json",
+        "claude-plugins/cogentstack/.claude-plugin/plugin.json"
+      ]
+    },
+    {
+      "id": "trusted-installation",
+      "kind": "packaging",
+      "consumers": [
+        "snap/gpt",
+        "snap/claude",
+        "web/gpt",
+        "web/claude",
+        "web/qwen",
+        "desk/gpt",
+        "desk/claude",
+        "local/qwen"
+      ],
+      "roots": [
+        ".agents/plugins",
+        ".claude-plugin",
+        "desktop/marketplace.json"
+      ]
+    },
+    {
+      "id": "legacy-package-skills",
+      "kind": "packaging",
+      "consumers": [
+        "snap/gpt",
+        "snap/claude",
+        "web/gpt",
+        "web/claude",
+        "web/qwen",
+        "desk/gpt",
+        "desk/claude",
+        "local/qwen"
+      ],
+      "roots": [
+        "plugins/cogentspec/skills/cogentspec/SKILL.md",
+        "plugins/cogentstack/skills/cogentstack/SKILL.md",
+        "claude-plugins/cogentspec/skills/cogentspec/SKILL.md",
+        "claude-plugins/cogentstack/skills/cogentstack/SKILL.md",
+        "plugins/cogentspec/skills/cogentspec/agents",
+        "plugins/cogentstack/skills/cogentstack/agents",
+        "plugins/cogentspec/skills/gptpop",
+        "plugins/cogentstack/skills/gptpop"
+      ]
+    },
+    {
+      "id": "web-runtime-artifacts",
+      "kind": "shared-runtime",
+      "consumers": [
+        "web/gpt"
+      ],
+      "roots": [
+        "bridge-runtime"
+      ]
+    },
+    {
+      "id": "browser-extension",
+      "kind": "shared-runtime",
+      "consumers": [
+        "web/gpt",
+        "web/claude"
+      ],
+      "roots": [
+        "browser-extension"
+      ]
+    },
+    {
+      "id": "qwen-web-extension",
+      "kind": "shared-runtime",
+      "consumers": [
+        "web/qwen"
+      ],
+      "roots": [
+        "qwen-web-extension"
+      ]
+    },
+    {
+      "id": "firewall",
+      "kind": "firewall",
+      "consumers": [
+        "snap/gpt",
+        "snap/claude",
+        "web/gpt",
+        "web/claude",
+        "web/qwen",
+        "desk/gpt",
+        "desk/claude",
+        "local/qwen"
+      ],
+      "roots": [
+        "bridge/registry.mjs",
+        "bridge/firewall.json",
+        "scripts/bridge-firewall.mjs",
+        "scripts/test-bridge-firewall.mjs",
+        "scripts/validate-desktop-marketplace.mjs",
+        "scripts/validate-claude-marketplace.mjs",
+        "package.json",
+        "package-lock.json",
+        ".github/workflows/bridge-firewall.yml",
+        "AGENTS.md",
+        "docs/bridge-firewall.md"
+      ]
+    },
+    {
+      "id": "contract-suites",
+      "kind": "firewall",
+      "consumers": [
+        "snap/gpt",
+        "snap/claude",
+        "web/gpt",
+        "web/claude",
+        "web/qwen",
+        "desk/gpt",
+        "desk/claude",
+        "local/qwen"
+      ],
+      "roots": [
+        "scripts/test-bridge-command-packages.mjs",
+        "scripts/test-claudeweb-launcher.mjs",
+        "scripts/test-desktop-ui-bridge.mjs",
+        "scripts/test-gptdesk-start.mjs",
+        "scripts/test-gptsnap-client.mjs",
+        "scripts/test-gptsnap-handshake.mjs",
+        "scripts/test-gptsnap-start.mjs",
+        "scripts/test-gptweb-browser-procedure.mjs",
+        "scripts/test-qwenlocal-command.mjs",
+        "scripts/test-standalone-gptweb.mjs",
+        "scripts/test-web-handoff.mjs"
+      ]
+    },
+    {
+      "id": "legacy-package-metadata",
+      "kind": "packaging",
+      "consumers": [
+        "snap/gpt",
+        "snap/claude",
+        "web/gpt",
+        "web/claude",
+        "web/qwen",
+        "desk/gpt",
+        "desk/claude",
+        "local/qwen"
+      ],
+      "roots": [
+        "plugins/cogentspec/.mcp.json",
+        "plugins/cogentspec/assets/icon.png",
+        "plugins/cogentspec/assets/logo.png",
+        "plugins/cogentstack/.mcp.json",
+        "plugins/cogentstack/assets/icon.png",
+        "plugins/cogentstack/assets/logo.png"
+      ]
+    },
+    {
+      "id": "provider-entrypoint-contracts",
+      "kind": "firewall",
+      "consumers": [
+        "snap/gpt",
+        "snap/claude",
+        "web/gpt",
+        "web/claude",
+        "web/qwen",
+        "desk/gpt",
+        "desk/claude",
+        "local/qwen"
+      ],
+      "roots": [
+        "scripts/test-command-destinations.mjs"
+      ]
+    }
+  ]
+}

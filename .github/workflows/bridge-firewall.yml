@@ -1,0 +1,32 @@
+name: Bridge command firewall
+on:
+  pull_request:
+  push:
+    branches: [main, 'codex/**']
+permissions:
+  contents: read
+jobs:
+  command-boundaries:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci --ignore-scripts
+      - name: Verify locked command sources and package boundaries
+        run: npm run bridge:check
+      - name: Test firewall rejection paths
+        run: npm run bridge:test-firewall
+      - name: Execute every command's declared automated contracts
+        run: npm run bridge:test -- --commands snap/gpt,snap/claude,web/gpt,web/claude,web/qwen,desk/gpt,desk/claude,local/qwen --output artifacts/bridge-ci
+      - name: Retain source-bound results (these are not live connection approval)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bridge-command-contracts
+          path: artifacts/bridge-ci
+          retention-days: 14

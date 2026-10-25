@@ -1,0 +1,14 @@
+{
+  "name": "cogentspec-marketplace-verification",
+  "private": true,
+  "devDependencies": {
+    "typescript": "5.9.3"
+  },
+  "scripts": {
+    "bridge:check": "node scripts/bridge-firewall.mjs check",
+    "bridge:test-firewall": "node --test scripts/test-bridge-firewall.mjs",
+    "bridge:test": "node scripts/bridge-firewall.mjs test",
+    "bridge:release": "node scripts/bridge-firewall.mjs release",
+    "test": "node scripts/bridge-firewall.mjs check && node --test scripts/test-bridge-firewall.mjs scripts/test-bridge-command-packages.mjs"
+  }
+}

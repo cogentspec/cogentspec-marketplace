@@ -1,0 +1,6 @@
+{
+  "id": "web/qwen",
+  "type": "web",
+  "provider": "qwen",
+  "command": "$qwenweb"
+}

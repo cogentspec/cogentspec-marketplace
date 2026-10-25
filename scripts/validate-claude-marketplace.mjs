@@ -2,8 +2,10 @@ import { spawnSync } from "node:child_process";
 import { readdir, readFile } from "node:fs/promises";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { verify } from './bridge-firewall.mjs';
 
 const repositoryRoot = dirname(dirname(fileURLToPath(import.meta.url)));
+verify(repositoryRoot);
 const marketplacePath = join(repositoryRoot, ".claude-plugin", "marketplace.json");
 const marketplace = JSON.parse(await readFile(marketplacePath, "utf8"));
 const updateInstructions = await readFile(join(repositoryRoot, ".agents", "plugins", "UPDATE.CLAUDE.v1.md"), "utf8");

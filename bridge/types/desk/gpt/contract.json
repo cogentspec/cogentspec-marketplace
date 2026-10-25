@@ -1,0 +1,6 @@
+{
+  "id": "desk/gpt",
+  "type": "desk",
+  "provider": "gpt",
+  "command": "$gptdesk"
+}
