@@ -352,7 +352,28 @@ Start-Sleep -Milliseconds 5500
     Assert-BridgeLauncherTest ([string]$webExperienceResult.browserNavigationProtocol -ceq 'cogentspec-gptweb-navigation-v1') 'The GPTWeb command omitted its direct navigation protocol.'
     # Execute the returned call with a fake tab. This checks the JS quoting and
     # preserves the complete URL across the PowerShell JSON -> browser JS boundary.
-    $navigationTestResult = $webExperienceJsonLine | & node (Join-Path $PSScriptRoot 'test-gptweb-navigation.mjs')
+    # The core launcher's legacy Web handoff remains a compatibility contract.
+    # Validate that result directly, independently of the current browser-only
+    # GPTWeb skill and its separate procedure tests.
+    $navigationTestPath = Join-Path $fixtureRoot 'verify-web-navigation.mjs'
+    @'
+import assert from 'node:assert/strict';
+import {runInNewContext} from 'node:vm';
+let input='';for await(const chunk of process.stdin)input+=chunk;
+const result=JSON.parse(input.replace(/^\uFEFF/,''));
+assert.equal(result.status,'ready');assert.equal(result.browserOpened,false);
+assert.equal(result.browserNavigationProtocol,'cogentspec-gptweb-navigation-v1');
+const call=/^await gptWebTab\.goto\(("(?:[^"\\]|\\.)*")\);$/.exec(result.browserNavigationCode);
+assert.ok(call);assert.equal(JSON.parse(call[1]),result.workspaceUrl);
+const url=new URL(result.workspaceUrl);assert.equal(url.origin,'https://cogentspec.app');
+assert.equal(url.pathname,'/stack');assert.equal(url.searchParams.get('experience'),'web');
+assert.equal(url.searchParams.get('context'),result.contextKey);assert.equal(url.searchParams.get('surface'),'chatgpt');
+const calls=[];await runInNewContext('(async()=>{'+result.browserNavigationCode+'})()',{
+ gptWebTab:{goto:async target=>calls.push(target)}
+},{timeout:1000});assert.deepEqual(calls,[result.workspaceUrl]);
+console.log('DIRECT_BROWSER_NAVIGATION_VERIFIED=true');
+'@ | Set-Content -LiteralPath $navigationTestPath -Encoding UTF8
+    $navigationTestResult = $webExperienceJsonLine | & node $navigationTestPath
     Assert-BridgeLauncherTest ($LASTEXITCODE -eq 0 -and $navigationTestResult -eq 'DIRECT_BROWSER_NAVIGATION_VERIFIED=true') 'The GPTWeb browser call did not deliver the exact handoff once.'
 
     $fixtureLauncherPath = Join-Path $fixtureScripts 'start-cogentstack-bridge.ps1'

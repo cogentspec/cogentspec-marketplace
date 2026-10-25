@@ -165,7 +165,15 @@ function Start-DetachedBridgeWatcher(
         -WatcherReadyPath $WatcherReadyPath
     $encodedCommand = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
     $commandLine = '"' + $PowerShellExecutable + '" -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -EncodedCommand ' + $encodedCommand
-    $creation = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $commandLine }
+    # Hide at process creation, before PowerShell can parse -WindowStyle.
+    # Keep the existing WMI detachment so the worker survives its caller.
+    $startup = New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{
+        ShowWindow = [UInt16]0
+    }
+    $creation = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{
+        CommandLine = $commandLine
+        ProcessStartupInformation = $startup
+    }
     if ([int]$creation.ReturnValue -ne 0 -or [int]$creation.ProcessId -le 0) {
         throw "Desktop Bridge worker could not be started (Windows result $([int]$creation.ReturnValue))."
     }
