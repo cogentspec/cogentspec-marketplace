@@ -1,0 +1,11 @@
+{
+  "protocol": "cogentspec-gptweb-native-release-v1",
+  "command": "$gptweb",
+  "version": "0.2.1",
+  "repository": "https://github.com/cogentspec/cogentspec-marketplace.git",
+  "runtimeRevision": "1533e8dc4ae8fff0613c113c9f86d5c02ed45c23",
+  "runtimeManifestSha256": "45e4c64757bc4a0cd4e93d1f0c7de661b490d9cebcaabd392ab0449d88b990eb",
+  "launcherSourceSha256": "463f5d831d88e86ec8e14967c98d50583286b2a085a633df2b8cb3944746da09",
+  "bootstrapSha256": "c75905cc18e68543ebaed2616dfd0b094d23acc0859fbb2a69e845b14ce59087",
+  "installerSha256": "b6b1ccf76ab4e52e949533ee793a7453e6928230c3ac5faf25ca5e2717bb4a69"
+}

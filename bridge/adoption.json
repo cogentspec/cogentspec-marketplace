@@ -1,46 +1,11 @@
 {
   "protocol": "cogentspec-bridge-firewall-v1",
-  "reason": "GPTWeb-only quiet marketplace Bridge installer removes setup form, binds native downloads to the tab request and resumes genuine first-use approval. Binary Git attributes are a shared packaging dependency; all eight consumers are recorded and checked without changing other private launchers.",
+  "reason": "Package the exact compiled quiet GPTWeb Bridge executable and bootstrap under its own marketplace artifact boundary; no other connector source or package changes.",
   "changes": [
     {
-      "id": "snap/gpt",
-      "before": "d66b223b9f8b1119644e152c464606a8609ed1fd6ebab0b3c7e2f9a2365f6985",
-      "after": "ae1418d2e3868f7bfd5e3dd924d5912f38851873eaba8a2943d99c63bebb0f66"
-    },
-    {
-      "id": "snap/claude",
-      "before": "cd79f85d90554b5034991f77b0fe4d4428620487c0847eaf13d5861572eebaad",
-      "after": "7e0d2ca0e2fe70fc5c4590ef493d68bd94c15b588faea3d0216bc4fbc8af8112"
-    },
-    {
       "id": "web/gpt",
-      "before": "e34c466ec2a46d0c28ab519de387baad5a489fbd87be9aa77be01deb903f218b",
-      "after": "10cf492f07078a2779a5e592771f2299bfe7e239dc6588dc925bf1c58eda2682"
-    },
-    {
-      "id": "web/claude",
-      "before": "6d45218672d45c4bb529094c12a7a091f4fa979923224555f1baba4a5477042e",
-      "after": "1f434ffcba1eeb55451ca3eb75d8b150e1d6c428b77c3395756e605af761b8fa"
-    },
-    {
-      "id": "web/qwen",
-      "before": "1d601c502ab6cc971386812e131c01380d3506f7be760143253fb6527196bd60",
-      "after": "2065fca5e48012db134d32f89eafae3624272088f65faad9dec3d8dc3f5ec014"
-    },
-    {
-      "id": "desk/gpt",
-      "before": "d1b1e56fba6e3b41a3e369d2dafbb8022fe8343f172327ddbb9002abe2860171",
-      "after": "f732713f36c4b1b8c94721d334fe5749c120cf116320d495ba85f506b71e2cde"
-    },
-    {
-      "id": "desk/claude",
-      "before": "2468bd29853bed37210e48c961fc1677e4cc6cd2cd4204dfe6c098de979200d3",
-      "after": "f7182ba7cb1ff5cdecb93bc1800850490baeba0595b82309048865f623023e6c"
-    },
-    {
-      "id": "local/qwen",
-      "before": "41b5d8ac03e56b48618ddf6f1ba840d835b6a5d3b7af761a40bbe831f128a3bc",
-      "after": "1ddb9b1781e367917f1a117c860cbf904117bfc8a2665d90b99837c4a88534d9"
+      "before": "10cf492f07078a2779a5e592771f2299bfe7e239dc6588dc925bf1c58eda2682",
+      "after": "c0f8902be65f2361e622608d571197f7154183c65471fb1bb3fbe77b4b7a17ed"
     }
   ]
 }
