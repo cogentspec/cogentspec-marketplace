@@ -26,9 +26,10 @@ test('GPTWeb inventory pins every input and its frozen runtime; other connector 
  const connect=await readFile(join(root,'connect.ps1'),'utf8');
  assert.ok(connect.indexOf("'authorize' -Authenticated")<connect.indexOf('(& $launcher'));
  assert.match(connect,/workspaceConnected -cne \$false/);
- const changed=execFileSync('git',['diff','--name-status','e29ee568d816f7d4afb1b1436035e8b8783556d5'],{encoding:'utf8',windowsHide:true}).trim().split('\n').filter(Boolean);
- for(const line of changed){const [status,path]=line.split('\t');assert.equal(status,'A','Existing marketplace source must be unchanged');
-  assert.ok(path.startsWith('bridge-gptweb-browser/')||path==='scripts/test-gptweb-browser-handler.mjs',path);}
+ // Restoring the independent Web command documents must never refresh this
+ // retired browser-start artifact's frozen worker snapshot.
+ const changed=execFileSync('git',['diff','--name-only','5366ee2a8fbd704f2630b8196085f4234b5b69f5','--','bridge-gptweb-browser/'],{encoding:'utf8',windowsHide:true}).trim();
+ assert.equal(changed,'','The retired browser-start artifact must remain frozen');
 });
 
 test('Windows handler accepts only a GPTWeb request UUID and setup rejects altered source', {skip:process.platform!=='win32'},async()=>{

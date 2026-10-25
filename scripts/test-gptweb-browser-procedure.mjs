@@ -1,18 +1,34 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {readFile} from 'node:fs/promises';
+import {execFileSync} from 'node:child_process';
+import {fileURLToPath} from 'node:url';
 
-test('GPTWeb browser instructions are self-contained, work without a Windows executor, and match both packages',async()=>{
- const read=plugin=>readFile(new URL(`../plugins/${plugin}/skills/gptweb/SKILL.md`,import.meta.url),'utf8');
- const procedure=await read('cogentspec');assert.equal(await read('cogentstack'),procedure);
- const steps=procedure.split('\n').filter(line=>/^\d\. /.test(line));
- assert.equal(steps.length,6);
- assert.match(steps[0],/browser tools/);assert.match(steps[0],/wait/);
- assert.match(steps[1],/existing/);assert.match(steps[2],/Initiate Bridge/);
- assert.match(steps[3],/Ask the user to confirm/);assert.match(steps[3],/Only after confirmation/);
- assert.match(steps[4],/Bridge connected/);assert.match(steps[4],/My projects/);
- assert.doesNotMatch(steps.join('\n'),/Invoke.*ps1|sole GPTWeb entry point|start-gptweb\.ps1/);
- assert.match(procedure,/only its browser tools are required/);assert.match(procedure,/must already be running/);
- assert.match(procedure,/do not load a generic connection skill/);
- assert.match(procedure,/No ChatGPT plugin, skill installation, PowerShell execution or waiting listener is required/);
+const root=fileURLToPath(new URL('../',import.meta.url));
+const tuesday='8a8011d5d48f53636bf5dabe7d4a5a07ad0f9710';
+const git=(...args)=>execFileSync('git',args,{cwd:root,windowsHide:true,encoding:'utf8'});
+const normalize=value=>value.replaceAll('\r\n','\n');
+
+test('GPTWeb and ClaudeWeb restore Tuesday instructions and retain their exact launchers in both packages',async()=>{
+ for(const [host,command] of [['plugins','gptweb'],['claude-plugins','claudeweb']]) {
+  for(const plugin of ['cogentspec','cogentstack']) {
+   for(const relative of ['SKILL.md',`scripts/start-${command}.ps1`]) {
+    const path=`${host}/${plugin}/skills/${command}/${relative}`;
+    assert.equal(normalize(await readFile(new URL('../'+path,import.meta.url),'utf8')),normalize(git('show',tuesday+':'+path)),path);
+   }
+  }
+ }
+});
+
+test('the restore cannot edit Qwen, Snap, Desk, shared runtime, manifests or installer behavior',()=>{
+ const allowed=new Set([
+  ...['cogentspec','cogentstack'].flatMap(plugin=>[
+   `plugins/${plugin}/skills/gptweb/SKILL.md`,
+   `claude-plugins/${plugin}/skills/claudeweb/SKILL.md`,
+  ]),
+  'scripts/test-gptweb-navigation.mjs','scripts/test-claudeweb-launcher.mjs',
+  'scripts/test-gptweb-browser-procedure.mjs','scripts/test-gptweb-browser-handler.mjs',
+ ]);
+ const changed=git('diff','--name-only','5366ee2a8fbd704f2630b8196085f4234b5b69f5').trim().split('\n').filter(Boolean);
+ for(const path of changed)assert.ok(allowed.has(path),'Out-of-scope marketplace change: '+path);
 });

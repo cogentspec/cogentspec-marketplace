@@ -8,7 +8,7 @@ test('claudeweb restores its provider-specific marketplace Web handoff',async()=
     const skill=await readFile(new URL('SKILL.md',root),'utf8');
     const script=await readFile(new URL('scripts/start-claudeweb.ps1',root),'utf8');
     assert.ok(skill.includes('status: ready'));
-    assert.ok(skill.includes('browserOpened: false'));
+    assert.ok(skill.includes('My projects'));
     assert.ok(skill.includes('browserNavigationCode'));
     assert.match(script,/-Surface claude-desktop -Experience web/);
     assert.match(script,/browserNavigationCode/);
