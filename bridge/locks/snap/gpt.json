@@ -243,7 +243,7 @@
         "web/qwen"
       ],
       "files": {
-        ".gitattributes": "e5ec3e326919448280c307733f7f0598f8ec9ddb7c9bd149063bfd4e80029439",
+        ".gitattributes": "46d8df64d901e7c95d847006878dd4e23bd8af11fbff186180a12870c1033554",
         ".github/workflows/bridge-firewall.yml": "fc8bec165e9c967f210cb373e23fd9992f8cf8ac6967000340f3d4769487a4f1",
         "AGENTS.md": "0b30d64f13697e9b08c1deac6abe50885efab629fedf424001d1f1388dbb005b",
         "bridge/firewall.json": "90305385dc8a35d2cd8767acff925dc1da80b9c0d09b6e7436783b759a8cb8f9",
@@ -321,5 +321,5 @@
       }
     }
   },
-  "artifactDigest": "c99e51689014d9a6fdc3e05fb6a72911d6d89b8acf4b44c246cee7989b86f5e0"
+  "artifactDigest": "47901b31425f21f179f58017dcf812d8258342fdcb889ee7c05c942494dada54"
 }

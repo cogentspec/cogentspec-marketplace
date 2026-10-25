@@ -1,11 +1,46 @@
 {
   "protocol": "cogentspec-bridge-firewall-v1",
-  "reason": "Add real Windows enrollment-contract fixture for first-time approval completion without an expiring browser job or worker startup.",
+  "reason": "Keep the new packaging attributes file itself in LF form across Windows and Linux checkouts; its raw-byte firewall hash must remain portable. No connector implementation or plugin package changes.",
   "changes": [
     {
+      "id": "snap/gpt",
+      "before": "c99e51689014d9a6fdc3e05fb6a72911d6d89b8acf4b44c246cee7989b86f5e0",
+      "after": "47901b31425f21f179f58017dcf812d8258342fdcb889ee7c05c942494dada54"
+    },
+    {
+      "id": "snap/claude",
+      "before": "5d13b218809e79323e84d3d589fe9e86edd5140abe749301eb85ee7a8ae0ae45",
+      "after": "e051cb0faf39f5bc2e874063827ac3272c303d93a1b601bf11a3b38f9d28fc77"
+    },
+    {
       "id": "web/gpt",
-      "before": "70c37d98c868f4c5d0d5d032ebc4c364d630ad871c869060e98e6934965ad4a2",
-      "after": "9415d409361e55d891c5ddd191228ef049eb693611d4342b301d56a656cdcfac"
+      "before": "9415d409361e55d891c5ddd191228ef049eb693611d4342b301d56a656cdcfac",
+      "after": "b3eedebc53f514255151e1e53db9b1671251c4b1a2e21d7c69d2821e5e0ef377"
+    },
+    {
+      "id": "web/claude",
+      "before": "45fa35cc0809fa6311eb16333aa8f3a62863add743ea35472a0d7003867cc388",
+      "after": "48988775ca1dd98dfc7a595e46283a2f54937faca1858b0653a5e8bf9d6ca27a"
+    },
+    {
+      "id": "web/qwen",
+      "before": "65bd8921b1d0b5e75430aad7cb6593bc389e46078b53f1a4d0b56d4c5a6d43d3",
+      "after": "db617c02d82eac2e4b33cf0d4314b5f2e7d240c54e7eb4f17356d051f9bcdd82"
+    },
+    {
+      "id": "desk/gpt",
+      "before": "373dd635478876e484e433eec0e1e7b4cd70217f83d96f9983e1ccc3e04da8dc",
+      "after": "c0a6bd99690645feaa0d83f1fb09a3c5914462ac470ec96068de0cc09905b903"
+    },
+    {
+      "id": "desk/claude",
+      "before": "acc1753a9595c3fce55647b41a2cd0b61cdaef9ef6c29a19b3b593cf8c077f47",
+      "after": "5b4b95aeec15734a7ac677470d012d5051c4b1e5f35bc4b4faafa04ac29d2ccb"
+    },
+    {
+      "id": "local/qwen",
+      "before": "7f6929dc6195ff1f4d4db6901d8f64e0407f59efa461e06c0558f9ebabaf829d",
+      "after": "0cfec784623efb8776cc080efcebdd77df27d0e36e014edc938164758d31d697"
     }
   ]
 }
