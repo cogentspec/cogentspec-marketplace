@@ -95,6 +95,7 @@
           "args": [
             "--test",
             "scripts/test-gptweb-browser-procedure.mjs",
+            "bridge/types/web/gpt/windows/native.test.mjs",
             "scripts/test-standalone-gptweb.mjs"
           ]
         },
@@ -523,6 +524,7 @@
         "scripts/validate-claude-marketplace.mjs",
         "package.json",
         "package-lock.json",
+        ".gitattributes",
         ".github/workflows/bridge-firewall.yml",
         "AGENTS.md",
         "docs/bridge-firewall.md"

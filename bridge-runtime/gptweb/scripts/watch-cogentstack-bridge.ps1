@@ -10,6 +10,18 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+# This private Web runtime carries its own verified Node dependency. A WMI
+# child does not inherit the installing process's PATH; initialize it here.
+$webNodeRoot = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'CogentSpec\gptweb-native\node\v22.23.2'
+$webNode = Join-Path $webNodeRoot 'node.exe'
+if (Test-Path -LiteralPath $webNode) {
+    if (((Get-Item -LiteralPath $webNode -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) -or
+        (Get-FileHash -LiteralPath $webNode -Algorithm SHA256).Hash.ToLowerInvariant() -cne '0d0f5e39f9f3d9587bc19f73eab3c2c9c4903fd02d6dbf9c853dd81b3d95fad4') {
+        throw 'GPTWeb Node integrity verification failed.'
+    }
+    $env:PATH = $webNodeRoot + ';' + $env:PATH
+}
+
 if ($null -eq ('System.Security.Cryptography.ProtectedData' -as [type])) {
     try { Add-Type -AssemblyName System.Security.Cryptography.ProtectedData -ErrorAction Stop }
     catch { Add-Type -AssemblyName System.Security -ErrorAction Stop }

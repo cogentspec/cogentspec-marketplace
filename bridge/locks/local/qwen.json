@@ -131,9 +131,10 @@
         "web/qwen"
       ],
       "files": {
+        ".gitattributes": "e5ec3e326919448280c307733f7f0598f8ec9ddb7c9bd149063bfd4e80029439",
         ".github/workflows/bridge-firewall.yml": "fc8bec165e9c967f210cb373e23fd9992f8cf8ac6967000340f3d4769487a4f1",
         "AGENTS.md": "0b30d64f13697e9b08c1deac6abe50885efab629fedf424001d1f1388dbb005b",
-        "bridge/firewall.json": "c3cba8f2ee332653efd0908c84cb2b5a9c527fc493e47f95c84c7b28f1c3d26e",
+        "bridge/firewall.json": "90305385dc8a35d2cd8767acff925dc1da80b9c0d09b6e7436783b759a8cb8f9",
         "bridge/registry.mjs": "1bb94e76bf77d412b68dfb98be3e68a3adb22dd25f4ab48c3db47f635b84f3d1",
         "docs/bridge-firewall.md": "a9f1df7707aa83f5c81869bd8b863e4f385da4367714059462bc6f71d04b0c8b",
         "package-lock.json": "4a64347f61f3703e9e646971662d33fca3d14f5d17ef78fd199f90a3d21495aa",
@@ -166,7 +167,7 @@
         "scripts/test-gptsnap-start.mjs": "46de0a4f2d4089c8ed4cff850d70001b1f18d5c4d07d916a7d1d5cbcdf1e6c8f",
         "scripts/test-gptweb-browser-procedure.mjs": "d09e8e6167db373b383e7d19de9ae20d3e57bec4fb10ebfcc9d9c329e4be1fe3",
         "scripts/test-qwenlocal-command.mjs": "e3134c51eaa66a553e1bfb526df0eb0b95e9cffa083116ec18e5f6bec06c683f",
-        "scripts/test-standalone-gptweb.mjs": "e7983cb0bc583e47cb053530165584d56258f6845bbc6ea5dc7d5a0ada88aa92",
+        "scripts/test-standalone-gptweb.mjs": "9da6165599648bfe12f79fe27c6e900226965154468a6b1e043dba4dd4853aeb",
         "scripts/test-web-handoff.mjs": "acaf1e04dbfe13028d345beb5df0a643554aa2ffc3264c0f90597b8cf76610e0"
       }
     },
@@ -208,5 +209,5 @@
       }
     }
   },
-  "artifactDigest": "f9c24c466d462121c9dab8b29e6545e7e2c97c9d2b546d61c6438a2026aa8c82"
+  "artifactDigest": "7f6929dc6195ff1f4d4db6901d8f64e0407f59efa461e06c0558f9ebabaf829d"
 }

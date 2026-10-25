@@ -48,7 +48,10 @@ function Run([string]$File,[string[]]$Arguments,[string]$WorkingDirectory,[int]$
 test('quiet bootstrap installs or reuses only the verified runtime; bad source, bytes, metadata and missing ACK never connect',{skip:process.platform!=='win32'},async()=>{
  const directory=await mkdtemp(join(tmpdir(),'standalone-gptweb-'));
  try{
-  const packageDirectory=join(directory,'fixture-package');await cp(runtime,packageDirectory,{recursive:true});
+  const packageDirectory=join(directory,'fixture-package');await mkdir(join(packageDirectory,'scripts'),{recursive:true});
+  // Exercise the shipped inventory, not untracked/empty working-copy folders.
+  await cp(new URL('runtime.json',runtime),join(packageDirectory,'runtime.json'));
+  for(const path of Object.keys(manifest.files))await cp(new URL(path,runtime),join(packageDirectory,path));
   const metadata={protocol:'cogentspec-standalone-web-release-v1',command:'$gptweb',version:manifest.version,
    manifestSha256:digest,repository:manifest.repository,sourceDirectory:'bridge-runtime/gptweb',revision:'a'.repeat(40),pluginRequired:false,codexRequired:false};
   await writeFile(join(directory,'metadata.json'),JSON.stringify(metadata));

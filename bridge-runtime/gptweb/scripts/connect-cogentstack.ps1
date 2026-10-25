@@ -43,7 +43,7 @@ $serviceUrl = 'https://cogentspec.com'
 $stateRoot = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'CogentSpec'
 $pendingPath = Join-Path $stateRoot 'desktop-authorization.json'
 $credentialPath = Join-Path $stateRoot 'desktop-credential.json'
-$snapPendingPath = Join-Path $stateRoot 'gptsnap-authorization.json'
+$snapPendingPath = Join-Path $stateRoot 'gptweb-authorization.json'
 if ($BrowserApproval) {
     if ($Surface -ne 'chatgpt' -or $ContextKey -notmatch '^ctx-[a-f0-9]{64}$' -or $Mode -notin @('start', 'complete')) {
         throw 'GPTSnap approval requires its original isolated context.'
@@ -316,11 +316,11 @@ if ($Mode -eq 'start') {
             return
         }
         if ([DateTimeOffset]$existing.expiresAt -gt [DateTimeOffset]::UtcNow) {
-            Write-CompactJson ([ordered]@{ status = 'approval_required'; approvalUrl = "$serviceUrl/activate?code=$([Uri]::EscapeDataString([string]$existing.userCode))&experience=split-screen"; expiresAt = $existing.expiresAt; pollAfterSeconds = 5; requestReused = $true })
+            Write-CompactJson ([ordered]@{ status = 'approval_required'; approvalUrl = "$serviceUrl/activate?code=$([Uri]::EscapeDataString([string]$existing.userCode))&experience=web"; expiresAt = $existing.expiresAt; pollAfterSeconds = 5; requestReused = $true })
             return
         }
     }
-    $requestBody = @{ deviceName = 'ChatGPT Desktop on Windows' } | ConvertTo-Json -Compress
+    $requestBody = @{ deviceName = 'CogentSpec GPTWeb on Windows' } | ConvertTo-Json -Compress
     $authorization = Invoke-RestMethod `
         -Method Post `
         -Uri "$serviceUrl/api/device-authorization" `
@@ -343,7 +343,7 @@ if ($Mode -eq 'start') {
         if ($approvalUri.GetLeftPart([UriPartial]::Authority) -cne $serviceUrl -or $approvalUri.AbsolutePath -cne '/activate') {
             throw 'CogentSpec returned an invalid approval destination.'
         }
-        Write-CompactJson ([ordered]@{ status = 'approval_required'; approvalUrl = "$($approvalUri.AbsoluteUri)&experience=split-screen"; expiresAt = ([DateTimeOffset]$authorization.expiresAt).ToString('o'); pollAfterSeconds = [int]$authorization.intervalSeconds; requestReused = $false })
+        Write-CompactJson ([ordered]@{ status = 'approval_required'; approvalUrl = "$($approvalUri.AbsoluteUri)&experience=web"; expiresAt = ([DateTimeOffset]$authorization.expiresAt).ToString('o'); pollAfterSeconds = [int]$authorization.intervalSeconds; requestReused = $false })
         return
     }
     Start-Process ([string]$authorization.verificationUriComplete)

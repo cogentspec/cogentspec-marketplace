@@ -158,7 +158,11 @@ function Start-DetachedBridgeWatcher(
         -WatcherReadyPath $WatcherReadyPath
     $encodedCommand = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
     $commandLine = '"' + $PowerShellExecutable + '" -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -EncodedCommand ' + $encodedCommand
-    $creation = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $commandLine }
+    $startup = New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{ ShowWindow = [UInt16]0 }
+    $creation = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{
+        CommandLine = $commandLine
+        ProcessStartupInformation = $startup
+    }
     if ([int]$creation.ReturnValue -ne 0 -or [int]$creation.ProcessId -le 0) {
         throw "Desktop Bridge worker could not be started (Windows result $([int]$creation.ReturnValue))."
     }
@@ -449,6 +453,15 @@ if (-not (Test-Path -LiteralPath $connectionScript -PathType Leaf) -or @($source
 }
 
 $powershellExecutable = Get-HostPowerShellExecutable
+# This package is GPTWeb's private, versioned runtime. Its pending approval is
+# separate from Snap; completing it never opens a tab or starts another command.
+if ($ResumeApproval) {
+    $resumeOutput = @(& $connectionScript -Mode complete -Surface chatgpt -ContextKey $resolvedContext -BrowserApproval -RequestTimeoutSeconds 6 2>&1)
+    $resumeLine = @($resumeOutput | ForEach-Object { $_.ToString() } | Where-Object { $_.Trim().StartsWith('{') } | Select-Object -Last 1)
+    if (-not $resumeLine) { throw 'GPTWeb approval could not be verified.' }
+    $resumed = $resumeLine[0] | ConvertFrom-Json
+    if ($resumed.status -ne 'connected') { Write-CompactJson $resumed; return }
+}
 $connectionOutput = @(& $connectionScript -Mode status -Surface $Surface -ContextKey $resolvedContext -Experience $Experience -WorkspaceGrant -RequestTimeoutSeconds 6 2>&1)
 $connectionJson = @($connectionOutput | ForEach-Object { $_.ToString() } | Where-Object { $_.Trim().StartsWith('{') } | Select-Object -Last 1)
 if (-not $connectionJson) { throw 'Desktop Bridge could not verify the account-bound installation.' }
@@ -471,7 +484,7 @@ if ([string]$connection.status -ne 'connected') {
             }
             $approvalUri = [Uri][string]$approval.approvalUrl
             if ($approvalUri.GetLeftPart([UriPartial]::Authority) -cne 'https://cogentspec.com' -or $approvalUri.AbsolutePath -cne '/activate') {
-                throw 'The GPTSnap approval destination is invalid.'
+                throw 'The GPTWeb approval destination is invalid.'
             }
             Write-CompactJson ([ordered]@{
                 status = 'approval_required'
@@ -479,9 +492,9 @@ if ([string]$connection.status -ne 'connected') {
                 approvalUrl = [string]$approval.approvalUrl
                 expiresAt = ([DateTimeOffset]$approval.expiresAt).ToString('o')
                 pollAfterSeconds = [int]$approval.pollAfterSeconds
-                approvalProtocol = 'cogentspec-gptsnap-approval-v1'
+                approvalProtocol = 'cogentspec-gptweb-approval-v1'
                 browserNavigationCode = 'await gptPopTab.goto(' + (ConvertTo-Json -InputObject ([string]$approval.approvalUrl) -Compress) + ');'
-                userMessage = 'Approve this computer in the CogentSpec browser page. GPTSnap will then finish connecting automatically; no installer prompt or repeated command is needed.'
+                userMessage = 'Approve this computer during one-time GPTWeb setup. The existing tab will finish connecting after approval.'
                 browserOpened = $false
                 launcherElapsedMs = [int]$launcherTimer.ElapsedMilliseconds
             })
@@ -636,14 +649,16 @@ if (Test-Path -LiteralPath $statePath -PathType Leaf) {
                 -WatcherPluginVersion $recordedPluginVersion `
                 -WatcherThreadId $recordedThreadId `
                 -WatcherReadyPath $readyPath)
-        if ($verifiedBridgeProcess -and $sameRuntime -and $sameThread) {
+        # A verified compatible worker may belong to a different connector.
+        # Reuse it in place; this GPTWeb runtime never replaces an existing worker.
+        if ($verifiedBridgeProcess) {
             $presenceReady = Wait-BridgePresenceReady `
                 -ReadyPath $readyPath `
                 -ProcessId $existingProcessId `
                 -ExpectedContextKey $resolvedContext `
-                -ExpectedPluginId $pluginId `
-                -ExpectedPluginVersion $pluginVersion `
-                -ExpectedThreadId $threadId `
+                -ExpectedPluginId $recordedPluginId `
+                -ExpectedPluginVersion $recordedPluginVersion `
+                -ExpectedThreadId $recordedThreadId `
                 -TimeoutMilliseconds 3000
             if ($presenceReady) {
                 $conversationConnection = Confirm-CurrentConversationConnection `
@@ -684,18 +699,17 @@ if (Test-Path -LiteralPath $statePath -PathType Leaf) {
                 })
                 return
             }
-            Stop-Process -Id $existingProcessId -Force -ErrorAction SilentlyContinue
-            Wait-Process -Id $existingProcessId -Timeout 2 -ErrorAction SilentlyContinue
-            Remove-Item -LiteralPath $readyPath -Force -ErrorAction SilentlyContinue
+            Write-CompactJson ([ordered]@{ status = 'worker_in_use'; browserOpened = $false; userMessage = 'The existing worker is not ready. GPTWeb did not stop or replace it.' })
+            return
         }
-        if ($verifiedBridgeProcess -and (-not $sameRuntime -or -not $sameThread)) {
-            Stop-Process -Id $existingProcessId -Force
-            Wait-Process -Id $existingProcessId -Timeout 2 -ErrorAction SilentlyContinue
+        if ($existingProcess) {
+            Write-CompactJson ([ordered]@{ status = 'worker_in_use'; browserOpened = $false; userMessage = 'GPTWeb could not verify the existing worker. It was not stopped or replaced.' })
+            return
         }
     } catch { }
 }
 
-Remove-Item -LiteralPath $readyPath -Force -ErrorAction SilentlyContinue
+# Do not remove a readiness record belonging to a concurrent connector startup.
 
 $watcher = Start-DetachedBridgeWatcher `
     -PowerShellExecutable $powershellExecutable `
@@ -715,7 +729,6 @@ $presenceReady = Wait-BridgePresenceReady `
     -TimeoutMilliseconds 8000
 if (-not $presenceReady) {
     Stop-Process -Id $watcher.Id -Force -ErrorAction SilentlyContinue
-    Remove-Item -LiteralPath $readyPath -Force -ErrorAction SilentlyContinue
     throw 'Desktop Bridge started, but CogentSpec did not verify this AI task.'
 }
 $conversationConnection = Confirm-CurrentConversationConnection `

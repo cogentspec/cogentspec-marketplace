@@ -1,46 +1,11 @@
 {
   "protocol": "cogentspec-bridge-firewall-v1",
-  "reason": "Enforce a closed per-command shared-export boundary and prohibit cross-command PowerShell dispatch",
+  "reason": "Add real Windows enrollment-contract fixture for first-time approval completion without an expiring browser job or worker startup.",
   "changes": [
     {
-      "id": "snap/gpt",
-      "before": "1ee1e67143740e1aaee244ff36ad385a908bc859212299465f93e6217895bb96",
-      "after": "5c45702b558e0f0bba6f1e5f26eec3f1c753c149f4ac242dee2120a435c82d71"
-    },
-    {
-      "id": "snap/claude",
-      "before": "4a06359e7c079b4d375b8fbf867e7ecac8f3e254ba59301ff93dcffccbfc2019",
-      "after": "977dee7937581b69e2a3b44f3ae52def615da6db082743495875f6bf56f65eb0"
-    },
-    {
       "id": "web/gpt",
-      "before": "d2816c8ac30c3aa395136ea79491c96969ef8948be7668c52a4f3a4a4028f4b4",
-      "after": "c2996df54221d3d363c7d104e832d7f4b921e93037ef090722774ea002853650"
-    },
-    {
-      "id": "web/claude",
-      "before": "82e945165232eacf23d8c6bf764f5388db16aa133ed13295996a3c9bf327bb81",
-      "after": "ae16be0553cb6d0aaff37ac5e9d4ce99521ff633dff6326f5f0ddb21b1295d91"
-    },
-    {
-      "id": "web/qwen",
-      "before": "634aeec746f4058eff685a578914e6ce3e5f25d3326040e9f56a81c2bf58fe2d",
-      "after": "46b1741c64d3b7aae730e34b413080a30f70ad1644213763b273dbd9bf033ef8"
-    },
-    {
-      "id": "desk/gpt",
-      "before": "ec81df6749da68207c15e7911a67c319731ae74c24b5d44445699667c5b0aab6",
-      "after": "cd4f330ee4db7abacf12adda95262fa8cf413c82ce942e4f9d116f5be51b6428"
-    },
-    {
-      "id": "desk/claude",
-      "before": "0f7e592073ab446b0c89eb5018ead2226e9b95b67093e29eb7ed51af3b20c44c",
-      "after": "1f4d512c2c7d622bce2b10030b395c60c86225ddfd2e775bdc6d4562c329e471"
-    },
-    {
-      "id": "local/qwen",
-      "before": "f829ea388133db261f938fffe9efb449092140d75b020d7ea5800cce873f47cd",
-      "after": "f9c24c466d462121c9dab8b29e6545e7e2c97c9d2b546d61c6438a2026aa8c82"
+      "before": "70c37d98c868f4c5d0d5d032ebc4c364d630ad871c869060e98e6934965ad4a2",
+      "after": "9415d409361e55d891c5ddd191228ef049eb693611d4342b301d56a656cdcfac"
     }
   ]
 }
