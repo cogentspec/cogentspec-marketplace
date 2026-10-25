@@ -294,6 +294,26 @@ export function validateEvidence(checked, ids, evidencePath, now = Date.now()) {
   }
 }
 
+// Candidate distribution solves the installer/test dependency without granting
+// production promotion. Only a committed, source-tested tree can be uploaded to
+// this fixed, immutable test ref; releaseGate still requires real observations.
+export function candidateGate(root, baseRef, evidencePath) {
+  const { checked, base, affected } = affectedCommands(root, baseRef);
+  const revision = git(root, ['rev-parse', '--verify', 'HEAD^{commit}']);
+  const dirty = spawnSync('git', ['diff', '--quiet', 'HEAD', '--'], { cwd: root, windowsHide: true });
+  if (dirty.status !== 0) fail('candidate sources and locks must be committed');
+  if (revision === base) fail('candidate must differ from the actual previous release');
+  const tracked = new Set(git(root, ['ls-tree', '-r', '--name-only', revision]).split('\n'));
+  for (const path of [...checked.state.owners.keys(), 'bridge/firewall.json', ...commandIds.map(id => `bridge/locks/${id}.json`)])
+    if (!tracked.has(path)) fail(`uncommitted candidate input ${path}`);
+  if (!evidencePath || !existsSync(resolve(evidencePath))) fail('candidate integration verification NOT RUN');
+  validateEvidence(checked, affected.length ? affected : commandIds, evidencePath);
+  if (!/^[a-z][a-z0-9-]*$/.test(checked.component)) fail('invalid candidate component');
+  return { protocol: schema, status: 'candidate-verified', component: checked.component, base, revision,
+    fingerprint: checked.fingerprint, affected, ref: `refs/heads/codex/candidate/${checked.component}-${revision}`,
+    liveVerified: false, productionPromotionAuthorized: false };
+}
+
 export function recordLive(root, id, resultPath, output) {
   const checked = verify(root), command = checked.commands.find(candidate => candidate.id === id);
   if (!command) fail('unknown live command');
@@ -348,10 +368,12 @@ async function main() {
   else if (mode === 'test') result = runContracts(root, option('--commands')?.split(','), resolve(option('--output') || fail('test output directory required')));
   else if (mode === 'record-live') result = recordLive(root, option('--command'), option('--result'), option('--output') || fail('live output directory required'));
   else if (mode === 'release') result = releaseGate(root, option('--base-ref'), option('--evidence'), option('--live-directory'));
+  else if (mode === 'candidate') result = candidateGate(root, option('--base-ref'), option('--evidence'));
   else fail(`unknown mode ${mode}`);
   // Inventory contents stay in files; ordinary output is a bounded receipt.
   console.log(JSON.stringify({ protocol: schema, status: result.status || 'passed', component: result.component,
     fingerprint: result.fingerprint, base: result.base, affected: result.affected,
+    ...(mode === 'candidate' ? { revision: result.revision, ref: result.ref, liveVerified: false, productionPromotionAuthorized: false } : {}),
     commands: result.commands?.map(command => typeof command === 'string' ? command : command.id) }));
 }
 

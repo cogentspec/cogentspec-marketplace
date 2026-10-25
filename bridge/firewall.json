@@ -519,6 +519,7 @@
         "bridge/registry.mjs",
         "bridge/firewall.json",
         "scripts/bridge-firewall.mjs",
+        "scripts/publish-bridge-candidate.mjs",
         "scripts/test-bridge-firewall.mjs",
         "scripts/validate-desktop-marketplace.mjs",
         "scripts/validate-claude-marketplace.mjs",

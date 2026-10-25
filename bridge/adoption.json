@@ -1,11 +1,46 @@
 {
   "protocol": "cogentspec-bridge-firewall-v1",
-  "reason": "Run the SHA-verified embedded GPTWeb setup with a child-session-only execution policy; preserve Group Policy and persistent settings. Add a real compiled launcher child-process test proving no console under restrictive inherited policy.",
+  "reason": "Add exact committed-source candidate distribution to immutable test-only refs after source-bound integration tests. Stable branches, release tags and production gate remain protected by real live observations. Shared verifier, uploader and policy inputs require all eight contracts; connector source and AI plugin packages stay unchanged.",
   "changes": [
     {
+      "id": "snap/gpt",
+      "before": "47901b31425f21f179f58017dcf812d8258342fdcb889ee7c05c942494dada54",
+      "after": "d66b223b9f8b1119644e152c464606a8609ed1fd6ebab0b3c7e2f9a2365f6985"
+    },
+    {
+      "id": "snap/claude",
+      "before": "e051cb0faf39f5bc2e874063827ac3272c303d93a1b601bf11a3b38f9d28fc77",
+      "after": "cd79f85d90554b5034991f77b0fe4d4428620487c0847eaf13d5861572eebaad"
+    },
+    {
       "id": "web/gpt",
-      "before": "b3eedebc53f514255151e1e53db9b1671251c4b1a2e21d7c69d2821e5e0ef377",
-      "after": "d0ea9982f715121759ad4874d12911ac023df37cd7a453264777dfa3ea74b911"
+      "before": "d0ea9982f715121759ad4874d12911ac023df37cd7a453264777dfa3ea74b911",
+      "after": "3fda01505ef3ffd4a242c63e6d11eedd6ab78ad77176ed2166c707234fb7060d"
+    },
+    {
+      "id": "web/claude",
+      "before": "48988775ca1dd98dfc7a595e46283a2f54937faca1858b0653a5e8bf9d6ca27a",
+      "after": "6d45218672d45c4bb529094c12a7a091f4fa979923224555f1baba4a5477042e"
+    },
+    {
+      "id": "web/qwen",
+      "before": "db617c02d82eac2e4b33cf0d4314b5f2e7d240c54e7eb4f17356d051f9bcdd82",
+      "after": "1d601c502ab6cc971386812e131c01380d3506f7be760143253fb6527196bd60"
+    },
+    {
+      "id": "desk/gpt",
+      "before": "c0a6bd99690645feaa0d83f1fb09a3c5914462ac470ec96068de0cc09905b903",
+      "after": "d1b1e56fba6e3b41a3e369d2dafbb8022fe8343f172327ddbb9002abe2860171"
+    },
+    {
+      "id": "desk/claude",
+      "before": "5b4b95aeec15734a7ac677470d012d5051c4b1e5f35bc4b4faafa04ac29d2ccb",
+      "after": "2468bd29853bed37210e48c961fc1677e4cc6cd2cd4204dfe6c098de979200d3"
+    },
+    {
+      "id": "local/qwen",
+      "before": "0cfec784623efb8776cc080efcebdd77df27d0e36e014edc938164758d31d697",
+      "after": "41b5d8ac03e56b48618ddf6f1ba840d835b6a5d3b7af761a40bbe831f128a3bc"
     }
   ]
 }

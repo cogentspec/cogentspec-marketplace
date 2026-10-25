@@ -79,6 +79,29 @@ evidence. Editing an old log invalidates it too.
 
 ## Protected release gate
 
+Before real installation tests, distribute the exact tested, committed source
+through the separate candidate channel:
+
+```powershell
+node scripts/bridge-firewall.mjs candidate --base-ref <previous-release> --evidence artifacts/bridge-verification/integration.json
+node scripts/publish-bridge-candidate.mjs --base-ref <previous-release> --evidence artifacts/bridge-verification/integration.json --output artifacts/candidate-upload --upload
+```
+
+The candidate gate requires current passing source-bound integration evidence,
+committed sources and locks, and no untracked inventoried input. Its receipt
+names one immutable `refs/heads/codex/candidate/<component>-<full-revision>`.
+Upload only to that ref, refuse an existing different value, and retain the
+receipt and source-archive hashes. This makes immutable resources available for
+real tests without updating stable branches, marketplace catalogues or release
+tags. Candidate services must use an isolated state restore, explicit test
+routing and protected data permissions. Do not route ordinary production traffic
+to the candidate, replace an existing tab/owner, or disclose credentials.
+
+Candidate distribution is not production publication or promotion. It grants
+neither live verification nor release approval. Real candidate observations must
+exercise the actual source and native worker, with no mocked transport or
+synthetic readiness. The production gate below remains required and unchanged.
+
 Use the actual previous deployed/published revision as `--base-ref`, not the
 candidate revision. The gate compares each candidate command lock against that
 revision. Initial introduction of locks requires all eight commands.

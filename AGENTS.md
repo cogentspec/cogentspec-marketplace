@@ -16,3 +16,7 @@
 - Keep normal commands quiet: no new Codex confirmation card, duplicate approval,
   tab opening, or automatic ownership approval. Use isolated fixtures for tests;
   preserve the user's live session during implementation.
+- Candidate distribution is a separate pre-production step: use the candidate
+  gate before uploading its exact committed source to the fixed candidate ref.
+  Keep stable branches, catalogues and release tags unchanged until releaseGate
+  passes. A candidate receipt never counts as live verification or promotion.

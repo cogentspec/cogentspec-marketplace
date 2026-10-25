@@ -4,7 +4,8 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, symlinkSyn
 import { join, dirname, basename, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
-import { commandIds, adopt, verify, affectedCommands, runContracts, validateEvidence, recordLive, releaseGate } from './bridge-firewall.mjs';
+import { commandIds, adopt, verify, affectedCommands, runContracts, validateEvidence, recordLive, releaseGate, candidateGate } from './bridge-firewall.mjs';
+import { candidateUploadPlan } from './publish-bridge-candidate.mjs';
 
 const protocol = 'cogentspec-bridge-firewall-v1';
 const write = (root, path, value) => { const target = join(root, path); mkdirSync(dirname(target), { recursive: true }); writeFileSync(target, typeof value === 'string' ? value : JSON.stringify(value, null, 2) + '\n'); };
@@ -185,3 +186,38 @@ test('expired evidence and future timestamps are rejected', () => using(root => 
     assert.throws(() => validateEvidence(verify(root), ['web/gpt'], path), /expired/);
   }
 }));
+
+test('a committed tested candidate can be distributed to its fixed test ref without authorizing production', () => using(root => {
+  const base=commitBase(root);
+  write(root,'types/web/gpt/entry.mjs','export const run=()=>"candidate";\n');
+  adopt(root,['web/gpt'],'Explicit candidate distribution fixture');
+  const output=join(root,'evidence');runContracts(root,['web/gpt'],output);
+  const evidence=join(output,'integration.json');
+  assert.throws(()=>candidateGate(root,base,evidence),/must be committed/);
+  runGit(root,'add','types','bridge');runGit(root,'commit','--quiet','-m','Candidate source');
+  const receipt=candidateGate(root,base,evidence);
+  assert.equal(receipt.status,'candidate-verified');assert.equal(receipt.liveVerified,false);
+  assert.equal(receipt.productionPromotionAuthorized,false);
+  assert.equal(receipt.ref,'refs/heads/codex/candidate/fixture-'+runGit(root,'rev-parse','HEAD'));
+  assert.throws(()=>releaseGate(root,base,evidence,join(root,'missing-live')),/live verification NOT RUN/);
+  assert.throws(()=>candidateGate(root,base,join(root,'missing-evidence')),/integration verification NOT RUN/);
+  write(root,'types/web/gpt/extra.mjs','export const extra=true;\n');
+  adopt(root,['web/gpt'],'Explicit untracked candidate input fixture');
+  runGit(root,'add','bridge');runGit(root,'commit','--quiet','-m','Locks without new input');
+  runContracts(root,['web/gpt'],output);
+  assert.throws(()=>candidateGate(root,base,evidence),/uncommitted candidate input/);
+}));
+
+test('candidate upload rejects stable refs, other repositories, release approval and overwriting another source', () => {
+  const revision='a'.repeat(40),ref='refs/heads/codex/candidate/website-'+revision;
+  const receipt={component:'website',status:'candidate-verified',revision,ref,fingerprint:'b'.repeat(64),liveVerified:false,productionPromotionAuthorized:false};
+  const remote='https://github.com/cogentspec/cogentspec.git';
+  const plan=candidateUploadPlan(receipt,remote);
+  assert.ok(plan.arguments.includes('--force-with-lease='+ref+':'),'The lease permits creation only');
+  assert.equal(candidateUploadPlan(receipt,remote,revision+'\t'+ref).alreadyUploaded,true);
+  for(const patch of [{ref:'refs/heads/main'},{ref:'refs/tags/homerun02'},{productionPromotionAuthorized:true},{liveVerified:true},{status:'release-verified'}])
+    assert.throws(()=>candidateUploadPlan({...receipt,...patch},remote),/candidate-only/);
+  for(const other of ['https://github.com/other/cogentspec.git','https://github.com/cogentspec/cogentspec-marketplace.git'])
+    assert.throws(()=>candidateUploadPlan(receipt,other),/official component/);
+  assert.throws(()=>candidateUploadPlan(receipt,remote,'c'.repeat(40)+'\t'+ref),/cannot be replaced/);
+});

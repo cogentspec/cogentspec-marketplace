@@ -243,14 +243,15 @@
       "files": {
         ".gitattributes": "46d8df64d901e7c95d847006878dd4e23bd8af11fbff186180a12870c1033554",
         ".github/workflows/bridge-firewall.yml": "fc8bec165e9c967f210cb373e23fd9992f8cf8ac6967000340f3d4769487a4f1",
-        "AGENTS.md": "0b30d64f13697e9b08c1deac6abe50885efab629fedf424001d1f1388dbb005b",
-        "bridge/firewall.json": "90305385dc8a35d2cd8767acff925dc1da80b9c0d09b6e7436783b759a8cb8f9",
+        "AGENTS.md": "2ec897f7d6501b423ecef71ac54f49725fd05361078cb29243b3c462deefed1e",
+        "bridge/firewall.json": "51aad36b516be30969c80f00ee8fbe300c0177eada996391558a4749374a1d73",
         "bridge/registry.mjs": "1bb94e76bf77d412b68dfb98be3e68a3adb22dd25f4ab48c3db47f635b84f3d1",
-        "docs/bridge-firewall.md": "a9f1df7707aa83f5c81869bd8b863e4f385da4367714059462bc6f71d04b0c8b",
+        "docs/bridge-firewall.md": "81622a8eeeb0f07aa12186c3fcafe1659a2a2cc9f2eeb28c8fb180596c2dda93",
         "package-lock.json": "4a64347f61f3703e9e646971662d33fca3d14f5d17ef78fd199f90a3d21495aa",
         "package.json": "021e34dc88678cb9f56cebf1edb822dc9412135a17bf992bf8e9d48773006bd8",
-        "scripts/bridge-firewall.mjs": "0a9e8cb4fcf13c02ee473598fae553959bc87af74227bca3df4a9f0a39367207",
-        "scripts/test-bridge-firewall.mjs": "c5d287b6828b590013b6e5c70c636098fc7c06fa52f4c28098fe94dd4fb6dce9",
+        "scripts/bridge-firewall.mjs": "9e26d7003a9393e3c9ccf0b231a61074209691895be6f8e04262b505bb66cf4a",
+        "scripts/publish-bridge-candidate.mjs": "d937a2fa93dbf3920986d8f094c37001951fdbfa7ab5e0974702688749bb3eb1",
+        "scripts/test-bridge-firewall.mjs": "1cc6354d8652535b725b5a38cda755715b9444ff63143ce54896c6fa9ff11d69",
         "scripts/validate-claude-marketplace.mjs": "82d9ec7ba34f2d0552a0cb451fc3b22ee9ec39a96bab8f1b68f6487f5c475c21",
         "scripts/validate-desktop-marketplace.mjs": "2dd5e6c6ee9af8c0069d59ccee1d02b2afe3f7b3d7ee2ed22f01b1f01f40a2f1"
       }
@@ -319,5 +320,5 @@
       }
     }
   },
-  "artifactDigest": "c0a6bd99690645feaa0d83f1fb09a3c5914462ac470ec96068de0cc09905b903"
+  "artifactDigest": "d1b1e56fba6e3b41a3e369d2dafbb8022fe8343f172327ddbb9002abe2860171"
 }
