@@ -1,11 +1,46 @@
 {
   "protocol": "cogentspec-bridge-firewall-v1",
-  "reason": "Package the exact compiled quiet GPTWeb Bridge executable and bootstrap under its own marketplace artifact boundary; no other connector source or package changes.",
+  "reason": "Restore only GPTWeb Wednesday marketplace instructions and exact historical launcher; replace obsolete browser-only contracts. Include all locked test consumers while keeping every other command runtime byte-identical.",
   "changes": [
     {
+      "id": "snap/gpt",
+      "before": "a33e8daa0ef6bf2ae06ea5a74848ea7c573c671e71512406839731ddd5fb964f",
+      "after": "fa1ba34d86d488941b1d882e192ba8d5f210d311a7a448ff7028b126b6c69c7a"
+    },
+    {
+      "id": "snap/claude",
+      "before": "79a4676a310bf868afc38789489ee736eb4b1f98a419d3ff5613c2e0c9334e4c",
+      "after": "d3033c1765a1f1b91e16e5fa73676b5bc3fbe4ca9447dc0557dfd9994b72b61c"
+    },
+    {
       "id": "web/gpt",
-      "before": "10cf492f07078a2779a5e592771f2299bfe7e239dc6588dc925bf1c58eda2682",
-      "after": "c0f8902be65f2361e622608d571197f7154183c65471fb1bb3fbe77b4b7a17ed"
+      "before": "ef220eaa3c0ce8ecd69c5ca700b17d9843ddbda0d965f0565cdc120372ce48e9",
+      "after": "84e82559edbe979dda58bb60e1eb5e8c60a44cfa2c4a6d46b2e571ef399c4eb7"
+    },
+    {
+      "id": "web/claude",
+      "before": "8ae2069f561260ba88615f86a83fa5df822df55f2ef9cfc0b5ac5b33cff756d9",
+      "after": "d644684cbf2aa34b9463f046e9aa579af56d5c20cf3063c5367d38374dbf349f"
+    },
+    {
+      "id": "web/qwen",
+      "before": "2a60583fdbeabb6b68fd69ebffe8935a87c22e72f6dab4f2da56a30cf17c16d2",
+      "after": "589056c09ee96307486d61ec41b2a59df2a11e9616da05371118e522dc66cff6"
+    },
+    {
+      "id": "desk/gpt",
+      "before": "250d6e9cfae80036551caf30607781c2f74ee042d365fa38870afc31ae1b6f9d",
+      "after": "7e68792b83c23749aad4c0e27212efd51753fe1bf544f9e2468790e68c7f71bb"
+    },
+    {
+      "id": "desk/claude",
+      "before": "49c9cbd7cae68c2442d752dfa43a54435854ab4f844dc9741aa46f86eeb9110c",
+      "after": "84f2a01f5d069586195ae270335f9c7c85865514562ebb44fc59db76bdb6015b"
+    },
+    {
+      "id": "local/qwen",
+      "before": "2feb082335350fa92f2205f39ee1d47276d9ddb8d32f52fe18b06a4d729f068c",
+      "after": "f39094e248caa1e72f1e0b1e3a0037cad8abb91078013ad12bd0d80435b3244b"
     }
   ]
 }

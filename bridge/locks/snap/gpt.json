@@ -278,7 +278,7 @@
         "scripts/test-gptsnap-client.mjs": "e34aea9f4c40f587ca6ebeeecf85bd1ae2e4e4d3aaf06f8208319d312f87b7fa",
         "scripts/test-gptsnap-handshake.mjs": "db78b3d81bab7bd66c4ed6c36bca3cd0174afa4fb09e7909f7c78f2429290395",
         "scripts/test-gptsnap-start.mjs": "46de0a4f2d4089c8ed4cff850d70001b1f18d5c4d07d916a7d1d5cbcdf1e6c8f",
-        "scripts/test-gptweb-browser-procedure.mjs": "d09e8e6167db373b383e7d19de9ae20d3e57bec4fb10ebfcc9d9c329e4be1fe3",
+        "scripts/test-gptweb-browser-procedure.mjs": "2b5b2cf2404e2fca5bfef12db7f3c44bf695d8681613f5a4dbadfa4824cbcf66",
         "scripts/test-qwenlocal-command.mjs": "e3134c51eaa66a553e1bfb526df0eb0b95e9cffa083116ec18e5f6bec06c683f",
         "scripts/test-standalone-gptweb.mjs": "9da6165599648bfe12f79fe27c6e900226965154468a6b1e043dba4dd4853aeb",
         "scripts/test-web-handoff.mjs": "acaf1e04dbfe13028d345beb5df0a643554aa2ffc3264c0f90597b8cf76610e0"
@@ -322,5 +322,5 @@
       }
     }
   },
-  "artifactDigest": "ae1418d2e3868f7bfd5e3dd924d5912f38851873eaba8a2943d99c63bebb0f66"
+  "artifactDigest": "fa1ba34d86d488941b1d882e192ba8d5f210d311a7a448ff7028b126b6c69c7a"
 }

@@ -1,52 +1,24 @@
-# GPTWeb quiet setup and connection, version 1
+---
+name: gptweb
+description: Open the current isolated CogentSpec project through the ordinary web-workspace flow for ChatGPT on the web. Use only when the user explicitly invokes $gptweb or asks for the GPT web command.
+---
 
-`$gptweb` quietly installs or starts the CogentSpec marketplace Bridge, then
-connects this Web work area. Keep its normal execution quiet: no running
-commentary, diagnostic checklist, repository search, extra AI question, or
-success claim before verification. The user's Windows computer runs the helper;
-the AI's execution host may be Linux. Browser tools control the existing tab;
-first installation also needs the host's actual Windows application launcher.
-Never install an AI plugin, skill package, Codex CLI or additional browser
-extension, and never substitute another Bridge command.
+# Open the CogentSpec GPT web workspace
 
-1. Obtain the host's browser access through its actual approval flow if required.
-   While permission is pending, report waiting for permission. Do not invent a
-   Windows execution approval or treat browser permission as Windows permission.
-2. Claim only the intended existing CogentSpec tab with `experience=web` and
-   `surface=chatgpt`. Preserve its URL, account, drafts, parent folder and project
-   selection. Do not open, navigate, reload or rearrange tabs/windows.
-3. The existing **$gptweb** copy button starts GPTWeb's own protected startup.
-   If startup has not begun, select that button once; open **GPTWeb help** first
-   only if the button is hidden. There is no Initiate Bridge step and no waiting
-   listener. An installed Bridge starts or reuses its helper through GPTWeb's
-   own protocol. If the page remains **Waiting for GPTWeb startup**, download
-   the **marketplace Bridge installer** from that tab: start the browser's
-   download event before clicking the existing link, then obtain the completed
-   download's actual Windows path. Launch that exact `.exe` with the host's
-   native application launcher, for example the Windows computer tool's
-   `launch_app`. The filename binds installation to this expiring tab request;
-   keep it intact. This Bridge installer fetches SHA-verified resources from
-   the pinned CogentSpec marketplace and opens no setup window or console.
-   Never use PowerShell, a terminal, Run dialog or Explorer commands through UI
-   automation. Do not execute PowerShell in the AI host. If there is no actual
-   Windows application launcher, report that missing capability accurately;
-   browser access alone cannot run downloaded software. Never invent permission.
-4. Let the user complete any genuine Windows/browser application consent and
-   first-time **Allow this computer** account permission in the existing tab.
-   Do not add an AI question, approve a different device, or bypass OS consent.
-   If a genuinely different tab owns the connection, leave the single
-   **Move GPTWeb to this tab?** choice for the user. Never select **Use this tab**
-   automatically. Routine connection and same-tab reconnect need no such choice.
-5. Require the same tab's fresh acknowledgement, visible **Bridge connected**
-   status, matching assigned context, and an authorized **My projects** view.
-   An empty authorized library is valid. Native helper readiness alone is not
-   connection. If a check fails, report the exact page message once and stop;
-   do not pick another context, install a different connector, or retry in a loop.
-6. Only after those checks say: **CogentSpec GPT web workspace is connected.**
+This restores the marketplace launcher and one-use Web handoff used on 21 October 2026. This is a self-contained browser procedure plus a Windows launcher: browser access alone cannot run the launcher. No ChatGPT plugin is required. Do not use another command's listener, Initiate Bridge, a downloaded executable, native startup protocol, or a routine computer/workspace confirmation. The copy button only copies these instructions.
 
-The Windows helper fetches SHA-pinned standalone resources from the official
-CogentSpec marketplace. It protects its credential with Windows CurrentUser
-DPAPI and sends no credential, browser grant or workspace URL to the AI. Its
-native URI carries only an expiring request identifier bound to the signed-in
-account and this tab. GPTSnap, ClaudeSnap, ClaudeWeb, Qwen Web, both Desk variants,
-Qwen Local and their launchers remain separate.
+The launcher runs on the installing Windows user's computer from the invoking project workspace, with the host's actual execution permission and access to that user's CurrentUser-protected Bridge credential. Request that actual permission when required and wait; never invent an approval or interpret a Linux execution host as the user's computer. If this session cannot execute there, report that capability accurately and stop. Do not send a browser-only session to another command or claim connection.
+
+Use the existing account-bound installation. Check its package once with the installed `check-cogentspec-update.ps1 -Surface chatgpt`. If current, continue. If an update is available, use the official Git-backed CogentSpec marketplace and its verified `install-cogentspec.ps1 -UpdateOnly -MarketplacePrepared -InstallerTimeoutSeconds 120` once, preserving credentials, and continue from the returned `refreshedPluginPath`. A routine update does not require a new installation reference, licence or account approval. If the installation is missing or authorization is rejected, report the supplied installation/reconnect guidance; never recover a private installation request or bypass account/device checks. An unavailable update check does not prevent an otherwise working connection. Do not follow a generic listener or destination flow.
+
+After any package refresh, use only the refreshed package's command-specific launcher. Require `status: ready` and `browserOpened: false` before browser delivery:
+
+1. Invoke `scripts/start-gptweb.ps1` exactly once from the invoking workspace. This is the sole GPTWeb entry point: it resolves the isolated context, starts or reuses Desktop Bridge with `-Experience web`, requests the web grant, and validates the complete handoff. Do not invoke `project-context.ps1`, `connect-cogentstack.ps1`, or `start-cogentstack-bridge.ps1` directly.
+2. Require `accountState: signed_in`, `presenceVerified: true`, `projectDataConnection: authenticated_desktop_bridge`, and `mcpState: not_required`. Web authenticates through the existing account-bound Desktop Bridge and the protected server-issued browser grant; it must not invoke `codex mcp list` or `codex mcp login` as a workspace prerequisite. This does not bypass account authorization, fresh worker evidence, or handoff validation. Require its single private `workspaceUrl`, which must contain the resolved `context`, `experience=web`, `open=web`, `nav`, and `#desktop-web=` handoff. Treat `invalid_workspace_handoff` as a hard failure. Never construct, repair, or return a URL yourself, and never return a legacy `#desktop=` authorization route. Do not expose the private URL in commentary or logs.
+3. Deliver the verified handoff directly as a browser-tool argument. Inspect and claim the user-selected CogentSpec Web tab, then bind its browser handle as `gptWebTab`. Require `browserNavigationProtocol: cogentspec-gptweb-navigation-v1` and execute the returned `browserNavigationCode` verbatim in `cua_repl.js` once. It is a complete, JSON-quoted `await gptWebTab.goto(...);` call generated from the validated URL. Tool arguments may contain this one-use handoff for the authorised navigation; do not print it in commentary, screenshots, or diagnostic logs. No transfer between runtimes is needed: do not use Windows or browser clipboards, local servers, temporary files, or runtime-state files to move the URL. If there is no intended CogentSpec Web tab, create a blank tab in the user's identified browser, bind it as `gptWebTab`, and execute the same prepared call once. The short setup URL cannot connect. Do not call the native Desktop browser-tab action or apply the Popout-only `currentConversationConnected` gate.
+4. Verify the resulting page before reporting connection: its context must match the returned context, its one-use fragment must be consumed, and the visible LED must report **Bridge connected**. Check **My projects** loads without an authorization or missing-context error; an empty authorized library is valid. Report **CogentSpec GPT web workspace is connected. Continue beside this conversation.** only after these checks. If delivery succeeds but verification fails, report the observed failure and stop; do not generate another handoff or claim success from Bridge readiness alone.
+5. If browser control is unavailable or navigation was not accepted, return `workspaceUrl` exactly once as `[Open CogentSpec GPT web workspace](<URL>)` and say: **CogentSpec GPT web workspace is ready. Open the link to continue.** Explain that the existing page stays disconnected until this link is opened. A returned link is a fallback, not automatic connection. Do not return a consumed handoff.
+
+This command selects only the ordinary GPT web destination. It must not activate Popout layout, request the compact Desktop UI route, resize windows, or alter the shared project flow.
+
+Users may enter a parent folder before or after connecting, until the specification starts. The authenticated launcher creates only the Windows profile's default CogentSpec projects parent directory and verifies writability before reporting `defaultDirectoryReady: true`; existing contents remain untouched. Treat `default_directory_unavailable` as a hard failure and report its folder guidance, not a login or restart instruction. Preserve that tab's explicit choice across navigation; an absent choice uses the Bridge-reported default. A custom parent and each individual project folder remain subject to approved project creation.

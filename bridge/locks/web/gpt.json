@@ -13,7 +13,7 @@
       ],
       "files": {
         "bridge/types/web/gpt/contract.json": "f85c3a663bfb647a22ae309780f531516fc5e296de2372891e597d8ae30b14ab",
-        "bridge/types/web/gpt/procedure.md": "3adeb66b268ea5be3aeee311335f173dcc166bc95734cbb082c02285a1d152c3",
+        "bridge/types/web/gpt/procedure.md": "fc92436dc18b527a3762e9ac37f510f35abcc0218b0a39b2159064ca6630525a",
         "bridge/types/web/gpt/release/CogentSpec-GPTWeb-Bridge.exe": "b6b1ccf76ab4e52e949533ee793a7453e6928230c3ac5faf25ca5e2717bb4a69",
         "bridge/types/web/gpt/release/native-bootstrap.ps1": "c75905cc18e68543ebaed2616dfd0b094d23acc0859fbb2a69e845b14ce59087",
         "bridge/types/web/gpt/release/native-release.json": "7142e83964750bfb769b9793046f1f3e8fb1bf9fbc6938d1e10fb330355847fc",
@@ -21,10 +21,10 @@
         "bridge/types/web/gpt/windows/bootstrap.ps1": "c75905cc18e68543ebaed2616dfd0b094d23acc0859fbb2a69e845b14ce59087",
         "bridge/types/web/gpt/windows/build-native.mjs": "73d7ede571dd152103fe6aef398b1abc4ca91c4280f346caef5a80fb77bb5705",
         "bridge/types/web/gpt/windows/native.test.mjs": "af5c1a94440f7cce7683066d1e8680d3faab3885c9f0adcfcb62c8dde184acb7",
-        "plugins/cogentspec/skills/gptweb/SKILL.md": "a807015fb3f0a11f9e7a68a2c904e5e2a04c10cee1ad848b5cae30e91571e3bd",
+        "plugins/cogentspec/skills/gptweb/SKILL.md": "fc92436dc18b527a3762e9ac37f510f35abcc0218b0a39b2159064ca6630525a",
         "plugins/cogentspec/skills/gptweb/agents/openai.yaml": "107c4fb15c541872d4cbb7f75666097bff55e23af2c668ce131e5bfbdd32c8f0",
         "plugins/cogentspec/skills/gptweb/scripts/start-gptweb.ps1": "9bda24127e7681b67d73a0e1c77f598c281548ac60989542b34f4b58de9a67fb",
-        "plugins/cogentstack/skills/gptweb/SKILL.md": "a807015fb3f0a11f9e7a68a2c904e5e2a04c10cee1ad848b5cae30e91571e3bd",
+        "plugins/cogentstack/skills/gptweb/SKILL.md": "fc92436dc18b527a3762e9ac37f510f35abcc0218b0a39b2159064ca6630525a",
         "plugins/cogentstack/skills/gptweb/agents/openai.yaml": "107c4fb15c541872d4cbb7f75666097bff55e23af2c668ce131e5bfbdd32c8f0",
         "plugins/cogentstack/skills/gptweb/scripts/start-gptweb.ps1": "f935828116e3156086b21bdef7a6e8bd31e6ee6f9cf92045556821a03208afd6"
       }
@@ -342,7 +342,7 @@
         "scripts/test-gptsnap-client.mjs": "e34aea9f4c40f587ca6ebeeecf85bd1ae2e4e4d3aaf06f8208319d312f87b7fa",
         "scripts/test-gptsnap-handshake.mjs": "db78b3d81bab7bd66c4ed6c36bca3cd0174afa4fb09e7909f7c78f2429290395",
         "scripts/test-gptsnap-start.mjs": "46de0a4f2d4089c8ed4cff850d70001b1f18d5c4d07d916a7d1d5cbcdf1e6c8f",
-        "scripts/test-gptweb-browser-procedure.mjs": "d09e8e6167db373b383e7d19de9ae20d3e57bec4fb10ebfcc9d9c329e4be1fe3",
+        "scripts/test-gptweb-browser-procedure.mjs": "2b5b2cf2404e2fca5bfef12db7f3c44bf695d8681613f5a4dbadfa4824cbcf66",
         "scripts/test-qwenlocal-command.mjs": "e3134c51eaa66a553e1bfb526df0eb0b95e9cffa083116ec18e5f6bec06c683f",
         "scripts/test-standalone-gptweb.mjs": "9da6165599648bfe12f79fe27c6e900226965154468a6b1e043dba4dd4853aeb",
         "scripts/test-web-handoff.mjs": "acaf1e04dbfe13028d345beb5df0a643554aa2ffc3264c0f90597b8cf76610e0"
@@ -386,5 +386,5 @@
       }
     }
   },
-  "artifactDigest": "c0f8902be65f2361e622608d571197f7154183c65471fb1bb3fbe77b4b7a17ed"
+  "artifactDigest": "84e82559edbe979dda58bb60e1eb5e8c60a44cfa2c4a6d46b2e571ef399c4eb7"
 }
