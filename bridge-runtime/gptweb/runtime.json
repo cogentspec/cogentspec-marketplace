@@ -1,6 +1,6 @@
 {
   "protocol": "cogentspec-standalone-web-runtime-v1",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "repository": "https://github.com/cogentspec/cogentspec-marketplace.git",
   "bridgeCompatibilityVersion": "0.6.171",
   "command": "$gptweb",
@@ -9,7 +9,7 @@
   "pluginRequired": false,
   "codexRequired": false,
   "files": {
-    "scripts/connect-cogentstack.ps1": "d7f8a84ab26c280531d38aa6377d036704562197745f08ba036d7328efd8ef5a",
+    "scripts/connect-cogentstack.ps1": "ce2c6a41074b8c3b9369b3e8dfc850c0124fea8abbaaf3da0d4f865298c682c8",
     "scripts/connect-gptweb.ps1": "fa3b2f07cd21d959c0c3bc5eb19aafe95f3bae2646f91ffa29389c9375dcae15",
     "scripts/create-specification-project.ps1": "33d1043a4f09622b2325a193ffc1d21ad56686606c15c6b966a0031bbf26aa1a",
     "scripts/delete-project.ps1": "ceb4dd562faa2f9232f6941972d3d8a9c6c7bda4cb07db06dd9bb659b8c8f40c",
@@ -34,7 +34,7 @@
     "scripts/save-project-version.ps1": "cd5d91121df2df6ab424e04eb5f930793136c1a96e19618b304f1e731842204d",
     "scripts/start-cogentstack-bridge.ps1": "6ccfa45a81aa6ef205592cfc0285fcb18e7ca1d0be0d2c7e5f472afaf7783758",
     "scripts/watch-cogentstack-bridge.ps1": "172d1d9bffd4e90c3d177623d64cbe4aff506368f43b5cce53d29fed51d975e3",
-    "scripts/start-gptweb-native.ps1": "7d652aabcb3216661b696200003f7e26dafe684b24091c9f51dd62e7b134eba4",
-    "scripts/setup-gptweb-device.ps1": "1922d0d0ffb1a02832c69c3065a8b1e6d2f0bae3a88fda63d2e18f5e3a950f60"
+    "scripts/start-gptweb-native.ps1": "e1f5abda3866e661b22eb28d1be721a2a6f8f7747ff0c77ed84221dfcde7f516",
+    "scripts/setup-gptweb-device.ps1": "dbb0693348d4cecd18ce605008bffe60589d47e317cfffb4d95f7659d622fc76"
   }
 }

@@ -13,6 +13,10 @@ try {
         try { Add-Type -AssemblyName System.Security.Cryptography.ProtectedData } catch { Add-Type -AssemblyName System.Security }
     }
     $path=Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'CogentSpec\desktop-credential.json'
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+        $enrollment=(& (Join-Path $PSScriptRoot 'setup-gptweb-device.ps1') -ContextKey $ContextKey -StartupRequest $StartupRequest -ResumeApproval:$ResumeApproval)|ConvertFrom-Json
+        if ($enrollment.status -cne 'enrolled') { $enrollment|ConvertTo-Json -Compress;return }
+    }
     if (Test-Path -LiteralPath $path -PathType Leaf) {
         $credential=Get-Content -LiteralPath $path -Raw|ConvertFrom-Json
         $bytes=[Security.Cryptography.ProtectedData]::Unprotect([Convert]::FromBase64String([string]$credential.token),$null,[Security.Cryptography.DataProtectionScope]::CurrentUser)
@@ -32,7 +36,7 @@ try {
     if ($result.status -ceq 'approval_required') {
         $uri=[Uri][string]$result.approvalUrl
         if ($uri.GetLeftPart([UriPartial]::Authority) -cne 'https://cogentspec.com' -or $uri.AbsolutePath -cne '/activate') { throw 'invalid_approval' }
-        # Consumed only by the one-time native setup UI, never echoed by the AI.
+        # Consumed only by this request's protected existing web tab.
         @{protocol='cogentspec-gptweb-native-v1';status='approval_required';approvalUrl=$uri.AbsoluteUri;browserOpened=$false}|ConvertTo-Json -Compress
         return
     }

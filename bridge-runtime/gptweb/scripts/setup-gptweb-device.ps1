@@ -1,20 +1,26 @@
-# Account enrollment is part of the explicit one-time GUI setup. It never starts
-# a worker or claims a browser tab, so an expired browser job cannot block setup.
+# First-time account permission stays in the existing CogentSpec web tab. This
+# step never starts a worker, claims a tab, or replaces an existing credential.
 [CmdletBinding()]
-param([Parameter(Mandatory=$true)][ValidatePattern('^ctx-[a-f0-9]{64}$')][string]$ContextKey,[switch]$ResumeApproval)
+param([Parameter(Mandatory=$true)][ValidatePattern('^ctx-[a-f0-9]{64}$')][string]$ContextKey,[switch]$ResumeApproval,
+    [ValidatePattern('^$|^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$')][string]$StartupRequest='')
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
 try {
     $connection=Join-Path $PSScriptRoot 'connect-cogentstack.ps1'
     $arguments=@{Surface='chatgpt';ContextKey=$ContextKey;Experience='web';RequestTimeoutSeconds=6}
+    if($StartupRequest){$arguments.StartupRequest=$StartupRequest}
     if($ResumeApproval){$arguments.Mode='complete';$arguments.BrowserApproval=$true}else{$arguments.Mode='status'}
     $result=(& $connection @arguments)|ConvertFrom-Json
-    if($result.status -ceq 'connected') {
+    if($result.status -cin @('connected','authorized')) {
         @{protocol='cogentspec-gptweb-native-v1';status='enrolled';workspaceConnected=$false;browserOpened=$false}|ConvertTo-Json -Compress
         return
     }
     if(-not $ResumeApproval){
         $arguments.Mode='start';$arguments.BrowserApproval=$true
+        $result=(& $connection @arguments)|ConvertFrom-Json
+    }
+    if($result.status -ceq 'approval_pending') {
+        $arguments.Mode='start'
         $result=(& $connection @arguments)|ConvertFrom-Json
     }
     if($result.status -ceq 'approval_required') {

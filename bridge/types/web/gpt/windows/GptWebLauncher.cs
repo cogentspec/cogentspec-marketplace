@@ -10,13 +10,12 @@ using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Web.Script.Serialization;
-using System.Windows.Forms;
 using Microsoft.Win32;
 
-// Dedicated GPTWeb GUI executable. There is no console, elevation, shell
-// command, AI plugin, browser extension, or interface to another connector.
+// Dedicated GPTWeb Bridge installer/launcher. The Windows GUI subsystem avoids
+// a console; this executable creates no application window or setup wizard.
 internal static class GptWebLauncher {
-    const string Version = "0.2.0";
+    const string Version = "0.2.1";
     const string Origin = "https://cogentspec.app";
     const string Startup = Origin + "/api/bridge/gptweb/startup";
     static readonly JavaScriptSerializer Json = new JavaScriptSerializer { MaxJsonLength = 65536 };
@@ -68,9 +67,13 @@ internal static class GptWebLauncher {
         }
     }
     static Dictionary<string, object> Post(Dictionary<string, object> body) { return Json.Deserialize<Dictionary<string, object>>(Encoding.UTF8.GetString(Download(Startup, Encoding.UTF8.GetBytes(Json.Serialize(body))))); }
-    static void Report(string request, string status) {
+    static void Report(string request, string status, string approval = null) {
         if (!Uuid.IsMatch(request ?? "")) return;
-        try { Post(new Dictionary<string, object> { { "operation", "report" }, { "requestId", request }, { "status", status } }); } catch { }
+        try {
+            var body = new Dictionary<string, object> { { "operation", "report" }, { "requestId", request }, { "status", status } };
+            if (approval != null) body.Add("approvalUrl", approval);
+            Post(body);
+        } catch { }
     }
     static string ProfileContext() {
         SafeDirectory(Root); Directory.CreateDirectory(Root);
@@ -182,60 +185,44 @@ internal static class GptWebLauncher {
                 try { held = gate.WaitOne(175000); } catch (AbandonedMutexException) { held = true; }
                 if (!held) { Report(request, "setup_failed"); return; }
                 try {
-                    var result = Run(RequestedContext(request), request, false, false);
-                    var status = Text(result, "status");
-                    if (status != "ready") Report(request, status == "approval_required" ? "approval_required" : "setup_failed");
+                    var context = RequestedContext(request);
+                    var deadline = DateTime.UtcNow.AddSeconds(280);
+                    bool resume = false;
+                    while (DateTime.UtcNow < deadline) {
+                        var result = Run(context, request, false, resume);
+                        var status = Text(result, "status");
+                        if (status == "ready") { InstallProtocol(); return; }
+                        if (status != "approval_required") { Report(request, "setup_failed"); return; }
+                        // Show genuine device permission in the already signed-in
+                        // web tab. Never approve it or open an installer window.
+                        Uri approval;
+                        if (!Uri.TryCreate(Text(result, "approvalUrl"), UriKind.Absolute, out approval)
+                            || approval.GetLeftPart(UriPartial.Authority) != "https://cogentspec.com"
+                            || approval.AbsolutePath != "/activate" || approval.Fragment != "")
+                            throw new InvalidOperationException("Invalid computer approval.");
+                        Report(request, "approval_required", approval.AbsoluteUri);
+                        Thread.Sleep(5000); resume = true;
+                    }
+                    Report(request, "setup_failed");
                 } finally { gate.ReleaseMutex(); }
             }
         } catch { Report(request, "setup_failed"); }
     }
-    static void Setup(string request) {
-        var form = new Form { Text = "Set up CogentSpec GPTWeb", Width = 580, Height = 280,
-            StartPosition = FormStartPosition.CenterScreen, FormBorderStyle = FormBorderStyle.FixedDialog, MaximizeBox = false };
-        var message = new Label { Left = 24, Top = 20, Width = 510, Height = 130,
-            Text = "Set up GPTWeb for this Windows user. After setup, $gptweb starts the helper quietly. Your existing CogentSpec tab stays open. No AI plugin or additional browser extension is installed." };
-        var action = new Button { Left = 355, Top = 170, Width = 180, Height = 36, Text = "Set up GPTWeb" };
-        var copy = new Button { Left = 24, Top = 170, Width = 230, Height = 36, Text = "Copy computer approval link", Visible = false };
-        string approval = ""; bool resume = false; bool finished = false;
-        copy.Click += delegate { if (approval != "") Clipboard.SetText(approval); };
-        action.Click += async delegate {
-            if (finished) { form.Close(); return; }
-            action.Enabled = false; copy.Visible = false;
-            try {
-                message.Text = "Preparing verified GPTWeb files. Keep the existing CogentSpec tab open.";
-                var result = await Task.Run(() => {
-                    InstallProtocol();
-                    return Run(ProfileContext(), "", false, resume, true);
-                });
-                var status = Text(result, "status");
-                if (status == "approval_required") {
-                    var url = Text(result, "approvalUrl"); Uri parsed;
-                    if (!Uri.TryCreate(url, UriKind.Absolute, out parsed) || parsed.GetLeftPart(UriPartial.Authority) != "https://cogentspec.com" || parsed.AbsolutePath != "/activate")
-                        throw new InvalidOperationException("The computer approval link is invalid.");
-                    approval = url; resume = true; copy.Visible = true; Report(request, "approval_required");
-                    message.Text = "This computer needs its one-time CogentSpec account approval. Copy the approval link, use it in your existing CogentSpec tab, then choose Continue setup here. Existing device replacement still requires your explicit approval.";
-                    action.Text = "Continue setup"; action.Enabled = true; return;
-                }
-                if (status != "enrolled") throw new InvalidOperationException("GPTWeb setup could not verify the computer approval. Your other connectors were not replaced.");
-                // Enrollment survives navigation to the real account approval
-                // page. An expired/cancelled original tab job cannot undo it.
-                if (request != "") await Task.Run(() => { try { QuietStart(request); } catch { } });
-                message.Text = "GPTWeb setup is complete. Return to the existing CogentSpec work area and copy $gptweb again if needed. Future startup is quiet; the tab reports connected after its own acknowledgement.";
-                finished = true; action.Text = "Close"; action.Enabled = true;
-            } catch (Exception error) { message.Text = error is InvalidOperationException ? error.Message : "GPTWeb setup could not finish. Your existing tab and other connectors are unchanged."; action.Text = "Try setup again"; action.Enabled = true; Report(request, "setup_failed"); }
-        };
-        form.Controls.AddRange(new Control[] { message, action, copy }); Application.Run(form);
+    internal static string InstallerRequestId(string filename) {
+        var match = Regex.Match(filename, "^CogentSpec-GPTWeb-Bridge-([a-f0-9-]{36})(?: \\(\\d+\\))?\\.exe$", RegexOptions.CultureInvariant);
+        return match.Success && Uuid.IsMatch(match.Groups[1].Value) ? match.Groups[1].Value : null;
     }
     [STAThread] static int Main(string[] args) {
         ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
         if (args.Length == 2 && args[0] == "--validate-uri") return RequestId(args[1]) == null ? 64 : 0;
+        if (args.Length == 2 && args[0] == "--validate-filename") return InstallerRequestId(args[1]) == null ? 64 : 0;
         if (args.Length == 1) {
             var request = RequestId(args[0]); if (request == null) return 64;
             QuietStart(request); return 0;
         }
         if (args.Length != 0) return 64;
-        var match = Regex.Match(Path.GetFileName(Assembly.GetExecutingAssembly().Location), "^CogentSpec-GPTWeb-Setup-([a-f0-9-]{36})(?: \\(\\d+\\))?\\.exe$", RegexOptions.CultureInvariant);
-        var id = match.Success && Uuid.IsMatch(match.Groups[1].Value) ? match.Groups[1].Value : "";
-        Application.EnableVisualStyles(); Setup(id); return 0;
+        var id = InstallerRequestId(Path.GetFileName(Assembly.GetExecutingAssembly().Location));
+        if (id == null) return 64;
+        QuietStart(id); return 0;
     }
 }

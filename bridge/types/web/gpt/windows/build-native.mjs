@@ -17,11 +17,12 @@ for (const path of ['bridge/types/web/gpt/windows/GptWebLauncher.cs', 'bridge/ty
     throw new Error('Native packaging requires the exact committed source: ' + path);
 }
 await mkdir(output, { recursive: true });
-const exe = join(output, 'CogentSpec-GPTWeb-Setup.exe');
+const exe = join(output, 'CogentSpec-GPTWeb-Bridge.exe');
 execFileSync('C:\\Windows\\Microsoft.NET\\Framework64\\v4.0.30319\\csc.exe', ['/nologo', '/target:winexe', '/platform:anycpu',
-  '/reference:System.Windows.Forms.dll', '/reference:System.Web.Extensions.dll', '/out:' + exe, join(directory, 'GptWebLauncher.cs')], { windowsHide: true });
+  '/reference:System.Web.Extensions.dll', '/out:' + exe, join(directory, 'GptWebLauncher.cs')], { windowsHide: true });
 await copyFile(join(directory, 'bootstrap.ps1'), join(output, 'native-bootstrap.ps1'));
-const metadata = { protocol: 'cogentspec-gptweb-native-release-v1', command: '$gptweb', version: '0.2.0', runtimeRevision: revision,
+const metadata = { protocol: 'cogentspec-gptweb-native-release-v1', command: '$gptweb', version: '0.2.1',
+  repository: 'https://github.com/cogentspec/cogentspec-marketplace.git', runtimeRevision: revision,
   runtimeManifestSha256: digest(await readFile(join(root, 'bridge-runtime/gptweb/runtime.json'))),
   launcherSourceSha256: digest(await readFile(join(directory, 'GptWebLauncher.cs'))),
   bootstrapSha256: digest(await readFile(join(output, 'native-bootstrap.ps1'))), installerSha256: digest(await readFile(exe)) };

@@ -1,3 +1,4 @@
 .gitattributes text eol=lf
 bridge-runtime/gptweb/** text eol=lf
 bridge/types/web/gpt/** text eol=lf
+bridge/types/web/gpt/release/*.exe -text

@@ -18,7 +18,7 @@ async function clean(path) {
   await rm(path, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 }
 
-test('the compiled GPTWeb launcher is a GUI executable and accepts only its exact startup URI', { skip: process.platform !== 'win32' }, async () => {
+test('the compiled GPTWeb Bridge has no console or setup window and accepts only its bound URI or installer filename', { skip: process.platform !== 'win32' }, async () => {
   const directory = await mkdtemp(join(tmpdir(), 'gptweb-native-test-'));
   try {
     const executable = join(directory, 'setup.exe');
@@ -40,9 +40,18 @@ test('the compiled GPTWeb launcher is a GUI executable and accepts only its exac
       const result = spawnSync(executable, ['--validate-uri', uri], { windowsHide: true, timeout: 5000 });
       assert.equal(result.status, valid ? 0 : 64, uri);
     }
+    for (const [filename, valid] of [
+      ['CogentSpec-GPTWeb-Bridge-' + id + '.exe', true],
+      ['CogentSpec-GPTWeb-Bridge-' + id + ' (1).exe', true],
+      ['CogentSpec-GPTWeb-Bridge.exe', false], ['CogentSpec-GPTWeb-Setup-' + id + '.exe', false],
+      ['CogentSpec-GPTWeb-Bridge-' + id + '.exe.cmd', false],
+      ['CogentSpec-GPTWeb-Bridge-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.exe', false],
+      ['CogentSpec-GPTWeb-Bridge-' + id + '-other.exe', false],
+    ]) assert.equal(spawnSync(executable, ['--validate-filename', filename], { windowsHide: true, timeout: 5000 }).status, valid ? 0 : 64, filename);
+    assert.equal(spawnSync(executable, [], { windowsHide: true, timeout: 5000 }).status, 64, 'An unbound download cannot start setup or select a workspace');
     const source = await readFile(join(windows, 'GptWebLauncher.cs'), 'utf8');
     assert.match(source, /CreateNoWindow = true/); assert.match(source, /WindowStyle = ProcessWindowStyle.Hidden/);
-    assert.doesNotMatch(source, /Verb\s*=\s*"runas"|cmd\.exe|nativeMessaging|cogentspec:\/\//);
+    assert.doesNotMatch(source, /Verb\s*=\s*"runas"|cmd\.exe|nativeMessaging|cogentspec:\/\/|new Form|Application\.Run|Windows\.Forms|MessageBox/);
   } finally { await clean(directory); }
 });
 
@@ -228,6 +237,26 @@ $protected=[Security.Cryptography.ProtectedData]::Protect($bytes,$null,[Security
     assert.equal(ready.workspaceConnected, false);assert.equal(ready.acknowledgementVerified, false);
     assert.deepEqual((await readFile(join(directory, 'trace.txt'), 'utf8')).trim().split(/\r?\n/), ['authorize', 'worker', 'ready']);
     assert.doesNotMatch(result.stdout + result.stderr, /cga_isolated_fixture|protected|Bearer/);
+    await rm(join(directory,'credential.json'));
+    await writeFile(join(directory,'trace.txt'),'');
+    await writeFile(join(directory,'setup-gptweb-device.ps1'),String.raw`
+param($ContextKey,$StartupRequest,[switch]$ResumeApproval)
+if($StartupRequest -cne 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee'){throw 'wrong startup'}
+Add-Content -LiteralPath (Join-Path $env:GPTWEB_FIXTURE 'trace.txt') -Value 'enroll'
+if(-not $ResumeApproval){@{protocol='cogentspec-gptweb-native-v1';status='approval_required';approvalUrl='https://cogentspec.com/activate?code=ABCD-EFGH&experience=web'}|ConvertTo-Json -Compress;return}
+Add-Type -AssemblyName System.Security
+$bytes=[Text.Encoding]::UTF8.GetBytes('cga_isolated_fixture')
+$protected=[Security.Cryptography.ProtectedData]::Protect($bytes,$null,[Security.Cryptography.DataProtectionScope]::CurrentUser)
+@{token=[Convert]::ToBase64String($protected)}|ConvertTo-Json|Set-Content -LiteralPath (Join-Path $env:GPTWEB_FIXTURE 'credential.json')
+@{protocol='cogentspec-gptweb-native-v1';status='enrolled'}|ConvertTo-Json -Compress
+`);
+    const cold=resume=>spawnSync('powershell.exe',['-NoProfile','-NonInteractive','-File',join(directory,'start.ps1'),
+      '-ContextKey','ctx-'+'a'.repeat(64),'-StartupRequest','aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',...(resume?['-ResumeApproval']:[])],{
+      windowsHide:true,encoding:'utf8',timeout:15000,env:{...process.env,GPTWEB_FIXTURE:directory,GPTWEB_FIXTURE_MODE:'approved'}});
+    result=cold(false);assert.equal(result.status,0,result.stderr);assert.equal(JSON.parse(result.stdout.trim()).status,'approval_required');
+    assert.deepEqual((await readFile(join(directory,'trace.txt'),'utf8')).trim().split(/\r?\n/),['enroll'],'No worker before genuine first-use permission');
+    result=cold(true);assert.equal(result.status,0,result.stderr);assert.equal(JSON.parse(result.stdout.trim()).status,'ready');
+    assert.deepEqual((await readFile(join(directory,'trace.txt'),'utf8')).trim().split(/\r?\n/),['enroll','enroll','authorize','worker','ready']);
   } finally { await clean(directory); }
 });
 
@@ -242,16 +271,18 @@ Add-Content -LiteralPath (Join-Path $env:GPTWEB_FIXTURE 'trace.txt') -Value $Mod
 switch($Mode){
  'status' {@{status='signed_out'}|ConvertTo-Json -Compress}
  'start' {if(-not $BrowserApproval){throw 'browser consent missing'};@{status='approval_required';approvalUrl='https://cogentspec.com/activate?user_code=fixture'}|ConvertTo-Json -Compress}
- 'complete' {if(-not $BrowserApproval){throw 'wrong pending approval'};@{status='connected'}|ConvertTo-Json -Compress}
+ 'complete' {if(-not $BrowserApproval){throw 'wrong pending approval'};@{status=$env:GPTWEB_ENROLLMENT_RESULT}|ConvertTo-Json -Compress}
  default {throw 'unexpected operation'}
 }
 `);
-    const run = resume => spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-File', join(directory, 'setup.ps1'),
+    const run = (resume, status = 'authorized') => spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-File', join(directory, 'setup.ps1'),
       '-ContextKey', 'ctx-' + 'a'.repeat(64), ...(resume ? ['-ResumeApproval'] : [])], {
-      windowsHide: true, encoding: 'utf8', timeout: 10000, env: { ...process.env, GPTWEB_FIXTURE: directory } });
+      windowsHide: true, encoding: 'utf8', timeout: 10000, env: { ...process.env, GPTWEB_FIXTURE: directory, GPTWEB_ENROLLMENT_RESULT: status } });
     let result = run(false);assert.equal(result.status,0,result.stderr);assert.equal(JSON.parse(result.stdout.trim()).status,'approval_required');
     result = run(true);assert.equal(result.status,0,result.stderr);const enrolled=JSON.parse(result.stdout.trim());
     assert.equal(enrolled.status,'enrolled');assert.equal(enrolled.workspaceConnected,false);assert.equal(enrolled.browserOpened,false);
     assert.deepEqual((await readFile(join(directory,'trace.txt'),'utf8')).trim().split(/\r?\n/),['status','start','complete']);
+    result = run(true, 'approval_pending');assert.equal(result.status,0,result.stderr);
+    assert.equal(JSON.parse(result.stdout.trim()).status,'approval_required','Waiting for consent must reuse the same approval instead of reporting failure');
   } finally { await clean(directory); }
 });

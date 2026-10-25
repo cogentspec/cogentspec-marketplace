@@ -15,6 +15,8 @@ param(
 
     [switch]$BrowserApproval,
 
+    [ValidatePattern('^$|^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$')][string]$StartupRequest = '',
+
     [string]$WorkspaceCode = '',
 
     [ValidateRange(3, 20)]
@@ -315,12 +317,14 @@ if ($Mode -eq 'start') {
             Write-CompactJson ([ordered]@{ status = 'approval_context_conflict'; userMessage = 'Another workspace is waiting for computer approval. Finish or cancel that request first.' })
             return
         }
-        if ([DateTimeOffset]$existing.expiresAt -gt [DateTimeOffset]::UtcNow) {
+        if ([DateTimeOffset]$existing.expiresAt -gt [DateTimeOffset]::UtcNow -and
+            (-not $StartupRequest -or ($existing.PSObject.Properties['startupRequest'] -and $existing.startupRequest -ceq $StartupRequest))) {
             Write-CompactJson ([ordered]@{ status = 'approval_required'; approvalUrl = "$serviceUrl/activate?code=$([Uri]::EscapeDataString([string]$existing.userCode))&experience=web"; expiresAt = $existing.expiresAt; pollAfterSeconds = 5; requestReused = $true })
             return
         }
     }
-    $requestBody = @{ deviceName = 'CogentSpec GPTWeb on Windows' } | ConvertTo-Json -Compress
+    $deviceName = if ($StartupRequest) { 'CogentSpec GPTWeb on Windows ('+$StartupRequest+')' } else { 'CogentSpec GPTWeb on Windows' }
+    $requestBody = @{ deviceName = $deviceName } | ConvertTo-Json -Compress
     $authorization = Invoke-RestMethod `
         -Method Post `
         -Uri "$serviceUrl/api/device-authorization" `
@@ -336,6 +340,7 @@ if ($Mode -eq 'start') {
         intervalSeconds = [int]$authorization.intervalSeconds
         contextKey = $ContextKey
         surface = $Surface
+        startupRequest = $StartupRequest
     } | ConvertTo-Json | Set-Content -LiteralPath $pendingPath -Encoding UTF8
 
     if ($BrowserApproval) {
