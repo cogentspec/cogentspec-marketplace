@@ -101,7 +101,15 @@ function Get-BridgeWatcherCommand(
         param([string]$Value)
         return $Value.Replace("'", "''")
     }
-    return "& '$(& $escape $WatcherScript)' -ContextKey '$(& $escape $WatcherContextKey)' -PluginId '$(& $escape $WatcherPluginId)' -PluginVersion '$(& $escape $WatcherPluginVersion)' -ThreadId '$(& $escape $WatcherThreadId)' -ReadyPath '$(& $escape $WatcherReadyPath)'"
+    $transport = ''
+    if ($env:COGENTSPEC_GPTWEB_LOOPBACK_PROXY) {
+        $proxy = [string]$env:COGENTSPEC_GPTWEB_LOOPBACK_PROXY
+        if ($proxy -cnotmatch '^http://127\.0\.0\.1:([0-9]{4,5})$' -or [int]$Matches[1] -lt 1024 -or [int]$Matches[1] -gt 65535) {
+            throw 'GPTWeb loopback transport is invalid.'
+        }
+        $transport = "[Net.WebRequest]::DefaultWebProxy=New-Object Net.WebProxy('$proxy'); "
+    }
+    return $transport + "& '$(& $escape $WatcherScript)' -ContextKey '$(& $escape $WatcherContextKey)' -PluginId '$(& $escape $WatcherPluginId)' -PluginVersion '$(& $escape $WatcherPluginVersion)' -ThreadId '$(& $escape $WatcherThreadId)' -ReadyPath '$(& $escape $WatcherReadyPath)'"
 }
 
 function Test-BridgeWatcherProcess(

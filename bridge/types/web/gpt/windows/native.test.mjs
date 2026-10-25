@@ -4,7 +4,8 @@ import { readFile, writeFile, mkdtemp, mkdir, cp, rm } from 'node:fs/promises';
 import { join, resolve, dirname, basename } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { spawnSync } from 'node:child_process';
+import { spawnSync, spawn } from 'node:child_process';
+import { createServer } from 'node:http';
 import { createHash } from 'node:crypto';
 
 const root = fileURLToPath(new URL('../../../../../', import.meta.url));
@@ -139,6 +140,53 @@ function Invoke-RestMethod { param($Uri,$MaximumRedirection,$TimeoutSec)
     result = run(); assert.equal(JSON.parse(result.stdout.trim()).status, 'not_ready');
     assert.equal(await readFile(entry, 'utf8'), 'throw "fixture tampering"', 'Do not silently overwrite a modified installation');
   } finally { await clean(directory); }
+});
+
+test('a scoped loopback proxy reaches the actual hidden PowerShell child without changing Windows proxy settings', { skip: process.platform !== 'win32' }, async () => {
+  const directory=await mkdtemp(join(tmpdir(),'gptweb-native-test-'));
+  let connections=0;
+  const proxy=createServer();
+  proxy.on('connect',(request,socket)=>{
+    assert.equal(request.url,'cogentspec.app:443');connections++;
+    socket.end('HTTP/1.1 502 Candidate transport probe\r\nContent-Length: 0\r\nConnection: close\r\n\r\n');
+  });
+  await new Promise(resolve=>proxy.listen(0,'127.0.0.1',resolve));
+  try {
+    await writeFile(join(directory,'fixture.ps1'),String.raw`
+param($ContextKey,[switch]$PrepareOnly)
+if($env:COGENTSPEC_GPTWEB_LOOPBACK_PROXY -notmatch '^http://127\.0\.0\.1:[0-9]+$'){throw 'missing scoped transport'}
+$request=[Net.HttpWebRequest]::Create('https://cogentspec.app/api/health');$request.Timeout=5000
+try{$response=$request.GetResponse();$response.Dispose();throw 'unexpected upstream response'}catch{
+ if($_.Exception.Message -eq 'unexpected upstream response'){throw}
+ Write-Output 'proxy-reached'
+}
+`);
+    await writeFile(join(directory,'Probe.cs'),String.raw`
+using System;using System.Diagnostics;using System.IO;
+internal static class ProxyProbe {
+ [STAThread] static int Main(string[] args){
+  var info=GptWebLauncher.VerifiedPowerShell(args[0],"ctx-"+new string('a',64),"",true,false,false);
+  if(info.UseShellExecute||!info.CreateNoWindow||info.WindowStyle!=ProcessWindowStyle.Hidden)return 20;
+  using(var child=Process.Start(info)){
+   var text=child.StandardOutput.ReadToEnd();var error=child.StandardError.ReadToEnd();child.WaitForExit();
+   File.WriteAllText(args[1],"EXIT:"+child.ExitCode+"\nSTDOUT:"+text+"\nSTDERR:"+error);
+   return child.ExitCode==0&&text.Trim()=="proxy-reached"&&error==""?0:21;
+  }
+ }
+}
+`);
+    const executable=join(directory,'ProxyProbe.exe');
+    const built=spawnSync('C:\\Windows\\Microsoft.NET\\Framework64\\v4.0.30319\\csc.exe',['/nologo','/target:winexe','/main:ProxyProbe',
+      '/reference:System.Windows.Forms.dll','/reference:System.Web.Extensions.dll','/out:'+executable,join(windows,'GptWebLauncher.cs'),join(directory,'Probe.cs')],
+      {windowsHide:true,encoding:'utf8',timeout:30000});
+    assert.equal(built.status,0,built.stdout+built.stderr);
+    await writeFile(executable+'.config','<configuration><system.net><defaultProxy enabled="true"><proxy proxyaddress="http://127.0.0.1:'+proxy.address().port+'" bypassonlocal="false" usesystemdefault="false" /></defaultProxy></system.net></configuration>');
+    const result=await new Promise((resolve,reject)=>{
+      const child=spawn(executable,[join(directory,'fixture.ps1'),join(directory,'trace.txt')],{windowsHide:true,timeout:15000,env:{...process.env,PSExecutionPolicyPreference:'Restricted'}});
+      child.on('error',reject);child.on('exit',(code,signal)=>resolve({code,signal}));
+    });
+    assert.equal(result.code,0,await readFile(join(directory,'trace.txt'),'utf8'));assert.equal(connections,1);
+  } finally {await new Promise(resolve=>proxy.close(resolve));await clean(directory);}
 });
 
 test('native startup proves the browser account before worker creation and never treats readiness as connection', { skip: process.platform !== 'win32' }, async () => {

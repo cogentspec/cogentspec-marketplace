@@ -32,7 +32,7 @@
     "scripts/provision-project-credentials.mjs": "5453e2a353644a2e2c66aa9efff2eaa8130d09f303a0278f58898830f3a1d60e",
     "scripts/restore-project-version.ps1": "461b3ccede8e7b0f64aaf10ad8f8123f48ec3666b0f1976cfd961d31d3264c1a",
     "scripts/save-project-version.ps1": "cd5d91121df2df6ab424e04eb5f930793136c1a96e19618b304f1e731842204d",
-    "scripts/start-cogentstack-bridge.ps1": "b66aed21788b4e90727870758444218505562a9365849c82966ba1d14a603e44",
+    "scripts/start-cogentstack-bridge.ps1": "6ccfa45a81aa6ef205592cfc0285fcb18e7ca1d0be0d2c7e5f472afaf7783758",
     "scripts/watch-cogentstack-bridge.ps1": "172d1d9bffd4e90c3d177623d64cbe4aff506368f43b5cce53d29fed51d975e3",
     "scripts/start-gptweb-native.ps1": "7d652aabcb3216661b696200003f7e26dafe684b24091c9f51dd62e7b134eba4",
     "scripts/setup-gptweb-device.ps1": "1922d0d0ffb1a02832c69c3065a8b1e6d2f0bae3a88fda63d2e18f5e3a950f60"

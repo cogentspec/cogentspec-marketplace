@@ -109,6 +109,23 @@ internal static class GptWebLauncher {
         // script policy. No user/machine policy is written; Group Policy wins.
         info.Arguments = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File " + Quote(file) + " -ContextKey " + context
             + (prepare ? " -PrepareOnly" : enroll ? " -EnrollOnly" : " -StartupRequest " + request) + (resume ? " -ResumeApproval" : "");
+        // A test-owned application proxy must cover the complete native chain.
+        // Retain the original HTTPS origins and normal certificate validation;
+        // never change the Windows user's proxy or another connector's process.
+        var proxy = WebRequest.DefaultWebProxy;
+        var origin = new Uri(Origin);
+        var transport = proxy != null && !proxy.IsBypassed(origin) ? proxy.GetProxy(origin) : null;
+        if (transport != null && transport.Scheme == "http" && transport.Host == "127.0.0.1"
+            && transport.Port >= 1024 && transport.UserInfo == "" && transport.AbsolutePath == "/"
+            && transport.Query == "" && transport.Fragment == "") {
+            var endpoint = transport.GetLeftPart(UriPartial.Authority);
+            var command = "$ProgressPreference='SilentlyContinue'; [Net.WebRequest]::DefaultWebProxy=New-Object Net.WebProxy('" + endpoint + "'); & '" + file.Replace("'", "''")
+                + "' -ContextKey '" + context + "'" + (prepare ? " -PrepareOnly" : enroll ? " -EnrollOnly" : " -StartupRequest '" + request + "'")
+                + (resume ? " -ResumeApproval" : "");
+            info.Arguments = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand "
+                + Convert.ToBase64String(Encoding.Unicode.GetBytes(command));
+            info.EnvironmentVariables["COGENTSPEC_GPTWEB_LOOPBACK_PROXY"] = endpoint;
+        }
         info.UseShellExecute = false; info.CreateNoWindow = true; info.WindowStyle = ProcessWindowStyle.Hidden;
         info.WorkingDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         info.RedirectStandardOutput = true; info.RedirectStandardError = true;
