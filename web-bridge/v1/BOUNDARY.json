@@ -1,0 +1,15 @@
+{
+  "protocol": "cogentspec-web-command-v1",
+  "runtimeVersion": "1.0.0",
+  "consumers": ["$gptweb", "$claudeweb"],
+  "sourceSnapshot": "2fe075a1b10e000a573cc0fbc808d9f3cbc2bf7f",
+  "localStateNamespace": "CogentSpec/web-command-v1",
+  "workerNamespaces": ["gptweb", "claudeweb"],
+  "browserControlRequired": false,
+  "aiPluginRequired": false,
+  "listenerButtonRequired": false,
+  "ownershipTransferAllowed": false,
+  "windowsExecutionRequired": true,
+  "accountDeviceAuthorizationRequired": true,
+  "sharedRuntimeUpdatePolicy": "Explicitly review and test both listed consumers. Do not refresh from another connector's current common helpers."
+}

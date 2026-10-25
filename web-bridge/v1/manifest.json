@@ -1,0 +1,33 @@
+{
+  "protocol": "cogentspec-web-runtime-v1",
+  "version": "1.0.0",
+  "commands": [
+    "$gptweb",
+    "$claudeweb"
+  ],
+  "bridgeCompatibilityVersion": "0.6.175",
+  "sourceSnapshot": "2fe075a1b10e000a573cc0fbc808d9f3cbc2bf7f",
+  "files": {
+    "runtime/connect-cogentstack.ps1": "8199400c7bcb848de420820a7e411a039a9e5364fd9f4d6c32b5a53f2aa064aa",
+    "runtime/connect-web.ps1": "b56b02266d938f693c22a043b52e8337db74a712df236821669e6d7ba0465ebc",
+    "runtime/create-specification-project.ps1": "33d1043a4f09622b2325a193ffc1d21ad56686606c15c6b966a0031bbf26aa1a",
+    "runtime/delete-project.ps1": "ceb4dd562faa2f9232f6941972d3d8a9c6c7bda4cb07db06dd9bb659b8c8f40c",
+    "runtime/delete-specification-project.ps1": "b20898d571c7defe2fa3c120d0c6382921651167f5b6db794fb0a335c5f9f400",
+    "runtime/ensure-default-project-directory.ps1": "962c8d83ce6ac4ce1e7ad40d77a01c94a66c2306d932f0f577785588fe6251c2",
+    "runtime/fulfil-project.ps1": "7664878db2ef4f683b2f6458f4e25eac8038c34eddde6120b9ad7d1094ffbb7d",
+    "runtime/generate-project-preview.ps1": "245f1fb7e7776e371bcc607c70132265c45e79b997e6ff3da100ad0125228278",
+    "runtime/inspect-project-git.ps1": "06977654c4e7315b40adf89453c892d031c0de2fac11afaa48abed6a2b3193c4",
+    "runtime/native-command.ps1": "92ce65af94ce17a3f0ba263af835a20d8274dde2787472f5c609a7b656ada4d9",
+    "runtime/prepare-development-handoff.ps1": "82c23415e291a3d9bf0cfe8ff2c02e035b693ecdeabc5181d032556b3b74f111",
+    "runtime/project-build-handoff.ps1": "cef53104080aef5524742c2b3b617c501afcad250b3023e2279c45fae36bf56f",
+    "runtime/project-context.ps1": "40479417d4e350476d5514ccdbc35431de4a23a0cd1755d372bde7b23a012533",
+    "runtime/project-credential-worker.ps1": "76558b65f1720cf58806056649b9ce1a8f267f3cea8a7bc2b8c7a45c95e10c6b",
+    "runtime/project-git-connection.ps1": "9263496e420d9988c02a3895d0a12ee60dace3e39df42bc775f3344fccd731d9",
+    "runtime/project-preview-readiness.ps1": "160070afb973d5804ed5a198238aa5ccba783b8f47f18b6b3f19776857e6fcc9",
+    "runtime/provision-project-credentials.mjs": "5453e2a353644a2e2c66aa9efff2eaa8130d09f303a0278f58898830f3a1d60e",
+    "runtime/restore-project-version.ps1": "461b3ccede8e7b0f64aaf10ad8f8123f48ec3666b0f1976cfd961d31d3264c1a",
+    "runtime/save-project-version.ps1": "cd5d91121df2df6ab424e04eb5f930793136c1a96e19618b304f1e731842204d",
+    "runtime/start-web-worker.ps1": "ada55ddcb525a0502c503233ed39cc1e44dd28266f2276fec7a2dc3c1df89cf8",
+    "runtime/watch-web-worker.ps1": "eb9387439196e8b1d1bc50bc9edcb41b2bea46d03409402cb3474170bbffa345"
+  }
+}

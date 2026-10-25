@@ -1,34 +1,15 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {readFile} from 'node:fs/promises';
 import {execFileSync} from 'node:child_process';
-import {fileURLToPath} from 'node:url';
-
-const root=fileURLToPath(new URL('../',import.meta.url));
-const tuesday='8a8011d5d48f53636bf5dabe7d4a5a07ad0f9710';
-const git=(...args)=>execFileSync('git',args,{cwd:root,windowsHide:true,encoding:'utf8'});
-const normalize=value=>value.replaceAll('\r\n','\n');
-
-test('GPTWeb and ClaudeWeb restore Tuesday instructions and retain their exact launchers in both packages',async()=>{
- for(const [host,command] of [['plugins','gptweb'],['claude-plugins','claudeweb']]) {
-  for(const plugin of ['cogentspec','cogentstack']) {
-   for(const relative of ['SKILL.md',`scripts/start-${command}.ps1`]) {
-    const path=`${host}/${plugin}/skills/${command}/${relative}`;
-    assert.equal(normalize(await readFile(new URL('../'+path,import.meta.url),'utf8')),normalize(git('show',tuesday+':'+path)),path);
-   }
-  }
- }
+import {readFileSync} from 'node:fs';
+const baseline='2fe075a1b10e000a573cc0fbc808d9f3cbc2bf7f';
+test('Web v1 changes no common helper, installer, manifest or other connector package',()=>{
+ const changed=execFileSync('git',['diff','--name-only',baseline,'--','plugins/','claude-plugins/','.agents/','bridge-runtime/','bridge-gptweb-browser/','qwen-web-extension/'],{cwd:new URL('../',import.meta.url),encoding:'utf8',windowsHide:true}).trim().split('\n').filter(Boolean);
+ const allowed=new Set(['plugins','claude-plugins'].flatMap(host=>['cogentspec','cogentstack'].flatMap(plugin=>{const command=host==='plugins'?'gptweb':'claudeweb';return [host+'/'+plugin+'/skills/'+command+'/SKILL.md',host+'/'+plugin+'/skills/'+command+'/scripts/start-'+command+'.ps1'];})));
+ for(const file of changed)assert.ok(allowed.has(file),'Out-of-scope connector change: '+file);
 });
-
-test('the restore cannot edit Qwen, Snap, Desk, shared runtime, manifests or installer behavior',()=>{
- const allowed=new Set([
-  ...['cogentspec','cogentstack'].flatMap(plugin=>[
-   `plugins/${plugin}/skills/gptweb/SKILL.md`,
-   `claude-plugins/${plugin}/skills/claudeweb/SKILL.md`,
-  ]),
-  'scripts/test-gptweb-navigation.mjs','scripts/test-claudeweb-launcher.mjs',
-  'scripts/test-gptweb-browser-procedure.mjs','scripts/test-gptweb-browser-handler.mjs',
- ]);
- const changed=git('diff','--name-only','5366ee2a8fbd704f2630b8196085f4234b5b69f5').trim().split('\n').filter(Boolean);
- for(const path of changed)assert.ok(allowed.has(path),'Out-of-scope marketplace change: '+path);
+test('Web v1 instructions require the actual local execution capability and exact request, without browser takeover',()=>{
+ const text=readFileSync(new URL('../web-bridge/v1/PROCEDURE.md',import.meta.url),'utf8');
+ assert.match(text,/local Windows execution tool/);assert.match(text,/UUID/);assert.match(text,/fresh acknowledgement/);
+ assert.match(text,/does not use browser control/);assert.match(text,/does not install an AI plugin/);
 });
