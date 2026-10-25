@@ -57,6 +57,36 @@ test('native startup uses no listener, and its private runtime cannot terminate 
   assert.match(credential, /'gptweb-authorization\.json'/); assert.doesNotMatch(credential, /'gptsnap-authorization\.json'/);
 });
 
+test('the actual launcher process adapter runs its verified script without a console under a restricted inherited policy', { skip: process.platform !== 'win32' }, async () => {
+  const directory=await mkdtemp(join(tmpdir(),'gptweb-native-test-'));
+  try {
+    await writeFile(join(directory,'fixture.ps1'), "param($ContextKey,[switch]$PrepareOnly)\nStart-Sleep -Milliseconds 400\nWrite-Output 'fixture-ready'\n");
+    await writeFile(join(directory,'Probe.cs'), String.raw`
+using System;using System.Diagnostics;using System.IO;using System.Threading;
+internal static class GuiProcessProbe {
+ [STAThread] static int Main(string[] args) {
+  var info=GptWebLauncher.VerifiedPowerShell(args[0],"ctx-"+new string('a',64),"",true,false,false);
+  if(info.UseShellExecute||!info.CreateNoWindow||info.WindowStyle!=ProcessWindowStyle.Hidden)return 20;
+  using(var child=Process.Start(info)){
+   bool visible=false;while(!child.WaitForExit(25)){try{child.Refresh();visible|=child.MainWindowHandle!=IntPtr.Zero;}catch(InvalidOperationException){if(!child.HasExited)throw;}}
+   var stdout=child.StandardOutput.ReadToEnd();var stderr=child.StandardError.ReadToEnd();
+   File.WriteAllText(args[1],visible?"visible":stdout.Trim()+"\nSTDERR:"+stderr+"\nEXIT:"+child.ExitCode);return visible||child.ExitCode!=0||stdout.Trim()!="fixture-ready"||stderr!=""?21:0;
+  }
+ }
+}
+`);
+    const executable=join(directory,'ProcessProbe.exe');
+    const built=spawnSync('C:\\Windows\\Microsoft.NET\\Framework64\\v4.0.30319\\csc.exe',['/nologo','/target:winexe','/main:GuiProcessProbe',
+      '/reference:System.Windows.Forms.dll','/reference:System.Web.Extensions.dll','/out:'+executable,join(windows,'GptWebLauncher.cs'),join(directory,'Probe.cs')],
+      {windowsHide:true,encoding:'utf8',timeout:30000});
+    assert.equal(built.status,0,built.stdout+built.stderr);
+    const result=spawnSync(executable,[join(directory,'fixture.ps1'),join(directory,'result.txt')],{
+      windowsHide:true,encoding:'utf8',timeout:15000,env:{...process.env,PSExecutionPolicyPreference:'Restricted'}});
+    const trace=await readFile(join(directory,'result.txt'),'utf8');
+    assert.equal(result.status,0,trace+result.stderr);assert.equal(trace,'fixture-ready\nSTDERR:\nEXIT:0');
+  } finally {await clean(directory);}
+});
+
 test('one-time setup installs SHA-verified files without Git, reuses them, and refuses a modified cache', { skip: process.platform !== 'win32' }, async () => {
   const directory = await mkdtemp(join(tmpdir(), 'gptweb-native-test-'));
   try {

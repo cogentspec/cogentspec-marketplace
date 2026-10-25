@@ -103,15 +103,20 @@ internal static class GptWebLauncher {
         if (Hash(File.ReadAllBytes(path)) != digest) throw new InvalidOperationException("GPTWeb's installed setup bytes changed.");
         return path;
     }
-    static Dictionary<string, object> Run(string context, string request, bool prepare, bool resume, bool enroll = false) {
-        if (!Context.IsMatch(context) || (!prepare && !enroll && !Uuid.IsMatch(request ?? ""))) throw new InvalidOperationException("GPTWeb's setup request is invalid.");
-        var file = Bootstrap();
+    internal static ProcessStartInfo VerifiedPowerShell(string file, string context, string request, bool prepare, bool resume, bool enroll) {
         var info = new ProcessStartInfo(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "WindowsPowerShell", "v1.0", "powershell.exe"));
-        info.Arguments = "-NoProfile -NonInteractive -File " + Quote(file) + " -ContextKey " + context
+        // Only this child session uses the embedded application's verified
+        // script policy. No user/machine policy is written; Group Policy wins.
+        info.Arguments = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File " + Quote(file) + " -ContextKey " + context
             + (prepare ? " -PrepareOnly" : enroll ? " -EnrollOnly" : " -StartupRequest " + request) + (resume ? " -ResumeApproval" : "");
         info.UseShellExecute = false; info.CreateNoWindow = true; info.WindowStyle = ProcessWindowStyle.Hidden;
         info.WorkingDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         info.RedirectStandardOutput = true; info.RedirectStandardError = true;
+        return info;
+    }
+    static Dictionary<string, object> Run(string context, string request, bool prepare, bool resume, bool enroll = false) {
+        if (!Context.IsMatch(context) || (!prepare && !enroll && !Uuid.IsMatch(request ?? ""))) throw new InvalidOperationException("GPTWeb's setup request is invalid.");
+        var info = VerifiedPowerShell(Bootstrap(), context, request, prepare, resume, enroll);
         using (var child = Process.Start(info)) {
             var stdout = child.StandardOutput.ReadToEndAsync(); var stderr = child.StandardError.ReadToEndAsync();
             if (!child.WaitForExit(170000)) { child.Kill(); throw new InvalidOperationException("GPTWeb setup reached its time limit."); }

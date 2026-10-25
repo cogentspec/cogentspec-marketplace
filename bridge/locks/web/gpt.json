@@ -14,10 +14,10 @@
       "files": {
         "bridge/types/web/gpt/contract.json": "f85c3a663bfb647a22ae309780f531516fc5e296de2372891e597d8ae30b14ab",
         "bridge/types/web/gpt/procedure.md": "863e7b57d1ab67d9989ddf25b45d310e2add9f3b08a71d4fb625420f4e301210",
-        "bridge/types/web/gpt/windows/GptWebLauncher.cs": "5df53540511e8ea1f58883b2a1c7015083494a4201d822668b76dd34a45c3549",
+        "bridge/types/web/gpt/windows/GptWebLauncher.cs": "4defefe56bd0b081738bd8f48271f509d5fa80a08707fe2c1060c2c9addea42c",
         "bridge/types/web/gpt/windows/bootstrap.ps1": "c75905cc18e68543ebaed2616dfd0b094d23acc0859fbb2a69e845b14ce59087",
         "bridge/types/web/gpt/windows/build-native.mjs": "243468d6857cc58dc10bc8da5d049d05eb6519e6bdf150247153773df9467585",
-        "bridge/types/web/gpt/windows/native.test.mjs": "ff984deeed0df1407e7a4e783fe57c9c9d4e18e8ef8cedd58c03a25fa0df9b9c",
+        "bridge/types/web/gpt/windows/native.test.mjs": "525628b67ac01285af0330f5faf81d67b231e1dd2f9398c497fcfc05756f3fa7",
         "plugins/cogentspec/skills/gptweb/SKILL.md": "a807015fb3f0a11f9e7a68a2c904e5e2a04c10cee1ad848b5cae30e91571e3bd",
         "plugins/cogentspec/skills/gptweb/agents/openai.yaml": "107c4fb15c541872d4cbb7f75666097bff55e23af2c668ce131e5bfbdd32c8f0",
         "plugins/cogentspec/skills/gptweb/scripts/start-gptweb.ps1": "9bda24127e7681b67d73a0e1c77f598c281548ac60989542b34f4b58de9a67fb",
@@ -382,5 +382,5 @@
       }
     }
   },
-  "artifactDigest": "b3eedebc53f514255151e1e53db9b1671251c4b1a2e21d7c69d2821e5e0ef377"
+  "artifactDigest": "d0ea9982f715121759ad4874d12911ac023df37cd7a453264777dfa3ea74b911"
 }
