@@ -16,8 +16,10 @@ test('gptweb verifies separately prepared setup while its legacy launcher stays 
   assert.doesNotMatch(script,/start-cogentstack-bridge|browserNavigationCode|start-workspace-beacon|Start-Process|open_in_codex/);
  }
  const procedure=await readFile(new URL('../gptweb-setup/v1/PROCEDURE.md',import.meta.url),'utf8');
- assert.match(procedure,/project_read_required/);assert.match(procedure,/Page polling and helper heartbeats cannot renew AI activity/);
+ assert.match(procedure,/project_read_required/);assert.match(procedure,/Page polling and helper heartbeats cannot create or renew AI authorization/);
  assert.match(procedure,/workspaceConnected:true/);assert.match(procedure,/acknowledgementVerified:true/);
  assert.match(procedure,/fresh HTTPS request/);assert.match(procedure,/Linux execution is sufficient/);
  assert.match(procedure,/leave the connection unverified/);
+ assert.match(procedure,/Moving focus, hiding the work area or normal idle time does not disconnect/);
+ assert.match(procedure,/until its returned `expiresAt`/);assert.doesNotMatch(procedure,/inactive after five minutes/);
 });
