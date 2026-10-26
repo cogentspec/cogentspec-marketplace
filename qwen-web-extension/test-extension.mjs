@@ -66,6 +66,15 @@ test('only real exact-command Send or Enter actions trigger the content script',
  editor.value='ordinary message';listeners.get('keydown')(enter);assert.equal(sent.length,0);
  editor.value='$qwenweb';listeners.get('keydown')(enter);await new Promise(resolve=>setImmediate(resolve));assert.equal(sent.length,1);
  listeners.get('focusin')({target:editor});listeners.get('click')({isTrusted:true,target:button});await new Promise(resolve=>setImmediate(resolve));assert.equal(sent.length,2);
+ const envelope='$qwenweb\n\nCogentSpec $qwenweb instructions, version 1.0.0, marketplace revision '+'a'.repeat(40)+'.\n'
+  +'--- BEGIN plugins/cogentspec/skills/qwenweb/SKILL.md ---\nOfficial instructions\n--- END plugins/cogentspec/skills/qwenweb/SKILL.md ---\n\n'
+  +'--- BEGIN qwen-web-extension/README.md ---\nSetup instructions\n--- END qwen-web-extension/README.md ---\n\n'
+  +'Work area: https://cogentspec.app/stack?experience=web&surface=qwen-web';
+ for(const value of [envelope.replace('$qwenweb','$qwenlocal'), envelope.replace('surface=qwen-web','surface=chatgpt'), '$qwenweb\nPlease connect', envelope+' extra']) {
+  editor.value=value;listeners.get('keydown')(enter);await new Promise(resolve=>setImmediate(resolve));assert.equal(sent.length,2);
+ }
+ editor.value=envelope;listeners.get('keydown')(enter);await new Promise(resolve=>setImmediate(resolve));assert.equal(sent.length,3);
+ editor.value=envelope.replace(/\n/g,'\r\n');listeners.get('keydown')(enter);await new Promise(resolve=>setImmediate(resolve));assert.equal(sent.length,4);
  assert.deepEqual(Object.keys(sent[0]).sort(),['command','protocol','requestId']);
  assert.doesNotMatch(source,/preventDefault|stopPropagation|window\.postMessage\s*\(|tabs\.|innerHTML|localStorage/);
 });

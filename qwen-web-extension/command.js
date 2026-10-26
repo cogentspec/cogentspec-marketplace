@@ -2,9 +2,19 @@
   const editorSelector = '#chat-input, textarea, [contenteditable="true"][role="textbox"], div[contenteditable="true"]';
   let lastEditor, busy = false;
   function editor(element) { return element instanceof Element ? element.closest(editorSelector) : null; }
+  function commandText(value) {
+    const text = value.trim().replace(/\r\n/g, '\n');
+    if (text === '$qwenweb') return true;
+    return text.length <= 64000
+      && /^\$qwenweb\n\nCogentSpec \$qwenweb instructions, version \d+\.\d+\.\d+, marketplace revision [a-f0-9]{40}\.\n/.test(text)
+      && text.includes('--- BEGIN plugins/cogentspec/skills/qwenweb/SKILL.md ---\n')
+      && text.includes('\n--- END plugins/cogentspec/skills/qwenweb/SKILL.md ---')
+      && text.includes('--- BEGIN qwen-web-extension/README.md ---\n')
+      && text.endsWith('--- END qwen-web-extension/README.md ---\n\nWork area: https://cogentspec.app/stack?experience=web&surface=qwen-web');
+  }
   function exactCommand(element) {
     return element && !element.closest('[hidden],[aria-hidden="true"]') && element.getClientRects().length
-      && (element.value ?? element.textContent ?? '').trim() === '$qwenweb';
+      && commandText(element.value ?? element.textContent ?? '');
   }
   function show(message, duration = 10000) {
     const host = document.createElement('div');

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "CogentSpec Qwen Web Bridge",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Start the local Bridge and deliver an authenticated Qwen Web work-area handoff when you send $qwenweb.",
   "minimum_chrome_version": "120",
   "permissions": ["nativeMessaging"],
