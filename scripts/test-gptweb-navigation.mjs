@@ -10,6 +10,7 @@ test('gptweb verifies separately prepared setup while its legacy launcher stays 
   assert.ok(skill.includes('gptweb-setup/v1/PROCEDURE.md'));
   assert.match(skill,/retain the same URL/);assert.match(skill,/projectReadUrl/);assert.match(skill,/acknowledgeUrl/);
   assert.match(skill,/do not ask for another copy merely because setup is pending/);
+  assert.match(skill,/existing `curl` or Python/);assert.match(skill,/AI session's own Linux/);
   assert.match(script,/ManifestSha256/);assert.match(script,/Get-FileHash/);
   assert.ok(script.includes("-Command '$gptweb'"));
   assert.doesNotMatch(script,/start-cogentstack-bridge|browserNavigationCode|start-workspace-beacon|Start-Process|open_in_codex/);
@@ -17,4 +18,6 @@ test('gptweb verifies separately prepared setup while its legacy launcher stays 
  const procedure=await readFile(new URL('../gptweb-setup/v1/PROCEDURE.md',import.meta.url),'utf8');
  assert.match(procedure,/project_read_required/);assert.match(procedure,/Page polling and helper heartbeats cannot renew AI activity/);
  assert.match(procedure,/workspaceConnected:true/);assert.match(procedure,/acknowledgementVerified:true/);
+ assert.match(procedure,/fresh HTTPS request/);assert.match(procedure,/Linux execution is sufficient/);
+ assert.match(procedure,/leave the connection unverified/);
 });
