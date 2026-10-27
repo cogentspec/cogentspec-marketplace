@@ -191,11 +191,11 @@ for(const pluginPath of [sourcePluginPath,compatibilityPluginPath]) for(const [c
   const commandRoot=join(pluginPath,'skills',command);
   const skill=await readFile(join(commandRoot,'SKILL.md'),'utf8');
   const metadata=await readFile(join(commandRoot,'agents','openai.yaml'),'utf8');
-  const resultMarkers=command==='gptweb'?['self-contained browser procedure','Bridge connected','My projects','No ChatGPT plugin']
+  const resultMarkers=command==='gptweb'?['private AI connection URL','projectReadUrl','acknowledgeUrl',"no execution on the user's Windows PC",'no browser control']
     :experience==='web'?['status: ready','browserOpened: false']:['acknowledgementVerified: true','browserOpened: false'];
-  for(const marker of [`name: ${command}`,`start-${command}.ps1`,...resultMarkers]) if(!skill.includes(marker)) fail(`${command} lacks ${marker}`);
+  for(const marker of [`name: ${command}`,...(command==='gptweb'?[]:[`start-${command}.ps1`]),...resultMarkers]) if(!skill.includes(marker)) fail(`${command} lacks ${marker}`);
   for(const marker of [`$${command}`,'allow_implicit_invocation: false']) if(!metadata.includes(marker)) fail(`${command} lacks explicit invocation metadata`);
-  if(command!=='gptsnap') {
+  if(command!=='gptsnap' && command!=='gptweb') {
     const source=await readFile(join(commandRoot,'scripts',`start-${command}.ps1`),'utf8');
     if(!source.includes(`-Surface ${command==='qwenweb'?'qwen-web':'chatgpt'} -Experience ${experience}`)) fail(`${command} addresses wrong listener`);
   }

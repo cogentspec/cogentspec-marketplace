@@ -51,11 +51,13 @@ for (const root of [pluginRoot, compatibilityRoot]) {
     const commandSkill=await readFile(join(commandRoot,'SKILL.md'),'utf8');
     const metadata=await readFile(join(commandRoot,'agents','openai.yaml'),'utf8');
     const executable=await readFile(join(commandRoot,'scripts',`start-${command}.ps1`),'utf8');
-    for(const marker of [`name: ${command}`,`start-${command}.ps1`,...(experience==='web'?['status: ready','browserOpened: false']:['Initiate Bridge','acknowledgementVerified: true','browserOpened: false','Never open'])]) {
+    for(const marker of [`name: ${command}`,`start-${command}.ps1`,...(command==='claudeweb'?['web-bridge/v1/PROCEDURE.md','copied request UUID','fresh acknowledgement']:experience==='web'?['status: ready','browserOpened: false']:['Initiate Bridge','acknowledgementVerified: true','browserOpened: false','Never open'])]) {
       if(!commandSkill.includes(marker)) fail(`${command} missing listener contract ${marker}`);
     }
     const surface=command==='qwenweb'?'qwen-web':'claude-desktop';
-    if(!executable.includes(`-Surface ${surface} -Experience ${experience}`)) fail(`${command} addresses the wrong listener`);
+    if(command==='claudeweb') {
+      for(const marker of ['cogentspec-web-release-v1','bootstrapSha256',"-Command '$claudeweb'",'MaximumRedirection 0','browserControlled=$false']) if(!executable.includes(marker)) fail(`${command} lacks its verified standalone bootstrap: ${marker}`);
+    } else if(!executable.includes(`-Surface ${surface} -Experience ${experience}`)) fail(`${command} addresses the wrong listener`);
     for(const marker of [`$${command}`,'allow_implicit_invocation: false']) if(!metadata.includes(marker)) fail(`${command} lacks explicit invocation metadata`);
   }
   try { await readFile(join(root,'skills','claudepop','SKILL.md'),'utf8');fail('Unverified Claude Popout must remain absent'); }
@@ -139,7 +141,7 @@ const claudeWebLaunchers = [pluginRoot, compatibilityRoot].map(root => join(root
 const canonicalWebSource = await readFile(claudeWebLaunchers[0], "utf8");
 const compatibilityWebSource = await readFile(claudeWebLaunchers[1], "utf8");
 if (normalized(canonicalWebSource) !== normalized(compatibilityWebSource).replaceAll("..\\..\\cogentstack\\scripts", "..\\..\\cogentspec\\scripts")) fail("Claude Web launcher compatibility parity failed");
-for (const marker of ["browserNavigationCode", "cogentspec-claudeweb-navigation-v1", "-Surface claude-desktop -Experience web"]) {
+for (const marker of ["cogentspec-web-release-v1", "bootstrapSha256", "-RequestId $RequestId -Command '$claudeweb'", "MaximumRedirection 0", "browserControlled=$false"]) {
   if (!canonicalWebSource.includes(marker)) fail(`Claude Web launcher missing ${marker}`);
 }
 const beacon=await readFile(join(scriptsRoot,'start-workspace-beacon.ps1'),'utf8');
