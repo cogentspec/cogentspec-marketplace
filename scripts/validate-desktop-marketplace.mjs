@@ -192,10 +192,11 @@ for(const pluginPath of [sourcePluginPath,compatibilityPluginPath]) for(const [c
   const skill=await readFile(join(commandRoot,'SKILL.md'),'utf8');
   const metadata=await readFile(join(commandRoot,'agents','openai.yaml'),'utf8');
   const resultMarkers=command==='gptweb'?['private AI connection URL','projectReadUrl','acknowledgeUrl',"no execution on the user's Windows PC",'no browser control']
+    :command==='gptdesk'?['status: ready','currentConversationConnected: true','desktop_thread_presence','open_in_codex']
     :experience==='web'?['status: ready','browserOpened: false']:['acknowledgementVerified: true','browserOpened: false'];
   for(const marker of [`name: ${command}`,...(command==='gptweb'?[]:[`start-${command}.ps1`]),...resultMarkers]) if(!skill.includes(marker)) fail(`${command} lacks ${marker}`);
   for(const marker of [`$${command}`,'allow_implicit_invocation: false']) if(!metadata.includes(marker)) fail(`${command} lacks explicit invocation metadata`);
-  if(command!=='gptsnap' && command!=='gptweb') {
+  if(command!=='gptsnap' && command!=='gptweb' && command!=='gptdesk') {
     const source=await readFile(join(commandRoot,'scripts',`start-${command}.ps1`),'utf8');
     if(!source.includes(`-Surface ${command==='qwenweb'?'qwen-web':'chatgpt'} -Experience ${experience}`)) fail(`${command} addresses wrong listener`);
   }
@@ -265,10 +266,11 @@ if (/SendInput|open_in_codex|openTabs|claimTab/.test(canonicalSnapStart)
 }
 const canonicalDeskStart = await readFile(deskStartPath(sourcePluginPath), 'utf8');
 const compatibilityDeskStart = await readFile(deskStartPath(compatibilityPluginPath), 'utf8');
-if (canonicalDeskStart !== compatibilityDeskStart.replaceAll('..\\..\\cogentstack\\scripts','..\\..\\cogentspec\\scripts')) fail('GPTDesk startup supervisors must match across GPT packages');
-for(const marker of ['start-workspace-beacon.ps1','-Surface chatgpt -Experience desktop-ui']) {
+if (canonicalDeskStart !== compatibilityDeskStart) fail('GPTDesk startup supervisors must match across GPT packages');
+for(const marker of ['cogentspec-gptdesk-start-v1', "'-Experience', 'desktop-ui'", 'trusted-marketplace-update-v1', 'desktop_thread_presence']) {
   if(!canonicalDeskStart.includes(marker)) fail(`GPTDesk lacks ${marker}`);
 }
+if (/start-workspace-beacon|workspace-reuse|ListenerOnly/.test(canonicalDeskStart)) fail('GPTDesk must use its own native startup, not a Snap/Web listener flow');
 
 const canonicalSidebarHelper = await readFile(join(sourcePluginPath, "skills", "cogentspec", "scripts", "ensure-codex-sidebar-hidden.py"), "utf8");
 const compatibilitySidebarHelper = await readFile(join(compatibilityPluginPath, "skills", "cogentstack", "scripts", "ensure-codex-sidebar-hidden.py"), "utf8");
