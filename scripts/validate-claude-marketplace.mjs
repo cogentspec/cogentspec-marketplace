@@ -51,12 +51,15 @@ for (const root of [pluginRoot, compatibilityRoot]) {
     const commandSkill=await readFile(join(commandRoot,'SKILL.md'),'utf8');
     const metadata=await readFile(join(commandRoot,'agents','openai.yaml'),'utf8');
     const executable=await readFile(join(commandRoot,'scripts',`start-${command}.ps1`),'utf8');
-    for(const marker of [`name: ${command}`,`start-${command}.ps1`,...(command==='claudeweb'?['web-bridge/v1/PROCEDURE.md','copied request UUID','fresh acknowledgement']:experience==='web'?['status: ready','browserOpened: false']:['Initiate Bridge','acknowledgementVerified: true','browserOpened: false','Never open'])]) {
+    for(const marker of [`name: ${command}`,`start-${command}.ps1`,...(command==='claudedesk'?['claude_desktop_session_presence','${CLAUDE_SESSION_ID}','Browser-pane','100-second']:command==='claudeweb'?['web-bridge/v1/PROCEDURE.md','copied request UUID','fresh acknowledgement']:experience==='web'?['status: ready','browserOpened: false']:['Initiate Bridge','acknowledgementVerified: true','browserOpened: false','Never open'])]) {
       if(!commandSkill.includes(marker)) fail(`${command} missing listener contract ${marker}`);
     }
     const surface=command==='qwenweb'?'qwen-web':'claude-desktop';
     if(command==='claudeweb') {
       for(const marker of ['cogentspec-web-release-v1','bootstrapSha256',"-Command '$claudeweb'",'MaximumRedirection 0','browserControlled=$false']) if(!executable.includes(marker)) fail(`${command} lacks its verified standalone bootstrap: ${marker}`);
+    } else if(command==='claudedesk') {
+      for(const marker of ['cogentspec-claudedesk-start-v1','claude_desktop_session_presence','start-claudedesk-bridge.ps1','marketplace_source_mismatch']) if(!executable.includes(marker)) fail(`${command} lacks its native session contract: ${marker}`);
+      if(/start-workspace-beacon|ListenerOnly|start-gptdesk|open_in_codex/.test(executable)) fail('ClaudeDesk must not delegate to another connector');
     } else if(!executable.includes(`-Surface ${surface} -Experience ${experience}`)) fail(`${command} addresses the wrong listener`);
     for(const marker of [`$${command}`,'allow_implicit_invocation: false']) if(!metadata.includes(marker)) fail(`${command} lacks explicit invocation metadata`);
   }
