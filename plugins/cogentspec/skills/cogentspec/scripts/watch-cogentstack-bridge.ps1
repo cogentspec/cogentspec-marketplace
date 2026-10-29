@@ -87,6 +87,80 @@ function Write-BridgePresenceReady {
     Move-Item -LiteralPath $temporaryPath -Destination $ReadyPath -Force
 }
 
+function Stop-OwnedFoundationProcess([Diagnostics.Process]$Process) {
+    if ($Process.HasExited) { return }
+    try { $Process.Kill($true) } catch {
+        if ($Process.HasExited) { return }
+        $stopInfo = [Diagnostics.ProcessStartInfo]::new()
+        $stopInfo.FileName = Join-Path ([Environment]::SystemDirectory) 'taskkill.exe'
+        $stopInfo.Arguments = "/PID $($Process.Id) /T /F"
+        $stopInfo.UseShellExecute = $false
+        $stopInfo.CreateNoWindow = $true
+        $stopInfo.RedirectStandardOutput = $true
+        $stopInfo.RedirectStandardError = $true
+        $stopper = [Diagnostics.Process]::new()
+        $stopper.StartInfo = $stopInfo
+        try {
+            [void]$stopper.Start()
+            $stopOutput = $stopper.StandardOutput.ReadToEndAsync()
+            $stopError = $stopper.StandardError.ReadToEndAsync()
+            if (-not $stopper.WaitForExit(5000)) { throw 'The build process stop could not be confirmed.' }
+        } finally { $stopper.Dispose() }
+    }
+    if (-not $Process.WaitForExit(5000)) { throw 'The build process stop could not be confirmed.' }
+}
+
+function Invoke-CancellableFoundationHelper($Request, [string]$Executable, [string[]]$Arguments, [string]$Token) {
+    $requestPath = "/api/plugin/project-requests?$contextQuery&requestId=$([Uri]::EscapeDataString([string]$Request.targetRequestId))"
+    $info = [Diagnostics.ProcessStartInfo]::new()
+    $info.FileName = $Executable
+    $info.UseShellExecute = $false
+    $info.CreateNoWindow = $true
+    $info.RedirectStandardOutput = $true
+    $info.RedirectStandardError = $true
+    $info.WorkingDirectory = (Get-Location).ProviderPath
+    if ($info.PSObject.Properties.Name -contains 'ArgumentList') {
+        foreach ($argument in $Arguments) { [void]$info.ArgumentList.Add($argument) }
+    } else {
+        $info.Arguments = (@($Arguments | ForEach-Object { '"' + $_.Replace('"', '\"') + '"' }) -join ' ')
+    }
+    $process = [Diagnostics.Process]::new()
+    $process.StartInfo = $info
+    $started = $false
+    try {
+        $snapshot = Invoke-BridgeApi -Method Get -Path $requestPath -Token $Token
+        if ($snapshot.request.cancelledAt) { return [pscustomobject]@{status='cancelled'} }
+        if ($snapshot.request.status -ne 'requested') { throw 'This foundation is no longer available to start.' }
+        $started = $process.Start()
+        if (-not $started) { throw 'The foundation helper could not be started.' }
+        $stdout = $process.StandardOutput.ReadToEndAsync()
+        $stderr = $process.StandardError.ReadToEndAsync()
+        while ($true) {
+            $exited = $process.WaitForExit(1500)
+            $snapshot = Invoke-BridgeApi -Method Get -Path $requestPath -Token $Token
+            if ($snapshot.request.cancellationRequestedAt) {
+                Stop-OwnedFoundationProcess $process
+                # Acknowledge only after this owned process tree has stopped.
+                Invoke-BridgeApi -Method Patch -Path "/api/plugin/project-requests?$contextQuery" -Token $Token -Body @{
+                    action='cancel'; requestId=[string]$Request.targetRequestId; desktopActionId=[string]$Request.id
+                } | Out-Null
+                return [pscustomobject]@{status='cancelled'}
+            }
+            if ($exited) { break }
+            # A running build must not block the normal authenticated heartbeat.
+            Invoke-BridgeApi -Method Get -Path "/api/plugin/desktop-actions?$contextQuery" -Token $Token | Out-Null
+            Write-BridgePresenceReady
+        }
+        $output = $stdout.GetAwaiter().GetResult()
+        [void]$stderr.GetAwaiter().GetResult()
+        if ($process.ExitCode -ne 0) { throw 'The foundation helper failed. Existing files have been kept.' }
+        return @($output.Split([char]10) | Where-Object { $_.Trim().StartsWith('{') } | Select-Object -Last 1)
+    } finally {
+        if ($started -and -not $process.HasExited) { Stop-OwnedFoundationProcess $process }
+        $process.Dispose()
+    }
+}
+
 function Invoke-ActionHelper($Request) {
     $scriptName = switch ([string]$Request.action) {
         'create_specification' { 'create-specification-project.ps1' }
@@ -161,7 +235,11 @@ function Invoke-ActionHelper($Request) {
         'prepare_development_handoff' { $arguments += @('-RequestId', [string]$Request.targetRequestId, '-ContextKey', $ContextKey) }
     }
 
-    $output = @(& ([string]$powershellCommand.Source) @arguments 2>&1)
+    $output = if ([string]$Request.action -eq 'create_project') {
+        $foundationResult = Invoke-CancellableFoundationHelper $Request ([string]$powershellCommand.Source) $arguments (Get-DesktopToken)
+        if ($foundationResult -isnot [string] -and $foundationResult.status -eq 'cancelled') { return $foundationResult }
+        @($foundationResult)
+    } else { @(& ([string]$powershellCommand.Source) @arguments 2>&1) }
     $jsonLine = @($output | ForEach-Object { $_.ToString() } | Where-Object { $_.Trim().StartsWith('{') } | Select-Object -Last 1)
     if (-not $jsonLine) { throw "Desktop Bridge helper returned no result for $($Request.action)." }
     $result = $jsonLine | ConvertFrom-Json
@@ -229,6 +307,12 @@ try {
 
             try {
                 $result = Invoke-ActionHelper $claimed.request
+                if ([string]$claimed.request.action -eq 'create_project' -and [string]$result.status -eq 'cancelled') {
+                    Invoke-BridgeApi -Method Patch -Path "/api/plugin/desktop-actions?$contextQuery" -Token $token -Body @{
+                        action='fail'; requestId=[string]$claimed.request.id; statusMessage='Build stopped. Files already created have been kept.'
+                    } | Out-Null
+                    continue
+                }
                 $summary = switch ([string]$claimed.request.action) {
                     'create_specification' { 'Specification project folder created and verified.' }
                     'delete_specification' { 'Specification draft, folder, and saved state deleted.' }
