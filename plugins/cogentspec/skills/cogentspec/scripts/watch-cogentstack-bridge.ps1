@@ -18,6 +18,7 @@ if ($null -eq ('System.Security.Cryptography.ProtectedData' -as [type])) {
 $serviceUrl = 'https://cogentspec.com'
 $stateRoot = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'CogentSpec'
 $credentialPath = Join-Path $stateRoot 'desktop-credential.json'
+$foundationHelperPath = Join-Path $PSScriptRoot 'fulfil-project.ps1'
 $profileDirectory = [Environment]::GetFolderPath('UserProfile')
 $defaultWorkDirectory = if ($profileDirectory) { Join-Path $profileDirectory 'CogentSpec\projects' } else { '' }
 $contextQuery = "context=$([Uri]::EscapeDataString($ContextKey))&pluginId=$([Uri]::EscapeDataString($PluginId))&pluginVersion=$([Uri]::EscapeDataString($PluginVersion))"
@@ -161,6 +162,53 @@ function Invoke-CancellableFoundationHelper($Request, [string]$Executable, [stri
     }
 }
 
+function Get-FoundationRecoveryProcesses {
+    return @(Get-CimInstance Win32_Process -Filter "Name='powershell.exe' OR Name='pwsh.exe' OR Name='cmd.exe' OR Name='node.exe' OR Name='git.exe'" |
+        Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine })
+}
+
+function Invoke-FoundationCancellationRecovery([string]$Token) {
+    # The server lists only pending stops claimed by this same active device lease.
+    $listing = Invoke-BridgeApi -Method Get -Path "/api/plugin/project-requests?$contextQuery&status=stopping" -Token $Token
+    :recoveries foreach ($request in @($listing.requests)) {
+        if (-not $request -or $request.status -ne 'creating' -or -not $request.cancellationRequestedAt -or
+            -not $request.PSObject.Properties['desktopActionId'] -or
+            [string]$request.id -notmatch '^[a-f0-9-]{36}$' -or [string]$request.desktopActionId -notmatch '^[a-f0-9-]{36}$') { continue }
+        $target = [IO.Path]::GetFullPath([string]$request.targetPath).TrimEnd('\')
+        if ($target -notmatch '^[a-zA-Z]:\\.+') { continue }
+        $requestPattern = '(?i)(?:^|\s)-RequestId\s+"?' + [Regex]::Escape([string]$request.id) + '"?(?=\s|$)'
+        $contextPattern = '(?i)(?:^|\s)-ContextKey\s+"?' + [Regex]::Escape($ContextKey) + '"?(?=\s|$)'
+        foreach ($candidate in @(Get-FoundationRecoveryProcesses)) {
+            $line = [string]$candidate.CommandLine
+            if ($line -notmatch 'fulfil-project\.ps1' -or $line -notmatch $requestPattern -or $line -notmatch $contextPattern) { continue }
+            $file = [Regex]::Match($line, '(?i)(?:^|\s)-File\s+(?:"([^"]+)"|(\S+))')
+            if (-not $file.Success) { continue recoveries }
+            $scriptPath = if ($file.Groups[1].Success) { $file.Groups[1].Value } else { $file.Groups[2].Value }
+            $trustedPath = '^' + [Regex]::Escape($stateRoot) + '\\bridge-runtime\\[a-f0-9]{24}\\fulfil-project\.ps1$'
+            if ($scriptPath -notmatch $trustedPath -or -not (Test-Path -LiteralPath $scriptPath -PathType Leaf) -or
+                (Get-FileHash -LiteralPath $scriptPath -Algorithm SHA256).Hash -cne (Get-FileHash -LiteralPath $foundationHelperPath -Algorithm SHA256).Hash) { continue recoveries }
+            $process = $null
+            try {
+                $process = [Diagnostics.Process]::GetProcessById([int]$candidate.ProcessId)
+                # Defend against PID reuse between the process snapshot and termination.
+                if ([Math]::Abs(($process.StartTime.ToUniversalTime() - $candidate.CreationDate.ToUniversalTime()).TotalMilliseconds) -gt 10 -or
+                    $process.MainModule.FileName -ine [string]$candidate.ExecutablePath) { continue recoveries }
+                Stop-OwnedFoundationProcess $process
+            } catch { continue recoveries }
+            finally { if ($process) { $process.Dispose() } }
+        }
+        # An unowned native process using the target prevents a false acknowledgement.
+        foreach ($remaining in @(Get-FoundationRecoveryProcesses)) {
+            $line = ([string]$remaining.CommandLine).Replace('/', '\')
+            $targetPattern = '(?i)' + [Regex]::Escape($target) + '(?=[\\\s"'']|$)'
+            if ($line -match $targetPattern -or ($line -match 'fulfil-project\.ps1' -and $line -match $requestPattern)) { continue recoveries }
+        }
+        Invoke-BridgeApi -Method Patch -Path "/api/plugin/project-requests?$contextQuery" -Token $Token -Body @{
+            action='cancel'; recover=$true; requestId=[string]$request.id; desktopActionId=[string]$request.desktopActionId
+        } | Out-Null
+    }
+}
+
 function Invoke-ActionHelper($Request) {
     $scriptName = switch ([string]$Request.action) {
         'create_specification' { 'create-specification-project.ps1' }
@@ -289,6 +337,7 @@ try {
         try {
             $listing = Invoke-BridgeApi -Method Get -Path "/api/plugin/desktop-actions?$contextQuery" -Token $token
             Write-BridgePresenceReady
+            if (-not $listing.taskPaused) { Invoke-FoundationCancellationRecovery $token }
             if (-not $listing.request) {
                 Start-Sleep -Seconds 2
                 continue
