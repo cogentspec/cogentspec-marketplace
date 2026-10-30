@@ -30,6 +30,7 @@ try{
     $directory=Initialize-CogentSpecDefaultProjectDirectory
     if($directory.status -cne 'ready'){throw 'default_directory_unavailable'}
     & (Join-Path $PSScriptRoot 'start-web-worker.ps1') -ContextKey $selected.contextKey -Command $Command
+    & (Join-Path $PSScriptRoot 'bridge-manager.ps1') -Mode RegisterWeb -ContextKey $selected.contextKey -Surface $surface
     $null=Send 'ready' $selected.contextKey
     $deadline=[DateTime]::UtcNow.AddSeconds(45)
     do{

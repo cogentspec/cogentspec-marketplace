@@ -38,6 +38,7 @@ $lastNativeOperation = $null
 $completedStages = [Collections.Generic.List[object]]::new()
 $stage = 'initialization'
 $stageStartedMs = 0
+$managerUpdateGuard = ''
 
 function Set-InstallStage {
     param([Parameter(Mandatory = $true)][string]$Name)
@@ -196,11 +197,11 @@ function Invoke-BoundedNative {
 function Invoke-BoundedInstallerHelper {
     param(
         [Parameter(Mandatory = $true)][string]$ScriptPath,
-        [Parameter(Mandatory = $true)][string]$Operation
+        [Parameter(Mandatory = $true)][string]$Operation,
+        [string[]]$Arguments = @()
     )
-    $output = Invoke-BoundedNative -FilePath $script:hostPowerShellPath -Arguments @(
-        '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $ScriptPath
-    ) -Operation $Operation
+    $helperArguments = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $ScriptPath) + $Arguments
+    $output = Invoke-BoundedNative -FilePath $script:hostPowerShellPath -Arguments $helperArguments -Operation $Operation
     return Read-JsonResult -Text $output -Operation $Operation
 }
 
@@ -306,6 +307,8 @@ try {
     $sourceManifestPath = Join-Path $sourcePluginPath '.codex-plugin\plugin.json'
     $sourceManifest = Get-Content -LiteralPath $sourceManifestPath -Raw | ConvertFrom-Json
     $allowedFiles = @(
+        'skills/cogentspec/scripts/bridge-manager.ps1',
+        'skills/cogentspec/scripts/bridge-manager-core.ps1',
         'skills/cogentspec/scripts/start-workspace-beacon.ps1',
         'skills/gptpop/scripts/start-gptpop.ps1',
         'skills/qwenweb/SKILL.md',
@@ -480,6 +483,20 @@ try {
         }
     }
     Complete-InstallStage
+
+    if (-not $ValidateOnly) {
+        if ($UpdateOnly) {
+            $managerRoot = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'CogentSpec\bridge-manager\v1'
+            [void][IO.Directory]::CreateDirectory($managerRoot)
+            $managerUpdateGuard = Join-Path $managerRoot 'updating.json'
+            @{ expires = [DateTime]::UtcNow.AddMinutes(3).ToString('o') } | ConvertTo-Json -Compress | Set-Content -LiteralPath $managerUpdateGuard
+        }
+        Set-InstallStage -Name 'shared_bridge_manager'
+        $managerScript = Join-Path $installedPath 'skills\cogentspec\scripts\bridge-manager.ps1'
+        $managerResult = Invoke-BoundedInstallerHelper -ScriptPath $managerScript -Arguments @('-Mode', 'Install') -Operation 'Shared Bridge manager setup'
+        if ($managerResult.status -ne 'installed') { throw 'The shared Bridge manager could not be registered.' }
+        Complete-InstallStage
+    }
 
     $projectDataConnectionReady = $false
     if (-not $ValidateOnly -and -not $DeferConnectionStartup) {
@@ -672,6 +689,7 @@ try {
     } | ConvertTo-Json -Compress -Depth 5 | Write-Output
     exit 1
 } finally {
+    if ($managerUpdateGuard) { Remove-Item -LiteralPath $managerUpdateGuard -Force -ErrorAction SilentlyContinue }
     $InstallationRequest = ''
     $privateInstallationRequest = ''
     if ($claimJob) {

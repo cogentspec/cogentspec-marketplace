@@ -44,6 +44,12 @@ function Get-ClaudeSnapBrowserNavigation([string]$WorkspaceUrl, [string]$Context
 }
 
 function Write-CompactJson($Value) {
+    if ($Value.status -eq 'ready' -and (Get-Variable -Name statePath -ErrorAction SilentlyContinue)) {
+        try {
+            & (Join-Path $PSScriptRoot 'bridge-manager.ps1') -Mode Register -ContextKey $resolvedContext -Surface $Surface -Experience $Experience -StatePath $statePath | Out-Null
+            $Value.recoveryManagerRegistered = $true
+        } catch { $Value.recoveryManagerRegistered = $false }
+    }
     $Value | ConvertTo-Json -Depth 6 -Compress | Write-Output
 }
 

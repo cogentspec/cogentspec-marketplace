@@ -8,8 +8,10 @@
   "bridgeCompatibilityVersion": "0.6.175",
   "sourceSnapshot": "2fe075a1b10e000a573cc0fbc808d9f3cbc2bf7f",
   "files": {
+    "runtime/bridge-manager-core.ps1": "c0473f545ea4e5e996c5c8109ad9f7fd2774e886ceda16c458513c4e7a4e4658",
+    "runtime/bridge-manager.ps1": "5498e7f41eff5f7a78c9296552dcd08cc98246024a7b58ed5745d5ab8a65f4fb",
     "runtime/connect-cogentstack.ps1": "8199400c7bcb848de420820a7e411a039a9e5364fd9f4d6c32b5a53f2aa064aa",
-    "runtime/connect-web.ps1": "b56b02266d938f693c22a043b52e8337db74a712df236821669e6d7ba0465ebc",
+    "runtime/connect-web.ps1": "9589e4aee2bf9fcfa027be81989feee6217b6e0a7dc910405e169a7fbe3264e6",
     "runtime/create-specification-project.ps1": "33d1043a4f09622b2325a193ffc1d21ad56686606c15c6b966a0031bbf26aa1a",
     "runtime/delete-project.ps1": "ceb4dd562faa2f9232f6941972d3d8a9c6c7bda4cb07db06dd9bb659b8c8f40c",
     "runtime/delete-specification-project.ps1": "b20898d571c7defe2fa3c120d0c6382921651167f5b6db794fb0a335c5f9f400",

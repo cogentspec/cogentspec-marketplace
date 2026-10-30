@@ -7,7 +7,9 @@ import {spawnSync} from 'node:child_process';
 import {runInNewContext} from 'node:vm';
 
 const root=new URL('../',import.meta.url);
-for(const [host,command,surface,handle] of [['plugins','gptweb','chatgpt','gptWebTab'],['claude-plugins','claudeweb','claude-desktop','claudeWebTab'],['plugins','qwenweb','qwen-web','qwenWebTab']]) {
+// GPTWeb/ClaudeWeb now use the independent request-bound Web runtime, covered
+// by test-web-command-v1.mjs. Qwen retains the direct browser handoff protocol.
+for(const [host,command,surface,handle] of [['plugins','qwenweb','qwen-web','qwenWebTab']]) {
  test(`${command}: launcher starts before any tab listener, returns one exact Web handoff and rejects unsafe results`,async()=>{
   const dir=await mkdtemp(join(tmpdir(),'web-handoff-')),core=join(dir,'skills','cogentspec','scripts'),dest=join(dir,'skills',command,'scripts');
   await mkdir(core,{recursive:true});await mkdir(dest,{recursive:true});

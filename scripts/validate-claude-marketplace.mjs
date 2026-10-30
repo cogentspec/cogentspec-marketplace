@@ -98,6 +98,8 @@ for (const forbidden of [
 }
 
 const requiredScripts = [
+  "bridge-manager.ps1",
+  "bridge-manager-core.ps1",
   "connect-cogentstack.ps1",
   "ensure-default-project-directory.ps1",
   "create-specification-project.ps1",

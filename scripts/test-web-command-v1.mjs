@@ -22,7 +22,7 @@ test('Web v1 pins its complete independent runtime and exactly two consumers',()
   assert.doesNotMatch(dispatch,/'(?:open_chatgpt_popup|set_chatgpt_popup_topmost|set_chatgpt_desktop_topmost|set_claude_desktop_topmost)'/);
 });
 test('versioned common worker helpers remain the reviewed immutable snapshot',()=>{
-  for(const name of readdirSync(join(directory,'runtime')).filter(v=>!['connect-web.ps1','start-web-worker.ps1','watch-web-worker.ps1'].includes(v))){
+  for(const name of readdirSync(join(directory,'runtime')).filter(v=>!['connect-web.ps1','start-web-worker.ps1','watch-web-worker.ps1','bridge-manager.ps1','bridge-manager-core.ps1'].includes(v))){
     const original=execFileSync('git',['show',manifest.sourceSnapshot+':plugins/cogentspec/skills/cogentspec/scripts/'+name],{cwd:root,encoding:'utf8',windowsHide:true});
     assert.equal(readFileSync(join(directory,'runtime',name),'utf8').replaceAll('\r\n','\n'),original.replaceAll('\r\n','\n'),name);
   }
