@@ -91,7 +91,9 @@ Start-CogentQwenRuntime -Node ${quoted(probe)} -Module 'unused-fixture' -Config 
       assert.throws(() => execFileSync(executable, args, { timeout: 5000, windowsHide: true, stdio: 'pipe' }), failure => failure.status === 2);
     }
     await assert.rejects(fs.access(bootstrap), 'Invalid URI must not start PowerShell');
-    execFileSync(executable, [synthetic], { timeout: 5000, windowsHide: true });
+    // The GUI parent exits immediately; its hidden child can inherit test pipes.
+    // Check the parent's exit directly, then verify the child's explicit logs.
+    execFileSync(executable, [synthetic], { timeout: 5000, windowsHide: true, stdio: 'ignore' });
     for (let attempt = 0; attempt < 150; attempt++) {
       if (await fs.access(done).then(() => true, () => false)) break;
       await new Promise(resolve => setTimeout(resolve, 100));
