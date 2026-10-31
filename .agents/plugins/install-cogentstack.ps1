@@ -366,6 +366,8 @@ try {
         'skills/cogentstack/scripts/project-knowledge.ps1',
         'skills/cogentstack/scripts/project-preview-readiness.ps1',
         'skills/cogentstack/scripts/project-credential-worker.ps1',
+        'skills/cogentstack/scripts/project-source-worker.ps1',
+        'skills/cogentstack/scripts/project-source-fingerprint.mjs',
         'skills/cogentstack/scripts/provision-project-credentials.mjs',
         'skills/cogentstack/scripts/project-review.ps1',
         'skills/cogentstack/scripts/reset-cogentspec-update.ps1',

@@ -110,6 +110,8 @@ const requiredScripts = [
   "inspect-project-git.ps1",
   "project-git-connection.ps1",
   "project-credential-worker.ps1",
+  "project-source-worker.ps1",
+  "project-review.ps1",
   "restore-project-version.ps1",
   "save-project-version.ps1",
   "native-command.ps1",
@@ -137,9 +139,10 @@ for (const name of requiredScripts) {
   }
 }
 
-const credentialRunner = "provision-project-credentials.mjs";
-if (normalized(await readFile(join(scriptsRoot, credentialRunner), "utf8")) !== normalized(await readFile(join(codexScriptsRoot, credentialRunner), "utf8"))) {
-  fail(`${credentialRunner} must remain identical to the shared Desktop Bridge implementation`);
+for (const runner of ["provision-project-credentials.mjs", "project-source-fingerprint.mjs"]) {
+  if (normalized(await readFile(join(scriptsRoot, runner), "utf8")) !== normalized(await readFile(join(codexScriptsRoot, runner), "utf8"))) {
+    fail(`${runner} must remain identical to the shared Desktop Bridge implementation`);
+  }
 }
 
 const claudeWebLaunchers = [pluginRoot, compatibilityRoot].map(root => join(root, "skills", "claudeweb", "scripts", "start-claudeweb.ps1"));

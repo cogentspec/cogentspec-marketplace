@@ -456,6 +456,8 @@ $sourceScriptNames = @(
     'project-build-handoff.ps1',
     'project-preview-readiness.ps1',
     'project-credential-worker.ps1',
+    'project-source-worker.ps1',
+    'project-source-fingerprint.mjs',
     'provision-project-credentials.mjs',
     'watch-cogentstack-bridge.ps1'
 )

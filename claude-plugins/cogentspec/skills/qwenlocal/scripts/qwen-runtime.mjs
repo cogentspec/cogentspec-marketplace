@@ -8,6 +8,58 @@ import { spawn } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 
 export const connectorVersion = '1.0.0';
+const fingerprintProjectSource = async function fingerprintProjectSource(directory, budget = 20000) {
+  const fs = await import('node:fs/promises');
+  const path = await import('node:path');
+  const { createHash } = await import('node:crypto');
+  const root = await fs.realpath(directory);
+  const ignoredDirectories = new Set(['.git', 'node_modules', '.next', 'dist', 'build', 'target', 'coverage', 'evidence', '.coge-review-evidence', '.venv', '__pycache__', '.cache']);
+  const ignoredRootFiles = new Set(['AGENTS.md', 'PROJECT_KNOWLEDGE.md', 'CURRENT_STATE.md', 'HANDOFF.md', 'PROJECT_NOTES.md']);
+  const ignoredPaths = new Set(['.coge/browser-project.json', '.coge/knowledge-manifest.json', '.coge/review-manifest.json']);
+  const rows = [], observed = [], started = Date.now();
+  let totalBytes = 0;
+  const hash = bytes => createHash('sha256').update(bytes).digest('hex');
+  const identity = stat => [stat.dev, stat.ino, stat.size, stat.mtimeNs, stat.ctimeNs].join(':');
+  const bounded = () => { if (rows.length > 20000 || totalBytes > 1024 * 1024 * 1024 || Date.now() - started > budget) throw new Error('Project source check exceeded its safe limits.'); };
+  const walk = async dir => {
+    bounded();
+    const before = await fs.lstat(dir, { bigint: true });
+    if (before.isSymbolicLink() || !before.isDirectory()) throw new Error('Linked source paths cannot be checked.');
+    observed.push([dir, identity(before)]);
+    for (const entry of await fs.readdir(dir, { withFileTypes: true })) {
+      const full = path.resolve(dir, entry.name), relative = path.relative(root, full).replaceAll('\\', '/');
+      if (relative.startsWith('../') || path.isAbsolute(relative)) throw new Error('Source path escaped project.');
+      if (ignoredDirectories.has(entry.name) || entry.name === 'review-evidence.json'
+        || ignoredPaths.has(relative) || dir === root && ignoredRootFiles.has(entry.name)) continue;
+      if (entry.isSymbolicLink()) throw new Error('Linked source paths cannot be checked.');
+      if (entry.name.startsWith('.env') || /^(?:\.npmrc|\.yarnrc.*|.*\.(?:pem|key|pfx|p12)|id_rsa|id_ed25519)$/i.test(entry.name)) {
+        const stat = await fs.lstat(full, { bigint: true });
+        if (!stat.isFile() || stat.nlink !== 1n) throw new Error('Private configuration cannot be checked.');
+        // Detect configuration edits without opening credentials or hashing their values.
+        rows.push([relative, 'private-configuration-metadata', stat.size.toString(), stat.mtimeNs.toString(), stat.ctimeNs.toString()]);
+        observed.push([full, identity(stat)]); bounded(); continue;
+      }
+      if (entry.isDirectory()) await walk(full);
+      else if (entry.isFile()) {
+        const file = await fs.open(full, 'r');
+        try {
+          const stat = await file.stat({ bigint: true });
+          const current = await fs.lstat(full, { bigint: true });
+          if (!stat.isFile() || current.isSymbolicLink() || stat.nlink !== 1n || identity(stat) !== identity(current)) throw new Error('Source identity changed during check.');
+          totalBytes += Number(stat.size); bounded();
+          const digest = createHash('sha256');
+          for await (const chunk of file.createReadStream({ autoClose: false })) { digest.update(chunk); bounded(); }
+          if (identity(await file.stat({ bigint: true })) !== identity(stat)) throw new Error('Source changed during check.');
+          rows.push([relative, digest.digest('hex'), stat.mode & 0o111n ? 1 : 0]); observed.push([full, identity(stat)]); bounded();
+        } finally { await file.close(); }
+      } else throw new Error('Unsupported source entry.');
+    }
+  };
+  await walk(root);
+  for (const [full, stamp] of observed) if (identity(await fs.lstat(full, { bigint: true })) !== stamp) throw new Error('Source changed during check.');
+  rows.sort((left, right) => left[0] < right[0] ? -1 : left[0] > right[0] ? 1 : 0);
+  return { protocol: 'cogentspec-project-source-v1', sourceDigest: hash(JSON.stringify(rows)), files: rows.length };
+};
 const origins = new Set(['https://cogentspec.app', 'https://cogentspec.com']);
 const verifier = 'https://cogentspec.app/api/qwen/project-bridge/verify';
 const hash = data => createHash('sha256').update(data).digest('hex');
@@ -198,8 +250,8 @@ export async function createConnector({ project, context, port = 4318, verifyPla
   const keys = generateKeyPairSync('ed25519');
   const publicKey = keys.publicKey.export({ type: 'spki', format: 'pem' }).toString();
   const instance = randomBytes(24).toString('hex');
-  const sessions = new Map(), consumed = new Set();
-  let busy = false, attempts = 0, paired = false, connectedPlan = null, workspacePlan = null;
+  const sessions = new Map(), consumed = new Set(), sourceConsumed = new Map();
+  let busy = false, sourceChecking = false, attempts = 0, paired = false, connectedPlan = null, workspacePlan = null;
   const receipt = value => ({ value, signature: sign(null, Buffer.from(JSON.stringify(value)), keys.privateKey).toString('base64url') });
   const verifyRemote = verifyPlan || (async token => {
     const response = await fetch(verifier, { method: 'POST', redirect: 'error', signal: AbortSignal.timeout(10_000),
@@ -281,6 +333,28 @@ export async function createConnector({ project, context, port = 4318, verifyPla
         catch { connectedPlan = null; return send({ ...workspaceStatus, connected: false }); }
         const { ownerId, context, bindingId } = connectedPlan;
         return send({ ...workspaceStatus, connected: true, ownerId, context, bindingId, targetPath: root });
+      }
+      if (request.url === '/source-check') {
+        if (sourceChecking) return send({ error: 'A source check is already active.' }, 409);
+        sourceChecking = true;
+        try {
+          // Background checks have their own expiring replay cache. They must
+          // never exhaust the limit reserved for approved project operations.
+          for (const [token, expiry] of sourceConsumed) if (expiry <= Date.now()) sourceConsumed.delete(token);
+          if (typeof body.token !== 'string' || consumed.has(hash(body.token)) || sourceConsumed.has(hash(body.token))) fail('A fresh check is required.');
+          const plan = await verifyRemote(body.token);
+          if (!plan || plan.operation !== 'source_check' || plan.instance !== instance || plan.publicKey !== publicKey
+            || !plan.requestId || !plan.sourceCheckId || !root || plan.targetPath !== root
+            || !connectedPlan || plan.ownerId !== connectedPlan.ownerId || plan.context !== connectedPlan.context
+            || plan.bindingId !== connectedPlan.bindingId || !Number.isFinite(plan.expiresAt)
+            || plan.expiresAt <= Date.now() || plan.expiresAt > Date.now() + 305000) fail('The selected project connection changed.');
+          await ownedRoot(root, plan);
+          if (sourceConsumed.size >= 1000) fail('Too many source checks.');
+          sourceConsumed.set(hash(body.token), plan.expiresAt);
+          const result = await fingerprintProjectSource(root, 5000);
+          return send({ receipt: receipt({ grantId: plan.grantId, instance, operation: 'source_check', result }) });
+        } catch { return send({ error: 'The project source could not be checked.' }, 409); }
+        finally { sourceChecking = false; }
       }
       if (request.url !== '/execute' || busy) return send({ error: 'Unknown operation or connector busy.' }, 409);
       busy = true;

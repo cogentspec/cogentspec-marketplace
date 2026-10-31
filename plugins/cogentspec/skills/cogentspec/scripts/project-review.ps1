@@ -28,7 +28,7 @@ try {
         if ([Text.Encoding]::UTF8.GetByteCount($raw) -gt 2097152) { throw 'Review payload too large.' }
         $payload = $raw | ConvertFrom-Json
         if ([string]$payload.caseId -ne [string]$CaseId) { throw 'Review case mismatch.' }
-        if ([string]$payload.action -notin @('report','verify','refresh','use_correction')) { throw 'Unsupported review action.' }
+        if ([string]$payload.action -notin @('start','report','verify','refresh','use_correction')) { throw 'Unsupported review action.' }
         Write-Result (Invoke-RestMethod -Method Post -Uri $uri -Headers $headers -ContentType 'application/json' -Body ([Text.Encoding]::UTF8.GetBytes($raw)) -TimeoutSec 30)
     } else {
         Write-Result (Invoke-RestMethod -Method Get -Uri $uri -Headers $headers -TimeoutSec 30)

@@ -32,6 +32,8 @@ $contextHash = ([BitConverter]::ToString($contextHashBytes)).Replace('-', '').To
 $mutex = New-Object Threading.Mutex($false, "Local\CogentSpecBridge-$contextHash")
 $ownsMutex = $false
 . (Join-Path $PSScriptRoot 'project-credential-worker.ps1')
+. (Join-Path $PSScriptRoot 'project-source-worker.ps1')
+$nextSourceCheck = [DateTime]::MinValue
 $nextCredentialCheck = [DateTime]::MinValue
 
 function Unprotect-CogentSpecValue([string]$Value) {
@@ -339,6 +341,10 @@ try {
             Write-BridgePresenceReady
             if (-not $listing.taskPaused) { Invoke-FoundationCancellationRecovery $token }
             if (-not $listing.request) {
+                if (-not $listing.taskPaused -and [DateTime]::UtcNow -ge $nextSourceCheck) {
+                    try { Invoke-ProjectSourceChecks -Token $token } catch { }
+                    $nextSourceCheck = [DateTime]::UtcNow.AddSeconds(5)
+                }
                 Start-Sleep -Seconds 2
                 continue
             }
