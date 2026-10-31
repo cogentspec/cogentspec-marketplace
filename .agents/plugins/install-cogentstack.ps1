@@ -370,6 +370,7 @@ try {
         'skills/cogentstack/scripts/project-source-fingerprint.mjs',
         'skills/cogentstack/scripts/provision-project-credentials.mjs',
         'skills/cogentstack/scripts/project-review.ps1',
+        'skills/cogentstack/scripts/project-update.ps1',
         'skills/cogentstack/scripts/reset-cogentspec-update.ps1',
         'skills/cogentstack/scripts/start-cogentspec-desktop-ui-bridge.ps1',
         'skills/cogentstack/scripts/start-cogentspec-popout-bridge.ps1',

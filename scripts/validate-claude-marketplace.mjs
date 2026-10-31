@@ -112,6 +112,7 @@ const requiredScripts = [
   "project-credential-worker.ps1",
   "project-source-worker.ps1",
   "project-review.ps1",
+  "project-update.ps1",
   "restore-project-version.ps1",
   "save-project-version.ps1",
   "native-command.ps1",

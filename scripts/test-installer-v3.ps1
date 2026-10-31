@@ -69,6 +69,22 @@ try {
     Copy-Item -LiteralPath (Join-Path $repositoryRoot ".agents\plugins\install-$PluginName.ps1") -Destination $fixtureInstallerDirectory
     Copy-Item -LiteralPath (Join-Path $repositoryRoot "plugins\$PluginName") -Destination $fixturePlugin -Recurse -Force
 
+    # Installer fixtures must not write a real user's update guard, register
+    # startup tasks or replace/wake their installed shared Bridge manager.
+    $fixtureInstallerPath = Join-Path $fixtureInstallerDirectory "install-$PluginName.ps1"
+    $fixtureInstallerText = Get-Content -LiteralPath $fixtureInstallerPath -Raw
+    $managerRootExpression = "Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'CogentSpec\bridge-manager\v1'"
+    Assert-InstallerTest ($fixtureInstallerText.Contains($managerRootExpression)) 'Shared manager guard fixture location is missing.'
+    $fixtureManagerRoot = (Join-Path $fixtureRoot 'manager').Replace("'", "''")
+    $fixtureInstallerText = $fixtureInstallerText.Replace($managerRootExpression, "'$fixtureManagerRoot'")
+    Set-Content -LiteralPath $fixtureInstallerPath -Value $fixtureInstallerText -Encoding UTF8
+    $managerFixture = @'
+param([string]$Mode)
+if ($Mode -ne 'Install') { throw 'Unexpected manager fixture mode.' }
+@{ protocol='cogentspec-bridge-manager-v1'; status='installed'; startup='fixture' } | ConvertTo-Json -Compress
+'@
+    Set-Content -LiteralPath (Join-Path $fixturePlugin "skills\$PluginName\scripts\bridge-manager.ps1") -Value $managerFixture -Encoding UTF8
+
     $claimFixture = @'
 param(
     [string]$Mode,
