@@ -111,6 +111,7 @@ const requiredScripts = [
   "project-git-connection.ps1",
   "project-credential-worker.ps1",
   "project-source-worker.ps1",
+  "project-preview-worker.ps1",
   "project-review.ps1",
   "project-update.ps1",
   "restore-project-version.ps1",
@@ -140,7 +141,7 @@ for (const name of requiredScripts) {
   }
 }
 
-for (const runner of ["provision-project-credentials.mjs", "project-source-fingerprint.mjs"]) {
+for (const runner of ["provision-project-credentials.mjs", "project-source-fingerprint.mjs", "project-preview-build.mjs", "project-preview-bundle.mjs", "project-preview-upload.mjs"]) {
   if (normalized(await readFile(join(scriptsRoot, runner), "utf8")) !== normalized(await readFile(join(codexScriptsRoot, runner), "utf8"))) {
     fail(`${runner} must remain identical to the shared Desktop Bridge implementation`);
   }

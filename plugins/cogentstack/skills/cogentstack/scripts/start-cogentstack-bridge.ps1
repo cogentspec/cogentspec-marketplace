@@ -457,6 +457,10 @@ $sourceScriptNames = @(
     'project-preview-readiness.ps1',
     'project-credential-worker.ps1',
     'project-source-worker.ps1',
+    'project-preview-worker.ps1',
+    'project-preview-build.mjs',
+    'project-preview-bundle.mjs',
+    'project-preview-upload.mjs',
     'project-source-fingerprint.mjs',
     'provision-project-credentials.mjs',
     'watch-cogentstack-bridge.ps1'

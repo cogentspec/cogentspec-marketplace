@@ -33,6 +33,7 @@ $mutex = New-Object Threading.Mutex($false, "Local\CogentSpecBridge-$contextHash
 $ownsMutex = $false
 . (Join-Path $PSScriptRoot 'project-credential-worker.ps1')
 . (Join-Path $PSScriptRoot 'project-source-worker.ps1')
+. (Join-Path $PSScriptRoot 'project-preview-worker.ps1')
 $nextSourceCheck = [DateTime]::MinValue
 $nextCredentialCheck = [DateTime]::MinValue
 
@@ -342,6 +343,7 @@ try {
             if (-not $listing.taskPaused) { Invoke-FoundationCancellationRecovery $token }
             if (-not $listing.request) {
                 if (-not $listing.taskPaused -and [DateTime]::UtcNow -ge $nextSourceCheck) {
+                    try { Invoke-ProjectPreviewUploads -Token $token } catch { }
                     try { Invoke-ProjectSourceChecks -Token $token } catch { }
                     $nextSourceCheck = [DateTime]::UtcNow.AddSeconds(5)
                 }

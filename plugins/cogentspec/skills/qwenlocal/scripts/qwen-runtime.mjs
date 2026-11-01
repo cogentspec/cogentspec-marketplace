@@ -7,6 +7,168 @@ import { randomBytes, createHash, generateKeyPairSync, sign, timingSafeEqual } f
 import { spawn } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 
+async function collectBuiltPreview(input) {
+  const {lstat, realpath, readdir, open} = await import('node:fs/promises');
+  const {default:path} = await import('node:path');
+  const {constants} = await import('node:fs');
+const previewManifestName = 'cogentspec-preview.json';
+const previewMaxBytes = 16 * 1024 * 1024;
+const previewMaxFiles = 1500;
+const extensions = new Set('html css js mjs json svg png jpg jpeg webp gif ico avif woff woff2 ttf txt xml webmanifest mp4 webm mp3 audio ogg pdf wasm'.split(' '));
+function safePreviewPath(path) {
+  return typeof path === 'string' && path.length <= 300 && /^[A-Za-z0-9_@+., ()/~-]+$/.test(path)
+    && !path.startsWith('/') && !path.split('/').some(p => !p || p.startsWith('.') || ['src','server','node_modules'].includes(p.toLowerCase()))
+    && extensions.has(path.split('.').at(-1).toLowerCase())
+    && !/(?:^|\/)(?:package(?:-lock)?\.json|.*(?:secret|credential|private.?key|\.pem|\.key))$/i.test(path);
+}
+const decode = value => Uint8Array.from(atob(value), char => char.charCodeAt(0));
+function inspectPreviewEntries(entries, expectedProjectId) {
+  if (!Array.isArray(entries) || !entries.length || entries.length > previewMaxFiles) throw Error('Choose a built preview with no more than 1,500 files.');
+  const paths = new Set(); let total = 0;
+  for (const file of entries) {
+    if (!file || !safePreviewPath(file.path) || paths.has(file.path) || typeof file.content !== 'string'
+      || file.content.length > previewMaxBytes * 1.4 || file.content.length % 4 || !/^[A-Za-z0-9+/]*={0,2}$/.test(file.content)) throw Error('The preview contains an unsafe, duplicate or unsupported file.');
+    paths.add(file.path); total += file.content.length / 4 * 3 - (file.content.endsWith('==') ? 2 : file.content.endsWith('=') ? 1 : 0);
+    if (total > previewMaxBytes) throw Error('The preview must be no larger than 16 MB.');
+  }
+  const metadata = entries.find(file => file.path === previewManifestName);
+  if (!metadata) {
+    if (!paths.has('index.html')) throw Error('Choose the static build folder containing index.html, or the application dist folder containing server and client.');
+    return { kind: 'static', bytes: total };
+  }
+  if (metadata.content.length > 8192) throw Error('Invalid application preview manifest.');
+  let manifest; try { manifest = JSON.parse(new TextDecoder().decode(decode(metadata.content))); } catch { throw Error('Invalid application preview manifest.'); }
+  const keys = ['protocol','kind','projectId','runtimeId','entry','assets','data'];
+  if (!manifest || Object.keys(manifest).some(key => !keys.includes(key)) || manifest.protocol !== 1 || manifest.kind !== 'vinext-worker-v1'
+    || manifest.entry !== 'app/index.js' || manifest.assets !== 'assets' || manifest.data !== 'isolated'
+    || typeof manifest.projectId !== 'string' || typeof manifest.runtimeId !== 'string'
+    || (expectedProjectId && manifest.projectId !== expectedProjectId) || !paths.has(manifest.entry)
+    || entries.some(file => file.path !== previewManifestName && !/^(?:app\/.+\.(?:js|mjs)|assets\/.+)$/.test(file.path))) throw Error('This application preview format or project identity is not supported.');
+  return { kind: 'vinext-worker-v1', manifest, bytes: total };
+}
+function encode(bytes) {
+  let binary = ''; for (let offset = 0; offset < bytes.length; offset += 8192) binary += String.fromCharCode(...bytes.subarray(offset, offset + 8192));
+  return btoa(binary);
+}
+const digest = async bytes => [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map(n => n.toString(16).padStart(2,'0')).join('');
+async function packPreviewFiles(files, project, signal) {
+  signal?.throwIfAborted();
+  if (!files?.length || files.length > 3000) throw Error('Choose the built preview folder.');
+  const named = [...files].map(file => ({ file, path: file.webkitRelativePath ? file.webkitRelativePath.split('/').slice(1).join('/') : file.name }));
+  const application = named.some(entry => entry.path === 'server/index.js');
+  const entries = [], paths = new Set(), rows = []; let total = 0;
+  for (const entry of named) {
+    signal?.throwIfAborted(); let path = entry.path;
+    if (application) {
+      if (/^server\/(?:index\.js|vinext-client-assets\.js|__vite_rsc_assets_manifest\.js|(?:_next\/static|ssr)\/.+\.(?:js|mjs))$/.test(path)) path = 'app/' + path.slice(7);
+      else if (path === 'client/.vite/manifest.json') continue;
+      else if (path.startsWith('client/')) path = 'assets/' + path.slice(7);
+      else continue; // No Wrangler vars, source tree, runtime state or private build metadata.
+    }
+    if (/(?:^|\/)(?:\.assetsignore|_headers)$/.test(path)) continue;
+    if (!safePreviewPath(path) || paths.has(path)) throw Error('Choose only built preview files, without source files, hidden paths or credentials.');
+    total += entry.file.size; if (total > previewMaxBytes) throw Error('The preview must be no larger than 16 MB.');
+    const bytes = new Uint8Array(await entry.file.arrayBuffer()); total += bytes.length - entry.file.size;
+    if (total > previewMaxBytes) throw Error('The preview must be no larger than 16 MB.');
+    signal?.throwIfAborted(); paths.add(path); entries.push({ path, content: encode(bytes) }); rows.push([path, await digest(bytes)]);
+  }
+  if (application) {
+    if (!project.runtimeId) throw Error('Refresh projects before preparing this application preview.');
+    const bytes = new TextEncoder().encode(JSON.stringify({ protocol:1, kind:'vinext-worker-v1', projectId:project.id, runtimeId:project.runtimeId, entry:'app/index.js', assets:'assets', data:'isolated' }));
+    entries.push({ path:previewManifestName, content:encode(bytes) }); rows.push([previewManifestName,await digest(bytes)]);
+  }
+  const inspected = inspectPreviewEntries(entries, project.id);
+  rows.sort((a,b) => a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0);
+  return { files:entries, kind:inspected.kind, digest:await digest(new TextEncoder().encode(JSON.stringify(rows))) };
+}
+
+
+const fail = code => { throw Object.assign(Error(code), { code }); };
+const identity = s => [s.dev, s.ino, s.size, s.mtimeNs, s.ctimeNs].join(':');
+async function collectProjectPreview({ targetPath, projectId, runtimeId }) {
+  if (!path.isAbsolute(targetPath || '') || !projectId || !runtimeId || path.parse(targetPath).root === path.resolve(targetPath)) fail('identity_mismatch');
+  const root = path.resolve(targetPath), observed = [];
+  // Never follow junctions/symlinks, including ones above the registered folder.
+  for (let part = root;; part = path.dirname(part)) {
+    const info = await lstat(part);
+    if (info.isSymbolicLink() || !info.isDirectory()) fail('unsafe_build');
+    if (part === path.dirname(part)) break;
+  }
+  if (await realpath(root) !== root) fail('unsafe_build');
+  const stat = async full => {
+    const info = await lstat(full, { bigint: true });
+    if (info.isSymbolicLink()) fail('unsafe_build');
+    observed.push([full, identity(info)]); return info;
+  };
+  const read = async full => {
+    const before = await stat(full);
+    if (!before.isFile() || before.nlink !== 1n) fail('unsafe_build');
+    if (before.size > BigInt(previewMaxBytes)) fail('build_too_large');
+    const handle = await open(full, constants.O_RDONLY | (constants.O_NOFOLLOW || 0));
+    try {
+      if (identity(await handle.stat({ bigint: true })) !== identity(before)) fail('build_changed');
+      const bytes = await handle.readFile();
+      if (identity(await handle.stat({ bigint: true })) !== identity(before)) fail('build_changed');
+      return bytes;
+    } finally { await handle.close(); }
+  };
+  try {
+    if (!(await stat(path.join(root, '.coge'))).isDirectory()) fail('identity_mismatch');
+    const manifest = JSON.parse((await read(path.join(root, '.coge', 'knowledge-manifest.json'))).toString('utf8'));
+    if (manifest.project?.requestId !== projectId) fail('identity_mismatch');
+  } catch (error) { if (error.code === 'unsafe_build' || error.code === 'build_changed') throw error; fail('identity_mismatch'); }
+  const exists = async full => { try { return await lstat(full); } catch (error) { if (error.code === 'ENOENT') return null; throw error; } };
+  let build = null, application = false;
+  for (const name of ['dist', 'build', 'out']) {
+    const candidate = path.join(root, name), info = await exists(candidate);
+    if (!info) continue;
+    if (info.isSymbolicLink() || !info.isDirectory()) fail('unsafe_build');
+    if (await exists(path.join(candidate, 'server'))) {
+      if (!await exists(path.join(candidate, 'server', 'index.js')) || !await exists(path.join(candidate, 'client'))) fail('build_missing');
+      build = candidate; application = true; break;
+    }
+    if (await exists(path.join(candidate, 'index.html'))) { build = candidate; break; }
+  }
+  // Plain HTML projects may have no build system. Do not mistake a source entry
+  // in a package-based app for completed production output.
+  if (!build && !await exists(path.join(root, 'package.json')) && await exists(path.join(root, 'index.html'))) build = root;
+  if (!build) fail('build_missing');
+  const files = []; let bytes = 0, visited = 0;
+  const include = relative => {
+    if (application) {
+      if (/^server\/(?:index\.js|vinext-client-assets\.js|__vite_rsc_assets_manifest\.js|(?:_next\/static|ssr)\/.+\.(?:js|mjs))$/.test(relative)) return true;
+      return relative.startsWith('client/') && safePreviewPath('assets/' + relative.slice(7));
+    }
+    return safePreviewPath(relative) && relative !== 'cogentspec-preview.json';
+  };
+  const walk = async dir => {
+    const info = await stat(dir); if (!info.isDirectory()) fail('unsafe_build');
+    for (const entry of await readdir(dir, { withFileTypes: true })) {
+      if (++visited > 6000) fail('build_too_large');
+      const full = path.join(dir, entry.name), relative = path.relative(build, full).replaceAll('\\', '/');
+      if (entry.name.startsWith('.') || ['node_modules', 'src', 'data', 'coverage'].includes(entry.name)) continue;
+      if (entry.isSymbolicLink()) fail('unsafe_build');
+      if (entry.isDirectory()) {
+        if (!application || /^(?:server(?:\/(?:_next|ssr)(?:\/.*)?)?|client(?:\/.*)?)$/.test(relative)) await walk(full);
+      } else if (include(relative)) {
+        const content = await read(full); bytes += content.length;
+        if (bytes > previewMaxBytes || files.length >= previewMaxFiles - 1) fail('build_too_large');
+        files.push({ name: entry.name, webkitRelativePath: 'build/' + relative, size: content.length,
+          arrayBuffer: async () => content.buffer.slice(content.byteOffset, content.byteOffset + content.byteLength) });
+      }
+    }
+  };
+  await walk(build);
+  let packed;
+  try { packed = await packPreviewFiles(files, { id: projectId, runtimeId }); }
+  catch { fail('unsafe_build'); }
+  for (const [full, stamp] of observed) if (identity(await lstat(full, { bigint: true })) !== stamp) fail('build_changed');
+  return { projectId, files: packed.files, buildDigest: packed.digest, kind: packed.kind };
+}
+
+  return collectProjectPreview(input);
+}
+
 export const connectorVersion = '1.0.0';
 const fingerprintProjectSource = async function fingerprintProjectSource(directory, budget = 20000) {
   const fs = await import('node:fs/promises');
@@ -333,6 +495,30 @@ export async function createConnector({ project, context, port = 4318, verifyPla
         catch { connectedPlan = null; return send({ ...workspaceStatus, connected: false }); }
         const { ownerId, context, bindingId } = connectedPlan;
         return send({ ...workspaceStatus, connected: true, ownerId, context, bindingId, targetPath: root });
+      }
+      if (request.url === '/preview-build') {
+        if (busy) return send({ error: 'The connector is busy.' }, 409);
+        busy = true;
+        try {
+          if (typeof body.token !== 'string' || consumed.has(hash(body.token))) fail('A fresh preview request is required.');
+          const plan = await verifyRemote(body.token);
+          const owner = workspaceMode ? workspacePlan : connectedPlan;
+          if (!plan || plan.operation !== 'preview_build' || plan.instance !== instance || plan.publicKey !== publicKey
+            || !owner || plan.ownerId !== owner.ownerId || plan.context !== owner.context || !plan.requestId
+            || !plan.previewUploadId || !plan.previewRuntimeId || !Number.isFinite(plan.expiresAt)
+            || plan.expiresAt <= Date.now() || plan.expiresAt > Date.now() + 305000
+            || !workspaceMode && plan.targetPath !== root) fail('The preview request is not approved for this connection.');
+          consumed.add(hash(body.token));
+          if (consumed.size > 1000) fail('Restart the connector to renew its operation limit.');
+          // The signed, one-use upload request authorizes a read of the exact
+          // registered library build. It never binds or changes active selection.
+          const target = await validateProjectRoot(plan.targetPath);
+          let result;
+          try { result = await collectBuiltPreview({ targetPath: target, projectId: plan.requestId, runtimeId: plan.previewRuntimeId }); }
+          catch { result = { error: 'build_unavailable' }; }
+          return send({ receipt: receipt({ grantId: plan.grantId, instance, operation: 'preview_build', result }) });
+        } catch { return send({ error: 'The project preview could not be collected.' }, 409); }
+        finally { busy = false; }
       }
       if (request.url === '/source-check') {
         if (sourceChecking) return send({ error: 'A source check is already active.' }, 409);
