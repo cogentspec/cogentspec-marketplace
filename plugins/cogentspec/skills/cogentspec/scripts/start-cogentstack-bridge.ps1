@@ -462,6 +462,11 @@ $sourceScriptNames = @(
     'project-preview-bundle.mjs',
     'project-preview-upload.mjs',
     'project-source-fingerprint.mjs',
+    'project-review-worker.ps1',
+    'project-review-runner.mjs',
+    'project-review-host.mjs',
+    'project-review-runtime-package.json',
+    'project-review-runtime-lock.json',
     'provision-project-credentials.mjs',
     'watch-cogentstack-bridge.ps1'
 )

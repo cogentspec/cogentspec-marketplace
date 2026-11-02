@@ -175,9 +175,9 @@ const fingerprintProjectSource = async function fingerprintProjectSource(directo
   const path = await import('node:path');
   const { createHash } = await import('node:crypto');
   const root = await fs.realpath(directory);
-  const ignoredDirectories = new Set(['.git', 'node_modules', '.next', 'dist', 'build', 'target', 'coverage', 'evidence', '.coge-review-evidence', '.venv', '__pycache__', '.cache']);
+  const ignoredDirectories = new Set(['.git', 'node_modules', '.next', 'dist', 'build', 'target', 'coverage', 'evidence', '.coge-review-evidence', '.venv', '__pycache__', '.cache', '.wrangler']);
   const ignoredRootFiles = new Set(['AGENTS.md', 'PROJECT_KNOWLEDGE.md', 'CURRENT_STATE.md', 'HANDOFF.md', 'PROJECT_NOTES.md']);
-  const ignoredPaths = new Set(['.coge/browser-project.json', '.coge/knowledge-manifest.json', '.coge/review-manifest.json']);
+  const ignoredPaths = new Set(['.coge/browser-project.json', '.coge/knowledge-manifest.json', '.coge/review-manifest.json', '.coge/review-evidence.json', '.coge/runtime']);
   const rows = [], observed = [], started = Date.now();
   let totalBytes = 0;
   const hash = bytes => createHash('sha256').update(bytes).digest('hex');
@@ -222,6 +222,7 @@ const fingerprintProjectSource = async function fingerprintProjectSource(directo
   rows.sort((left, right) => left[0] < right[0] ? -1 : left[0] > right[0] ? 1 : 0);
   return { protocol: 'cogentspec-project-source-v1', sourceDigest: hash(JSON.stringify(rows)), files: rows.length };
 };
+
 const origins = new Set(['https://cogentspec.app', 'https://cogentspec.com']);
 const verifier = 'https://cogentspec.app/api/qwen/project-bridge/verify';
 const hash = data => createHash('sha256').update(data).digest('hex');

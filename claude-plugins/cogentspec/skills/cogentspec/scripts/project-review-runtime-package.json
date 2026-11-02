@@ -1,0 +1,8 @@
+{
+  "name": "cogentspec-local-review-runtime",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {"playwright":"1.62.1","miniflare":"4.20260730.0","sharp":"0.35.5"},
+  "overrides": {"sharp":"$sharp","undici":"7.30.1","ws":"8.22.1"}
+}

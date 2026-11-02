@@ -34,6 +34,7 @@ $ownsMutex = $false
 . (Join-Path $PSScriptRoot 'project-credential-worker.ps1')
 . (Join-Path $PSScriptRoot 'project-source-worker.ps1')
 . (Join-Path $PSScriptRoot 'project-preview-worker.ps1')
+. (Join-Path $PSScriptRoot 'project-review-worker.ps1')
 $nextSourceCheck = [DateTime]::MinValue
 $nextCredentialCheck = [DateTime]::MinValue
 
@@ -67,7 +68,7 @@ function Invoke-BridgeApi([string]$Method, [string]$Path, [string]$Token, $Body 
     }
     if ($null -ne $Body) {
         $parameters.ContentType = 'application/json'
-        $parameters.Body = $Body | ConvertTo-Json -Depth 6 -Compress
+        $parameters.Body = $Body | ConvertTo-Json -Depth 30 -Compress
     }
     return Invoke-RestMethod @parameters
 }
@@ -345,6 +346,7 @@ try {
                 if (-not $listing.taskPaused -and [DateTime]::UtcNow -ge $nextSourceCheck) {
                     try { Invoke-ProjectPreviewUploads -Token $token } catch { }
                     try { Invoke-ProjectSourceChecks -Token $token } catch { }
+                    try { Invoke-ProjectReviewRuns -Token $token } catch { }
                     $nextSourceCheck = [DateTime]::UtcNow.AddSeconds(5)
                 }
                 Start-Sleep -Seconds 2

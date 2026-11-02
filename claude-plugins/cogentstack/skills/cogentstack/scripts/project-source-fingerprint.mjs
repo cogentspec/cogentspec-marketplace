@@ -5,9 +5,9 @@ export const projectSourceFingerprintProgram = String.raw`async function fingerp
   const path = await import('node:path');
   const { createHash } = await import('node:crypto');
   const root = await fs.realpath(directory);
-  const ignoredDirectories = new Set(['.git', 'node_modules', '.next', 'dist', 'build', 'target', 'coverage', 'evidence', '.coge-review-evidence', '.venv', '__pycache__', '.cache']);
+  const ignoredDirectories = new Set(['.git', 'node_modules', '.next', 'dist', 'build', 'target', 'coverage', 'evidence', '.coge-review-evidence', '.venv', '__pycache__', '.cache', '.wrangler']);
   const ignoredRootFiles = new Set(['AGENTS.md', 'PROJECT_KNOWLEDGE.md', 'CURRENT_STATE.md', 'HANDOFF.md', 'PROJECT_NOTES.md']);
-  const ignoredPaths = new Set(['.coge/browser-project.json', '.coge/knowledge-manifest.json', '.coge/review-manifest.json']);
+  const ignoredPaths = new Set(['.coge/browser-project.json', '.coge/knowledge-manifest.json', '.coge/review-manifest.json', '.coge/review-evidence.json', '.coge/runtime']);
   const rows = [], observed = [], started = Date.now();
   let totalBytes = 0;
   const hash = bytes => createHash('sha256').update(bytes).digest('hex');
