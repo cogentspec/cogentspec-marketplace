@@ -38,7 +38,7 @@ export async function runPolishExecution(input,{spawnProcess=spawn,signal}={}){
  let buffer='',final='',bytes=0,overflow=false;
  const terminate=()=>{if(process.platform==='win32'){const kill=spawn(path.join(process.env.SystemRoot||'C:/Windows','System32/taskkill.exe'),['/PID',String(child.pid),'/T','/F'],{windowsHide:true,stdio:'ignore'});kill.on('error',()=>{});}else try{process.kill(-child.pid,'SIGKILL');}catch{child.kill();}};
  signal?.addEventListener('abort',terminate,{once:true});
- child.stdout.on('data',chunk=>{bytes+=chunk.length;if(bytes>8*1024*1024){overflow=true;terminate();return;}buffer+=chunk.toString();let split;while((split=buffer.indexOf('\n'))>=0){const line=buffer.slice(0,split);buffer=buffer.slice(split+1);try{const event=JSON.parse(line);if(event.type==='item.completed'&&event.item?.type==='agent_message')final=event.item.text;}catch{}}});
+ child.stdout.on('data',chunk=>{bytes+=chunk.length;if(bytes>8*1024*1024){overflow=true;terminate();return;}buffer+=chunk.toString();let split;while((split=buffer.indexOf('\n'))>=0){const line=buffer.slice(0,split);buffer=buffer.slice(split+1);try{const event=JSON.parse(line);if(event.type==='item.completed'&&event.item?.type==='agent_message')final=event.item.text;}catch{/* Non-JSON progress lines cannot supply a final result. */}}});
  child.stderr.on('data',()=>{});child.stdin.on('error',()=>{});child.stdin.end(command.prompt);
  const code=await new Promise((resolve,reject)=>{child.once('error',()=>reject(Error('AI executor could not start.')));child.once('close',resolve);});
  signal?.removeEventListener('abort',terminate);
