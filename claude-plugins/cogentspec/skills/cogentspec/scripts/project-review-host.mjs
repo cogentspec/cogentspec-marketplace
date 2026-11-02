@@ -26,6 +26,7 @@ if(config.kind!=='static'){
  mf=new Miniflare({modules:true,script:"export default{fetch(){return new Response('test')}}",d1Databases:['DB'],d1Persist:path.join(root,'test-data')});
  const sharp=(await import(pathToFileURL(require.resolve('sharp')).href)).default;
  env={DB:await mf.getD1Database('DB'),ASSETS:{fetch:asset},BETTER_AUTH_URL:origin,BETTER_AUTH_SECRET:randomBytes(48).toString('base64url'),
+  ADMIN_LOCAL_SETUP_MODE:'loopback-trusted-v1',ADMIN_LOCAL_BIND_ADDRESS:'127.0.0.1',AUTH_EMAIL_CAPTURE_MODE:'local-owner-capture-v1',
   IMAGES:{input(stream){let options={};return{transform(value){options=value;return this;},async output({format,quality}){let image=sharp(Buffer.from(await new Response(stream).arrayBuffer()),{limitInputPixels:40000000});if(options.width)image=image.resize({width:options.width,withoutEnlargement:true});const bytes=await image.toFormat(format==='image/webp'?'webp':format==='image/avif'?'avif':'jpeg',{quality}).toBuffer();return{response:()=>new Response(bytes,{headers:{'content-type':format}})};}};}}};
  // Ordinary fetch-based external integrations are disabled in this test host.
  // This is a separate-data test process, not an OS sandbox for hostile code.

@@ -1,0 +1,85 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "outcome": {
+      "type": "string",
+      "enum": [
+        "continue",
+        "waiting_cogentspec",
+        "needs_user_action",
+        "complete"
+      ]
+    },
+    "summary": {
+      "type": "string",
+      "maxLength": 600
+    },
+    "maintenanceProposal": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "summary": {
+              "type": "string",
+              "maxLength": 600
+            },
+            "instructions": {
+              "type": "string",
+              "maxLength": 2000
+            },
+            "verification": {
+              "type": "string",
+              "maxLength": 2000
+            }
+          },
+          "required": [
+            "summary",
+            "instructions",
+            "verification"
+          ]
+        }
+      ]
+    },
+    "decision": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "required": [
+            "reason",
+            "question"
+          ],
+          "type": "object",
+          "properties": {
+            "reason": {
+              "type": "string",
+              "enum": [
+                "retry_approval",
+                "scope_approval",
+                "provider_authorisation",
+                "destructive_approval"
+              ]
+            },
+            "question": {
+              "type": "string",
+              "maxLength": 400
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    }
+  },
+  "required": [
+    "outcome",
+    "summary",
+    "maintenanceProposal",
+    "decision"
+  ]
+}

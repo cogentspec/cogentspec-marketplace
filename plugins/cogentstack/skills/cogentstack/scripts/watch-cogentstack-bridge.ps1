@@ -35,6 +35,7 @@ $ownsMutex = $false
 . (Join-Path $PSScriptRoot 'project-source-worker.ps1')
 . (Join-Path $PSScriptRoot 'project-preview-worker.ps1')
 . (Join-Path $PSScriptRoot 'project-review-worker.ps1')
+. (Join-Path $PSScriptRoot 'polish-ai-worker.ps1')
 $nextSourceCheck = [DateTime]::MinValue
 $nextCredentialCheck = [DateTime]::MinValue
 
@@ -153,7 +154,7 @@ function Invoke-CancellableFoundationHelper($Request, [string]$Executable, [stri
             }
             if ($exited) { break }
             # A running build must not block the normal authenticated heartbeat.
-            Invoke-BridgeApi -Method Get -Path "/api/plugin/desktop-actions?$contextQuery" -Token $Token | Out-Null
+            Invoke-BridgeApi -Method Get -Path "/api/plugin/desktop-actions?$contextQuery&polishProtocol=1" -Token $Token | Out-Null
             Write-BridgePresenceReady
         }
         $output = $stdout.GetAwaiter().GetResult()
@@ -347,6 +348,7 @@ try {
                     try { Invoke-ProjectPreviewUploads -Token $token } catch { }
                     try { Invoke-ProjectSourceChecks -Token $token } catch { }
                     try { Invoke-ProjectReviewRuns -Token $token } catch { }
+                    if ($listing.PSObject.Properties['polishWorkPending'] -and $listing.polishWorkPending) { try { Start-PolishAiWorker -Key $ContextKey -BaseUrl $serviceUrl } catch { } }
                     $nextSourceCheck = [DateTime]::UtcNow.AddSeconds(5)
                 }
                 Start-Sleep -Seconds 2
