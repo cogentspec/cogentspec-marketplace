@@ -340,7 +340,7 @@ try {
             $nextCredentialCheck = [DateTime]::UtcNow.AddSeconds(10)
         }
         try {
-            $listing = Invoke-BridgeApi -Method Get -Path "/api/plugin/desktop-actions?$contextQuery" -Token $token
+            $listing = Invoke-BridgeApi -Method Get -Path "/api/plugin/desktop-actions?$contextQuery&polishProtocol=1" -Token $token
             Write-BridgePresenceReady
             if (-not $listing.taskPaused) { Invoke-FoundationCancellationRecovery $token }
             if (-not $listing.request) {
