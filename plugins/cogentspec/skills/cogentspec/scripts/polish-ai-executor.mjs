@@ -24,7 +24,11 @@ export async function preparePolishExecution(input){
  // Command networking is off by default in workspace-write. Enable it only
  // behind Codex's allowlist proxy for Bridge, local test servers and npm.
  const network=['-c','sandbox_workspace_write.network_access=true','-c','features.network_proxy.enabled=true','-c','features.network_proxy.domains={"cogentspec.com"="allow","cogentspec.app"="allow","127.0.0.1"="allow","localhost"="allow","registry.npmjs.org"="allow"}'];
- return {executable,root,prompt,args:['--ask-for-approval','never',...network,'exec','--sandbox','workspace-write','--ephemeral','--cd',root,'--json','--output-schema',path.join(scripts,'polish-ai-result.schema.json'),'-']};
+ // Desktop defaults can name models that this independent CLI/account cannot
+ // execute. Keep the managed runner's model explicit and separately configurable.
+ const model=process.env.COGENTSPEC_POLISH_MODEL?.trim()||'gpt-5.6-sol';
+ if(!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,79}$/.test(model))throw Error('Invalid Polish execution model configuration.');
+ return {executable,root,prompt,args:['--ask-for-approval','never',...network,'exec','--model',model,'--sandbox','workspace-write','--ephemeral','--cd',root,'--json','--output-schema',path.join(scripts,'polish-ai-result.schema.json'),'-']};
 }
 export async function runPolishExecution(input,{spawnProcess=spawn,signal}={}){
  const command=await preparePolishExecution(input);
