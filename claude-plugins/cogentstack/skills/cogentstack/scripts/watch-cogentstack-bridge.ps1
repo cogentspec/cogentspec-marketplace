@@ -348,7 +348,7 @@ try {
                     try { Invoke-ProjectPreviewUploads -Token $token } catch { }
                     try { Invoke-ProjectSourceChecks -Token $token } catch { }
                     try { Invoke-ProjectReviewRuns -Token $token } catch { }
-                    if ($listing.PSObject.Properties['polishWorkPending'] -and $listing.polishWorkPending) { try { Start-PolishAiWorker -Key $ContextKey -BaseUrl $serviceUrl } catch { } }
+                    if ($listing.PSObject.Properties['polishWorkPending'] -and $listing.polishWorkPending) { try { Start-PolishAiWorker -Key $ContextKey -BaseUrl $serviceUrl -Token $token } catch { } }
                     $nextSourceCheck = [DateTime]::UtcNow.AddSeconds(5)
                 }
                 Start-Sleep -Seconds 2

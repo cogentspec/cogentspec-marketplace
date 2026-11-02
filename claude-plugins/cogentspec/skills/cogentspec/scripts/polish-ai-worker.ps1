@@ -1,13 +1,45 @@
 param([string]$PolishContextKey='', [switch]$PolishRun, [switch]$PolishMaintainer, [string]$PolishMaintenanceRoot='', [string]$PolishOperatorTokenFile='', [string]$PolishServiceUrl='https://cogentspec.com')
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
+function Resolve-PolishNpmExecutor([string]$Shim,[string]$Architecture=$env:PROCESSOR_ARCHITECTURE) {
+    # Never run a .cmd through a shell. Resolve only the official installed
+    # package's native binary, using the layouts supported by its CLI loader.
+    if (-not [IO.Path]::IsPathRooted($Shim) -or [IO.Path]::GetFileName($Shim) -ine 'codex.cmd' -or -not (Test-Path -LiteralPath $Shim -PathType Leaf)) { return '' }
+    $target='';$platform=''
+    if ($Architecture -match '^(AMD64|x64)$') { $target='x86_64-pc-windows-msvc';$platform='codex-win32-x64' }
+    elseif ($Architecture -eq 'ARM64') { $target='aarch64-pc-windows-msvc';$platform='codex-win32-arm64' }
+    else { return '' }
+    try {
+        $packageRoot=Join-Path (Split-Path -Parent $Shim) 'node_modules\@openai\codex'
+        $manifest=Get-Content -Raw -LiteralPath (Join-Path $packageRoot 'package.json')|ConvertFrom-Json
+        if ($manifest.name -ne '@openai/codex' -or $manifest.bin.codex -ne 'bin/codex.js' -or -not (Test-Path -LiteralPath (Join-Path $packageRoot 'bin\codex.js') -PathType Leaf)) { return '' }
+        $vendors=@((Join-Path $packageRoot ('node_modules\@openai\'+$platform+'\vendor')),(Join-Path (Split-Path -Parent $packageRoot) ($platform+'\vendor')),(Join-Path $packageRoot 'vendor'))
+        foreach ($vendor in $vendors) { foreach ($layout in @('bin','codex')) {
+            $candidate=Join-Path $vendor ($target+'\'+$layout+'\codex.exe')
+            if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+                $item=Get-Item -LiteralPath $candidate
+                if (-not ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) { return [string]$item.FullName }
+            }
+        } }
+    } catch { }
+    return ''
+}
 function Find-PolishExecutor {
     $command=Get-Command codex.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($command) { return [string]$command.Source }
+    $shim=Get-Command codex.cmd -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($shim) { return Resolve-PolishNpmExecutor ([string]$shim.Source) }
     return ''
 }
-function Start-PolishAiWorker([string]$Key,[string]$BaseUrl='https://cogentspec.com') {
-    if ($BaseUrl -notmatch '^https://cogentspec\.(com|app)/?$' -or $Key -notmatch '^ctx-[a-f0-9]{64}$' -or -not (Find-PolishExecutor)) { return }
+function Send-PolishStartupFailure([string]$Key,[string]$BaseUrl,[string]$Reason,[string]$Token) {
+    if (-not $Token -or $BaseUrl -notmatch '^https://cogentspec\.(com|app)/?$' -or $Key -notmatch '^ctx-[a-f0-9]{64}$' -or $Reason -notin @('executor_missing','node_missing','worker_start_failed')) { return }
+    try { [void](Invoke-RestMethod -Method Post -Uri ($BaseUrl.TrimEnd('/')+'/api/plugin/polish-work?context='+[Uri]::EscapeDataString($Key)+'&executorProtocol=1') -Headers @{Authorization='Bearer '+$Token;Accept='application/json'} -ContentType 'application/json' -Body ([Text.Encoding]::UTF8.GetBytes((@{action='startup_failed';reason=$Reason}|ConvertTo-Json -Compress))) -TimeoutSec 6 -MaximumRedirection 0) } catch { }
+}
+function Start-PolishAiWorker([string]$Key,[string]$BaseUrl='https://cogentspec.com',[string]$Token='') {
+    if ($BaseUrl -notmatch '^https://cogentspec\.(com|app)/?$' -or $Key -notmatch '^ctx-[a-f0-9]{64}$') { return }
+    if (-not (Find-PolishExecutor)) { Send-PolishStartupFailure $Key $BaseUrl 'executor_missing' $Token;return }
+    if (-not (Get-Command node.exe -CommandType Application -ErrorAction SilentlyContinue)) { Send-PolishStartupFailure $Key $BaseUrl 'node_missing' $Token;return }
+    try {
     $base=Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'CogentSpec\PolishWorkers'
     [void][IO.Directory]::CreateDirectory($base)
     if ((Get-Item -LiteralPath $base).Attributes -band [IO.FileAttributes]::ReparsePoint) { return }
@@ -21,8 +53,23 @@ function Start-PolishAiWorker([string]$Key,[string]$BaseUrl='https://cogentspec.
     $ps=(Get-Process -Id $PID).Path
     $worker=Start-Process -FilePath $ps -ArgumentList @('-NoProfile','-NonInteractive','-EncodedCommand',$encoded) -WindowStyle Hidden -PassThru
     [IO.File]::WriteAllText($file,(@{pid=$worker.Id;startedTicks=$worker.StartTime.Ticks;startedAt=[DateTime]::UtcNow.ToString('o')}|ConvertTo-Json -Compress),[Text.UTF8Encoding]::new($false))
+    } catch { Send-PolishStartupFailure $Key $BaseUrl 'worker_start_failed' $Token }
+}
+function Get-PolishToken {
+    if ($PolishMaintainer) { return [IO.File]::ReadAllText($PolishOperatorTokenFile).Trim() }
+    $file=Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'CogentSpec\desktop-credential.json'
+    if (-not (Test-Path -LiteralPath $file)) { return '' }
+    if ($null -eq ('System.Security.Cryptography.ProtectedData' -as [type])) { try { Add-Type -AssemblyName System.Security.Cryptography.ProtectedData } catch { Add-Type -AssemblyName System.Security } }
+    $record=Get-Content -Raw -LiteralPath $file|ConvertFrom-Json
+    $bytes=[Security.Cryptography.ProtectedData]::Unprotect([Convert]::FromBase64String($record.token),$null,[Security.Cryptography.DataProtectionScope]::CurrentUser)
+    try { return [Text.Encoding]::UTF8.GetString($bytes) } finally { [Array]::Clear($bytes,0,$bytes.Length);$record=$null }
 }
 if (-not $PolishRun) { return }
+function Invoke-PolishWorkerRuntime {
+trap {
+    if ($PolishRun -and -not $PolishMaintainer) { try { Send-PolishStartupFailure $PolishContextKey $PolishServiceUrl 'worker_start_failed' (Get-PolishToken) } catch { } }
+    exit 1
+}
 if ($PolishServiceUrl -notmatch '^https://cogentspec\.(com|app)/?$' -and -not ($PolishMaintainer -and $PolishServiceUrl -match '^http://127\.0\.0\.1:\d{1,5}/?$')) { exit 1 }
 if (-not $PolishMaintainer -and $PolishContextKey -notmatch '^ctx-[a-f0-9]{64}$') { exit 1 }
 if ($PolishMaintainer -and (-not [IO.Path]::IsPathRooted($PolishMaintenanceRoot) -or -not [IO.Path]::IsPathRooted($PolishOperatorTokenFile))) { exit 1 }
@@ -39,15 +86,6 @@ function Save-PolishRecovery($AssignedJob,$Process) {
     $bytes=[Text.Encoding]::UTF8.GetBytes($json)
     try { $cipher=[Security.Cryptography.ProtectedData]::Protect($bytes,$null,[Security.Cryptography.DataProtectionScope]::CurrentUser);[IO.File]::WriteAllText($receiptFile,[Convert]::ToBase64String($cipher),[Text.UTF8Encoding]::new($false)) }
     finally { [Array]::Clear($bytes,0,$bytes.Length);$json=$null }
-}
-function Get-PolishToken {
-    if ($PolishMaintainer) { return [IO.File]::ReadAllText($PolishOperatorTokenFile).Trim() }
-    $file=Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'CogentSpec\desktop-credential.json'
-    if (-not (Test-Path -LiteralPath $file)) { return '' }
-    if ($null -eq ('System.Security.Cryptography.ProtectedData' -as [type])) { try { Add-Type -AssemblyName System.Security.Cryptography.ProtectedData } catch { Add-Type -AssemblyName System.Security } }
-    $record=Get-Content -Raw -LiteralPath $file|ConvertFrom-Json
-    $bytes=[Security.Cryptography.ProtectedData]::Unprotect([Convert]::FromBase64String($record.token),$null,[Security.Cryptography.DataProtectionScope]::CurrentUser)
-    try { return [Text.Encoding]::UTF8.GetString($bytes) } finally { [Array]::Clear($bytes,0,$bytes.Length);$record=$null }
 }
 function Invoke-PolishApi([string]$Method,$Body=$null) {
     $token=Get-PolishToken
@@ -84,10 +122,12 @@ try {
                 Remove-Item -LiteralPath $receiptFile -Force;$pending=$null
             }
             $executable=Find-PolishExecutor
-            if (-not $executable) { break }
+            if (-not $executable) { if (-not $PolishMaintainer) { Send-PolishStartupFailure $PolishContextKey $PolishServiceUrl 'executor_missing' (Get-PolishToken) };break }
+            $node=Get-Command node.exe,node -CommandType Application -ErrorAction SilentlyContinue|Select-Object -First 1
+            if (-not $node) { if (-not $PolishMaintainer) { Send-PolishStartupFailure $PolishContextKey $PolishServiceUrl 'node_missing' (Get-PolishToken) };break }
             $claimed=if($PolishMaintainer){Invoke-PolishApi Post @{action='claim'}}else{Invoke-PolishApi Get}
             if (-not $claimed.job) { Start-Sleep -Seconds 5; continue }
-            $job=$claimed.job;$node=Get-Command node.exe,node -CommandType Application -ErrorAction Stop|Select-Object -First 1
+            $job=$claimed.job
             $info=[Diagnostics.ProcessStartInfo]::new();$info.FileName=$node.Source;$info.Arguments='"'+(Join-Path $PSScriptRoot 'polish-ai-executor.mjs')+'"';$info.UseShellExecute=$false;$info.CreateNoWindow=$true
             $info.RedirectStandardInput=$true;$info.RedirectStandardOutput=$true;$info.RedirectStandardError=$true
             $process=[Diagnostics.Process]::new();$process.StartInfo=$info;[void]$process.Start()
@@ -110,7 +150,14 @@ try {
             }
             [void](Invoke-PolishApi Post $body)
             Remove-Item -LiteralPath $receiptFile -Force -ErrorAction SilentlyContinue
-        } catch { Start-Sleep -Seconds 5 }
+        } catch {
+            if ($process) { Stop-PolishProcess $process $ownedJob }
+            if ($job) { try { $ack=@{action='cancelled';id=$job.id;claimToken=$job.claimToken};if(-not $PolishMaintainer){$ack.caseId=$job.caseId};[void](Invoke-PolishApi Post $ack) } catch { } }
+            if (-not $PolishMaintainer) { try { Send-PolishStartupFailure $PolishContextKey $PolishServiceUrl 'worker_start_failed' (Get-PolishToken) } catch { } }
+            Start-Sleep -Seconds 5
+        }
         finally { if ($process) { Stop-PolishProcess $process $ownedJob; $process.Dispose() };$job=$null }
     }
 } finally { $mutex.ReleaseMutex();$mutex.Dispose() }
+}
+Invoke-PolishWorkerRuntime
