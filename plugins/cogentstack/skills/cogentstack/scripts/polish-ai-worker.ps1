@@ -81,30 +81,101 @@ function New-PolishExecutionReceipt($AssignedJob,[string]$OutputText,[int]$ExitC
     if ($Maintainer) { $body.Remove('caseId') }
     return $body
 }
+function Save-PolishRecovery([string]$ReceiptFile,$AssignedJob,$ProcessIdentity,$Delivery=$null) {
+    if ($null -eq ('System.Security.Cryptography.ProtectedData' -as [type])) { try { Add-Type -AssemblyName System.Security.Cryptography.ProtectedData } catch { Add-Type -AssemblyName System.Security } }
+    if ([IO.File]::Exists($ReceiptFile) -and ((Get-Item -LiteralPath $ReceiptFile).Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Linked receipt is not allowed.' }
+    $json=@{id=$AssignedJob.id;caseId=$AssignedJob.caseId;claimToken=$AssignedJob.claimToken;pid=$ProcessIdentity.pid;startedTicks=$ProcessIdentity.startedTicks;delivery=$Delivery}|ConvertTo-Json -Depth 12 -Compress
+    $bytes=[Text.Encoding]::UTF8.GetBytes($json)
+    $temporary=$ReceiptFile+'.'+[guid]::NewGuid().ToString('N')+'.tmp'
+    # A PowerShell $null binds to an empty string here. Use a typed null for
+    # File.Replace's optional backup filename in both Windows PS 5 and PS 7.
+    try { $cipher=[Security.Cryptography.ProtectedData]::Protect($bytes,$null,[Security.Cryptography.DataProtectionScope]::CurrentUser);[IO.File]::WriteAllText($temporary,[Convert]::ToBase64String($cipher),[Text.UTF8Encoding]::new($false));if([IO.File]::Exists($ReceiptFile)){[IO.File]::Replace($temporary,$ReceiptFile,[Management.Automation.Language.NullString]::Value)}else{[IO.File]::Move($temporary,$ReceiptFile)} }
+    finally { [Array]::Clear($bytes,0,$bytes.Length);$json=$null;if([IO.File]::Exists($temporary)){Remove-Item -LiteralPath $temporary -Force} }
+}
+function Read-PolishRecovery([string]$ReceiptFile) {
+    $item=Get-Item -LiteralPath $ReceiptFile
+    if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -or $item.Length -gt 65536) { throw 'Invalid private receipt.' }
+    if ($null -eq ('System.Security.Cryptography.ProtectedData' -as [type])) { try { Add-Type -AssemblyName System.Security.Cryptography.ProtectedData } catch { Add-Type -AssemblyName System.Security } }
+    $plain=[Security.Cryptography.ProtectedData]::Unprotect([Convert]::FromBase64String([IO.File]::ReadAllText($ReceiptFile)),$null,[Security.Cryptography.DataProtectionScope]::CurrentUser)
+    try { return [Text.Encoding]::UTF8.GetString($plain)|ConvertFrom-Json } finally { [Array]::Clear($plain,0,$plain.Length) }
+}
+function Stop-PolishProcess($Process,$OwnedJob=$null) {
+    if ($OwnedJob) { $OwnedJob.Dispose() }
+    try { $processId=[int]$Process.Id } catch { return }
+    if ($processId -le 0) { return }
+    if (-not $Process -or $Process.HasExited) { return }
+    $kill=Join-Path $env:SystemRoot 'System32\taskkill.exe'
+    & $kill /PID ([string]$processId) /T /F 2>&1|Out-Null
+    if (-not $Process.WaitForExit(7000)) { throw 'Worker shutdown is not confirmed.' }
+}
+function Restore-PolishRecovery([string]$ReceiptFile,[scriptblock]$SendApi,[switch]$Maintainer) {
+    if (-not [IO.File]::Exists($ReceiptFile)) { return }
+    $pending=Read-PolishRecovery $ReceiptFile
+    $prior=$null
+    if ($pending.pid -gt 0) { $prior=Get-Process -Id $pending.pid -ErrorAction SilentlyContinue }
+    if ($prior -and $prior.StartTime.Ticks -eq $pending.startedTicks) { Stop-PolishProcess $prior }
+    $ack=@{action='cancelled';id=$pending.id;claimToken=$pending.claimToken}
+    if (-not $Maintainer) { $ack.caseId=$pending.caseId }
+    if ($pending.PSObject.Properties['delivery'] -and $pending.delivery) {
+        $ack.action='recover';$ack.result=$pending.delivery.result
+        foreach ($name in @('decision','proposal')) { if ($pending.delivery.PSObject.Properties[$name]) { $ack[$name]=$pending.delivery.$name } }
+    } elseif ($pending.PSObject.Properties['result'] -and $pending.result) { $ack.result=$pending.result }
+    $reply=& $SendApi Post $ack
+    if (-not (($reply.PSObject.Properties['receiptSettled'] -and $reply.receiptSettled) -or ($reply.PSObject.Properties['receiptExpired'] -and $reply.receiptExpired))) { throw 'The saved result has not been acknowledged.' }
+    Remove-Item -LiteralPath $ReceiptFile -Force
+}
+# One claimed attempt, shared by the production loop and the Windows lifecycle
+# test. The runtime below supplies only its fixed service API and bundled executor.
+function Invoke-PolishAssignment($Claimed,[string]$Executable,[string]$Node,[string]$ExecutorPath,[string]$ReceiptFile,[scriptblock]$SendApi,[string]$MaintenanceRoot='',[switch]$Maintainer) {
+    $process=$null;$ownedJob=$null;$identity=@{pid=0;startedTicks=0};$body=$null;$job=$Claimed.job
+    try {
+        if ($null -eq ('CogentSpecPolishProcessJob' -as [type])) { Add-Type -Path (Join-Path $PSScriptRoot 'polish-process-job.cs') }
+        $info=[Diagnostics.ProcessStartInfo]::new();$info.FileName=$Node;$info.Arguments='"'+$ExecutorPath+'"';$info.UseShellExecute=$false;$info.CreateNoWindow=$true
+        $info.RedirectStandardInput=$true;$info.RedirectStandardOutput=$true;$info.RedirectStandardError=$true
+        $process=[Diagnostics.Process]::new();$process.StartInfo=$info;[void]$process.Start()
+        $identity=@{pid=$process.Id;startedTicks=$process.StartTime.Ticks}
+        $ownedJob=[CogentSpecPolishProcessJob]::new($process.Handle)
+        Save-PolishRecovery $ReceiptFile $job $identity
+        $stdout=$process.StandardOutput.ReadToEndAsync();$stderr=$process.StandardError.ReadToEndAsync()
+        $executionJson=@{job=$job;review=$Claimed.review;executable=$Executable;maintenanceRoot=$MaintenanceRoot}|ConvertTo-Json -Depth 80 -Compress
+        $process.StandardInput.Write($executionJson);$process.StandardInput.Close();$executionJson=$null
+        $cancelled=$false;$cancelReason='connection_lost';$deadline=[DateTime]::UtcNow.AddMinutes(45)
+        while (-not $process.WaitForExit(3000)) {
+            try { $reply=& $SendApi Post @{action='heartbeat';id=$job.id;caseId=$job.caseId;claimToken=$job.claimToken} }
+            catch { $reply=@{shouldStop=$true} }
+            if ($reply.shouldStop -or [DateTime]::UtcNow -ge $deadline) { $cancelled=$true;if([DateTime]::UtcNow -ge $deadline){$cancelReason='deadline'};Stop-PolishProcess $process $ownedJob;break }
+        }
+        Stop-PolishProcess $process $ownedJob
+        $body=New-PolishExecutionReceipt -AssignedJob $job -OutputText $stdout.Result -ExitCode $process.ExitCode -Cancelled $cancelled -CancelReason $cancelReason -Maintainer:$Maintainer
+        # Persist the entire delivery, including a question/proposal, before HTTP.
+        Save-PolishRecovery $ReceiptFile $job $identity $body
+        $receipt=& $SendApi Post $body
+        # HTTP 200 can still mean "stop, lease expired" without recording the
+        # result. Keep the final receipt until the controller confirms settlement.
+        if (-not $receipt.PSObject.Properties['state']) { throw 'The execution result has not been recorded.' }
+        Remove-Item -LiteralPath $ReceiptFile -Force
+    } catch {
+        if ($process) { Stop-PolishProcess $process $ownedJob }
+        if (-not $body) {
+            $failure=New-PolishExecutionReceipt -AssignedJob $job -OutputText '' -ExitCode 1 -Cancelled $true -CancelReason 'worker_error' -Maintainer:$Maintainer
+            Save-PolishRecovery $ReceiptFile $job $identity $failure
+        }
+        # Keep the receipt for delivery recovery. An executed attempt is never
+        # relabelled as a startup failure, nor followed by a new claim here.
+        throw
+    } finally { if ($process) { Stop-PolishProcess $process $ownedJob;$process.Dispose() } }
+}
 if (-not $PolishRun) { return }
 function Invoke-PolishWorkerRuntime {
-trap {
-    if ($PolishRun -and -not $PolishMaintainer) { try { Send-PolishStartupFailure $PolishContextKey $PolishServiceUrl 'worker_start_failed' (Get-PolishToken) } catch { } }
-    exit 1
-}
 if ($PolishServiceUrl -notmatch '^https://cogentspec\.(com|app)/?$' -and -not ($PolishMaintainer -and $PolishServiceUrl -match '^http://127\.0\.0\.1:\d{1,5}/?$')) { exit 1 }
 if (-not $PolishMaintainer -and $PolishContextKey -notmatch '^ctx-[a-f0-9]{64}$') { exit 1 }
 if ($PolishMaintainer -and (-not [IO.Path]::IsPathRooted($PolishMaintenanceRoot) -or -not [IO.Path]::IsPathRooted($PolishOperatorTokenFile))) { exit 1 }
 $mutex=[Threading.Mutex]::new($false,('Local\CogentSpecPolish-'+$(if($PolishMaintainer){'maintainer'}else{$PolishContextKey})))
 if (-not $mutex.WaitOne(0)) { $mutex.Dispose(); exit 0 }
-if ($null -eq ('CogentSpecPolishProcessJob' -as [type])) { Add-Type -Path (Join-Path $PSScriptRoot 'polish-process-job.cs') }
 $receiptRoot=Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'CogentSpec\PolishWorkers'
 [void][IO.Directory]::CreateDirectory($receiptRoot)
 if ((Get-Item -LiteralPath $receiptRoot).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Linked worker state is not allowed.' }
 $receiptFile=Join-Path $receiptRoot ($(if($PolishMaintainer){'maintainer'}else{$PolishContextKey})+'.receipt')
-function Save-PolishRecovery($AssignedJob,$Process,$AttemptResult=$null) {
-    if ($null -eq ('System.Security.Cryptography.ProtectedData' -as [type])) { try { Add-Type -AssemblyName System.Security.Cryptography.ProtectedData } catch { Add-Type -AssemblyName System.Security } }
-    $json=@{id=$AssignedJob.id;caseId=$AssignedJob.caseId;claimToken=$AssignedJob.claimToken;pid=$Process.Id;startedTicks=$Process.StartTime.Ticks;result=$AttemptResult}|ConvertTo-Json -Depth 12 -Compress
-    $bytes=[Text.Encoding]::UTF8.GetBytes($json)
-    $temporary=$receiptFile+'.'+[guid]::NewGuid().ToString('N')+'.tmp'
-    try { $cipher=[Security.Cryptography.ProtectedData]::Protect($bytes,$null,[Security.Cryptography.DataProtectionScope]::CurrentUser);[IO.File]::WriteAllText($temporary,[Convert]::ToBase64String($cipher),[Text.UTF8Encoding]::new($false));if([IO.File]::Exists($receiptFile)){[IO.File]::Replace($temporary,$receiptFile,$null)}else{[IO.File]::Move($temporary,$receiptFile)} }
-    finally { [Array]::Clear($bytes,0,$bytes.Length);$json=$null;if([IO.File]::Exists($temporary)){Remove-Item -LiteralPath $temporary -Force} }
-}
 function Invoke-PolishApi([string]$Method,$Body=$null) {
     $token=Get-PolishToken
     if (-not $token) { throw 'AI connection unavailable.' }
@@ -115,31 +186,11 @@ function Invoke-PolishApi([string]$Method,$Body=$null) {
         return Invoke-RestMethod -Method $Method -Uri $uri -Headers $headers -ContentType 'application/json' -Body ([Text.Encoding]::UTF8.GetBytes(($Body|ConvertTo-Json -Depth 12 -Compress))) -TimeoutSec 15 -MaximumRedirection 0
     } finally { $token=$null;$headers=$null }
 }
-function Stop-PolishProcess($Process,$OwnedJob=$null) {
-    if ($OwnedJob) { $OwnedJob.Dispose() }
-    if (-not $Process -or $Process.HasExited) { return }
-    $kill=Join-Path $env:SystemRoot 'System32\taskkill.exe'
-    & $kill /PID ([string]$Process.Id) /T /F 2>&1|Out-Null
-    [void]$Process.WaitForExit(7000)
-}
 try {
     while ($true) {
-        $process=$null;$job=$null;$ownedJob=$null;$body=$null
+        $job=$null
         try {
-            if (Test-Path -LiteralPath $receiptFile) {
-                if ((Get-Item -LiteralPath $receiptFile).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Linked receipt is not allowed.' }
-                if ($null -eq ('System.Security.Cryptography.ProtectedData' -as [type])) { try { Add-Type -AssemblyName System.Security.Cryptography.ProtectedData } catch { Add-Type -AssemblyName System.Security } }
-                $plain=[Security.Cryptography.ProtectedData]::Unprotect([Convert]::FromBase64String([IO.File]::ReadAllText($receiptFile)),$null,[Security.Cryptography.DataProtectionScope]::CurrentUser)
-                try { $pending=[Text.Encoding]::UTF8.GetString($plain)|ConvertFrom-Json } finally { [Array]::Clear($plain,0,$plain.Length) }
-                $prior=Get-Process -Id $pending.pid -ErrorAction SilentlyContinue
-                if ($prior -and $prior.StartTime.Ticks -eq $pending.startedTicks) { Stop-PolishProcess $prior }
-                $ack=@{action='cancelled';id=$pending.id;claimToken=$pending.claimToken}
-                if ($pending.PSObject.Properties['result'] -and $pending.result) { $ack.result=$pending.result }
-                if (-not $PolishMaintainer) { $ack.caseId=$pending.caseId }
-                try { [void](Invoke-PolishApi Post $ack) }
-                catch { if (-not $_.Exception.Response -or [int]$_.Exception.Response.StatusCode -ne 409) { throw } }
-                Remove-Item -LiteralPath $receiptFile -Force;$pending=$null
-            }
+            Restore-PolishRecovery $receiptFile ${function:Invoke-PolishApi} -Maintainer:$PolishMaintainer
             $executable=Find-PolishExecutor
             if (-not $executable) { if (-not $PolishMaintainer) { Send-PolishStartupFailure $PolishContextKey $PolishServiceUrl 'executor_missing' (Get-PolishToken) };break }
             $node=Get-Command node.exe,node -CommandType Application -ErrorAction SilentlyContinue|Select-Object -First 1
@@ -147,33 +198,13 @@ try {
             $claimed=if($PolishMaintainer){Invoke-PolishApi Post @{action='claim'}}else{Invoke-PolishApi Get}
             if (-not $claimed.job) { Start-Sleep -Seconds 5; continue }
             $job=$claimed.job
-            $info=[Diagnostics.ProcessStartInfo]::new();$info.FileName=$node.Source;$info.Arguments='"'+(Join-Path $PSScriptRoot 'polish-ai-executor.mjs')+'"';$info.UseShellExecute=$false;$info.CreateNoWindow=$true
-            $info.RedirectStandardInput=$true;$info.RedirectStandardOutput=$true;$info.RedirectStandardError=$true
-            $process=[Diagnostics.Process]::new();$process.StartInfo=$info;[void]$process.Start()
-            $ownedJob=[CogentSpecPolishProcessJob]::new($process.Handle)
-            Save-PolishRecovery $job $process
-            $stdout=$process.StandardOutput.ReadToEndAsync();$stderr=$process.StandardError.ReadToEndAsync()
-            $executionJson=@{job=$job;review=$claimed.review;executable=$executable;maintenanceRoot=$PolishMaintenanceRoot}|ConvertTo-Json -Depth 80 -Compress
-            $process.StandardInput.Write($executionJson);$process.StandardInput.Close();$executionJson=$null;$claimed=$null
-            $cancelled=$false;$cancelReason='connection_lost';$deadline=[DateTime]::UtcNow.AddMinutes(45)
-            while (-not $process.WaitForExit(3000)) {
-                try { $reply=Invoke-PolishApi Post @{action='heartbeat';id=$job.id;caseId=$job.caseId;claimToken=$job.claimToken} }
-                catch { $reply=@{shouldStop=$true} }
-                if ($reply.shouldStop -or [DateTime]::UtcNow -ge $deadline) { $cancelled=$true;if([DateTime]::UtcNow -ge $deadline){$cancelReason='deadline'};Stop-PolishProcess $process $ownedJob;break }
-            }
-            $body=New-PolishExecutionReceipt -AssignedJob $job -OutputText $stdout.Result -ExitCode $process.ExitCode -Cancelled $cancelled -CancelReason $cancelReason -Maintainer:$PolishMaintainer
-            # A network loss after the model exits must not discard its final
-            # outcome. Replay only after the owned process has stopped.
-            Save-PolishRecovery $job $process $body.result
-            [void](Invoke-PolishApi Post $body)
-            Remove-Item -LiteralPath $receiptFile -Force -ErrorAction SilentlyContinue
+            Invoke-PolishAssignment -Claimed $claimed -Executable $executable -Node $node.Source -ExecutorPath (Join-Path $PSScriptRoot 'polish-ai-executor.mjs') -ReceiptFile $receiptFile -SendApi ${function:Invoke-PolishApi} -MaintenanceRoot $PolishMaintenanceRoot -Maintainer:$PolishMaintainer
         } catch {
-            if ($process) { Stop-PolishProcess $process $ownedJob }
-            if ($job) { try { $ack=@{action='cancelled';id=$job.id;claimToken=$job.claimToken};if($body -and $body.ContainsKey('result')){$ack.result=$body.result};if(-not $PolishMaintainer){$ack.caseId=$job.caseId};[void](Invoke-PolishApi Post $ack) } catch { } }
-            if (-not $PolishMaintainer) { try { Send-PolishStartupFailure $PolishContextKey $PolishServiceUrl 'worker_start_failed' (Get-PolishToken) } catch { } }
+            # Only pre-claim failures are startup failures. Once claimed, the
+            # protected receipt owns recovery and must settle before a new claim.
+            if (-not $job -and -not [IO.File]::Exists($receiptFile) -and -not $PolishMaintainer) { try { Send-PolishStartupFailure $PolishContextKey $PolishServiceUrl 'worker_start_failed' (Get-PolishToken) } catch { } }
             Start-Sleep -Seconds 5
-        }
-        finally { if ($process) { Stop-PolishProcess $process $ownedJob; $process.Dispose() };$job=$null }
+        } finally { $job=$null;$claimed=$null }
     }
 } finally { $mutex.ReleaseMutex();$mutex.Dispose() }
 }

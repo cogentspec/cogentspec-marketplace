@@ -12,9 +12,11 @@ if (-not (Test-Path -LiteralPath $credentialPath -PathType Leaf)) {
     exit 0
 }
 $token = $null
+$bytes = $null
 try {
     if ($null -eq ('System.Security.Cryptography.ProtectedData' -as [type])) {
-        Add-Type -AssemblyName System.Security.Cryptography.ProtectedData
+        try { Add-Type -AssemblyName System.Security.Cryptography.ProtectedData }
+        catch { Add-Type -AssemblyName System.Security }
     }
     $credential = Get-Content -Raw -LiteralPath $credentialPath | ConvertFrom-Json
     $bytes = [System.Security.Cryptography.ProtectedData]::Unprotect(
@@ -36,4 +38,4 @@ try {
 } catch {
     # Never emit credentials, request headers, raw provider errors or diagnostic payloads.
     Write-Result @{ status='review_request_failed'; activeProjectPreserved=$true; message='The review request was not accepted. Read the case again; check its revision, project identity and connection before retrying.' }
-} finally { $token=$null; $bytes=$null; $headers=$null; $credential=$null }
+} finally { if ($bytes) { [Array]::Clear($bytes,0,$bytes.Length) }; $token=$null; $bytes=$null; $headers=$null; $credential=$null }
