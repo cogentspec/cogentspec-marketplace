@@ -126,6 +126,27 @@ function Restore-PolishRecovery([string]$ReceiptFile,[scriptblock]$SendApi,[swit
 }
 # One claimed attempt, shared by the production loop and the Windows lifecycle
 # test. The runtime below supplies only its fixed service API and bundled executor.
+function Read-PolishExecutionOutput($State,[switch]$UntilClosed) {
+    $deadline=[DateTime]::UtcNow.AddSeconds(5)
+    while (-not $State.closed) {
+        if (-not $State.pending.IsCompleted) {
+            if (-not $UntilClosed) { return }
+            if ([DateTime]::UtcNow -ge $deadline -or -not $State.pending.Wait(1000)) { if([DateTime]::UtcNow -ge $deadline){throw 'Execution output did not close.'};continue }
+        }
+        $line=$State.pending.Result
+        if ($null -eq $line) { $State.closed=$true;return }
+        $State.pending=$State.reader.ReadLineAsync()
+        if (-not $line -or $line.Length -gt 12000) { continue }
+        try {
+            $entry=$line|ConvertFrom-Json
+            if ($entry.PSObject.Properties['type'] -and $entry.type -eq 'polish_activity') {
+                $activity=$entry.activity
+                $allowed=@('protocol','sequence','sampledAt','currentTask','currentTaskStartedAt','lastCompleted','lastMeaningfulAt','completedSteps','failedSteps','checksSucceeded','checksFailed','sourceUpdates','sourceChangedAt','outputsUpdated','outputsUpdatedAt')
+                if($activity.protocol -eq 1 -and $activity.sequence -gt 0 -and -not @($activity.PSObject.Properties.Name|Where-Object{$_ -notin $allowed}).Count -and (-not $State.activity -or $activity.sequence -gt $State.activity.sequence)){$State.activity=$activity}
+            } elseif ($entry.PSObject.Properties['protocol'] -and $entry.PSObject.Properties['outcome']) { $State.finalText=$line }
+        } catch { } # Optional observation data cannot replace the final result.
+    }
+}
 function Invoke-PolishAssignment($Claimed,[string]$Executable,[string]$Node,[string]$ExecutorPath,[string]$ReceiptFile,[scriptblock]$SendApi,[string]$MaintenanceRoot='',[switch]$Maintainer) {
     $process=$null;$ownedJob=$null;$identity=@{pid=0;startedTicks=0};$body=$null;$job=$Claimed.job
     try {
@@ -136,17 +157,20 @@ function Invoke-PolishAssignment($Claimed,[string]$Executable,[string]$Node,[str
         $identity=@{pid=$process.Id;startedTicks=$process.StartTime.Ticks}
         $ownedJob=[CogentSpecPolishProcessJob]::new($process.Handle)
         Save-PolishRecovery $ReceiptFile $job $identity
-        $stdout=$process.StandardOutput.ReadToEndAsync();$stderr=$process.StandardError.ReadToEndAsync()
+        $outputState=@{reader=$process.StandardOutput;pending=$process.StandardOutput.ReadLineAsync();closed=$false;activity=$null;finalText=''};$stderr=$process.StandardError.ReadToEndAsync()
         $executionJson=@{job=$job;review=$Claimed.review;executable=$Executable;maintenanceRoot=$MaintenanceRoot}|ConvertTo-Json -Depth 80 -Compress
         $process.StandardInput.Write($executionJson);$process.StandardInput.Close();$executionJson=$null
         $cancelled=$false;$cancelReason='connection_lost';$deadline=[DateTime]::UtcNow.AddMinutes(45)
         while (-not $process.WaitForExit(3000)) {
-            try { $reply=& $SendApi Post @{action='heartbeat';id=$job.id;caseId=$job.caseId;claimToken=$job.claimToken} }
+            Read-PolishExecutionOutput $outputState
+            try { $heartbeat=@{action='heartbeat';id=$job.id;caseId=$job.caseId;claimToken=$job.claimToken};if($outputState.activity){$heartbeat.activity=$outputState.activity};$reply=& $SendApi Post $heartbeat }
             catch { $reply=@{shouldStop=$true} }
             if ($reply.shouldStop -or [DateTime]::UtcNow -ge $deadline) { $cancelled=$true;if([DateTime]::UtcNow -ge $deadline){$cancelReason='deadline'};Stop-PolishProcess $process $ownedJob;break }
         }
         Stop-PolishProcess $process $ownedJob
-        $body=New-PolishExecutionReceipt -AssignedJob $job -OutputText $stdout.Result -ExitCode $process.ExitCode -Cancelled $cancelled -CancelReason $cancelReason -Maintainer:$Maintainer
+        Read-PolishExecutionOutput $outputState -UntilClosed
+        if($outputState.activity){try{[void](& $SendApi Post @{action='heartbeat';id=$job.id;caseId=$job.caseId;claimToken=$job.claimToken;activity=$outputState.activity})}catch{}}
+        $body=New-PolishExecutionReceipt -AssignedJob $job -OutputText $outputState.finalText -ExitCode $process.ExitCode -Cancelled $cancelled -CancelReason $cancelReason -Maintainer:$Maintainer
         # Persist the entire delivery, including a question/proposal, before HTTP.
         Save-PolishRecovery $ReceiptFile $job $identity $body
         $receipt=& $SendApi Post $body
