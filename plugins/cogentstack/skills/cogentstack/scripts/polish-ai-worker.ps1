@@ -64,6 +64,23 @@ function Get-PolishToken {
     $bytes=[Security.Cryptography.ProtectedData]::Unprotect([Convert]::FromBase64String($record.token),$null,[Security.Cryptography.DataProtectionScope]::CurrentUser)
     try { return [Text.Encoding]::UTF8.GetString($bytes) } finally { [Array]::Clear($bytes,0,$bytes.Length);$record=$null }
 }
+function New-PolishExecutionReceipt($AssignedJob,[string]$OutputText,[int]$ExitCode,[bool]$Cancelled=$false,[string]$CancelReason='connection_lost',[switch]$Maintainer) {
+    $body=@{action=$(if($Cancelled){'cancelled'}elseif($ExitCode -eq 0){'finish'}else{'failed'});id=$AssignedJob.id;caseId=$AssignedJob.caseId;claimToken=$AssignedJob.claimToken}
+    $result=$null
+    if (-not $Cancelled -and $OutputText.Length -lt 10000) { try { $candidate=$OutputText|ConvertFrom-Json;if(@('protocol','outcome','reason','summary','nextStep','exitCode','checkpoint','decision','maintenanceProposal')|Where-Object{-not $candidate.PSObject.Properties[$_]}){throw 'Incomplete result.'};$result=$candidate } catch { } }
+    if ($result -and $result.protocol -eq 1) {
+        $body.result=@{protocol=1;outcome=$result.outcome;reason=$result.reason;summary=$result.summary;nextStep=$result.nextStep;exitCode=$result.exitCode;checkpoint=$result.checkpoint}
+        if ($result.outcome -eq 'failed') { $body.action='failed' }
+        if ($result.outcome -eq 'cancelled') { $body.action='cancelled' }
+        if (-not $Maintainer -and $body.action -eq 'finish' -and $result.decision) { $body.decision=$result.decision }
+        if ($Maintainer -and $body.action -eq 'finish' -and $result.maintenanceProposal) { $body.proposal=$result.maintenanceProposal }
+    } else {
+        $body.result=@{protocol=1;outcome=$(if($Cancelled){'cancelled'}else{'failed'});reason=$(if($Cancelled){$CancelReason}else{'invalid_result'});summary='The worker stopped before a structured result was recorded.';nextStep='Check the retained project changes before continuing.';exitCode=$ExitCode;checkpoint=$null}
+        if (-not $Cancelled) { $body.action='failed' }
+    }
+    if ($Maintainer) { $body.Remove('caseId') }
+    return $body
+}
 if (-not $PolishRun) { return }
 function Invoke-PolishWorkerRuntime {
 trap {
@@ -80,12 +97,13 @@ $receiptRoot=Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'C
 [void][IO.Directory]::CreateDirectory($receiptRoot)
 if ((Get-Item -LiteralPath $receiptRoot).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Linked worker state is not allowed.' }
 $receiptFile=Join-Path $receiptRoot ($(if($PolishMaintainer){'maintainer'}else{$PolishContextKey})+'.receipt')
-function Save-PolishRecovery($AssignedJob,$Process) {
+function Save-PolishRecovery($AssignedJob,$Process,$AttemptResult=$null) {
     if ($null -eq ('System.Security.Cryptography.ProtectedData' -as [type])) { try { Add-Type -AssemblyName System.Security.Cryptography.ProtectedData } catch { Add-Type -AssemblyName System.Security } }
-    $json=@{id=$AssignedJob.id;caseId=$AssignedJob.caseId;claimToken=$AssignedJob.claimToken;pid=$Process.Id;startedTicks=$Process.StartTime.Ticks}|ConvertTo-Json -Compress
+    $json=@{id=$AssignedJob.id;caseId=$AssignedJob.caseId;claimToken=$AssignedJob.claimToken;pid=$Process.Id;startedTicks=$Process.StartTime.Ticks;result=$AttemptResult}|ConvertTo-Json -Depth 12 -Compress
     $bytes=[Text.Encoding]::UTF8.GetBytes($json)
-    try { $cipher=[Security.Cryptography.ProtectedData]::Protect($bytes,$null,[Security.Cryptography.DataProtectionScope]::CurrentUser);[IO.File]::WriteAllText($receiptFile,[Convert]::ToBase64String($cipher),[Text.UTF8Encoding]::new($false)) }
-    finally { [Array]::Clear($bytes,0,$bytes.Length);$json=$null }
+    $temporary=$receiptFile+'.'+[guid]::NewGuid().ToString('N')+'.tmp'
+    try { $cipher=[Security.Cryptography.ProtectedData]::Protect($bytes,$null,[Security.Cryptography.DataProtectionScope]::CurrentUser);[IO.File]::WriteAllText($temporary,[Convert]::ToBase64String($cipher),[Text.UTF8Encoding]::new($false));if([IO.File]::Exists($receiptFile)){[IO.File]::Replace($temporary,$receiptFile,$null)}else{[IO.File]::Move($temporary,$receiptFile)} }
+    finally { [Array]::Clear($bytes,0,$bytes.Length);$json=$null;if([IO.File]::Exists($temporary)){Remove-Item -LiteralPath $temporary -Force} }
 }
 function Invoke-PolishApi([string]$Method,$Body=$null) {
     $token=Get-PolishToken
@@ -106,7 +124,7 @@ function Stop-PolishProcess($Process,$OwnedJob=$null) {
 }
 try {
     while ($true) {
-        $process=$null;$job=$null;$ownedJob=$null
+        $process=$null;$job=$null;$ownedJob=$null;$body=$null
         try {
             if (Test-Path -LiteralPath $receiptFile) {
                 if ((Get-Item -LiteralPath $receiptFile).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Linked receipt is not allowed.' }
@@ -116,6 +134,7 @@ try {
                 $prior=Get-Process -Id $pending.pid -ErrorAction SilentlyContinue
                 if ($prior -and $prior.StartTime.Ticks -eq $pending.startedTicks) { Stop-PolishProcess $prior }
                 $ack=@{action='cancelled';id=$pending.id;claimToken=$pending.claimToken}
+                if ($pending.PSObject.Properties['result'] -and $pending.result) { $ack.result=$pending.result }
                 if (-not $PolishMaintainer) { $ack.caseId=$pending.caseId }
                 try { [void](Invoke-PolishApi Post $ack) }
                 catch { if (-not $_.Exception.Response -or [int]$_.Exception.Response.StatusCode -ne 409) { throw } }
@@ -136,23 +155,21 @@ try {
             $stdout=$process.StandardOutput.ReadToEndAsync();$stderr=$process.StandardError.ReadToEndAsync()
             $executionJson=@{job=$job;review=$claimed.review;executable=$executable;maintenanceRoot=$PolishMaintenanceRoot}|ConvertTo-Json -Depth 80 -Compress
             $process.StandardInput.Write($executionJson);$process.StandardInput.Close();$executionJson=$null;$claimed=$null
-            $cancelled=$false;$deadline=[DateTime]::UtcNow.AddMinutes(45)
+            $cancelled=$false;$cancelReason='connection_lost';$deadline=[DateTime]::UtcNow.AddMinutes(45)
             while (-not $process.WaitForExit(3000)) {
                 try { $reply=Invoke-PolishApi Post @{action='heartbeat';id=$job.id;caseId=$job.caseId;claimToken=$job.claimToken} }
                 catch { $reply=@{shouldStop=$true} }
-                if ($reply.shouldStop -or [DateTime]::UtcNow -ge $deadline) { $cancelled=$true;Stop-PolishProcess $process $ownedJob;break }
+                if ($reply.shouldStop -or [DateTime]::UtcNow -ge $deadline) { $cancelled=$true;if([DateTime]::UtcNow -ge $deadline){$cancelReason='deadline'};Stop-PolishProcess $process $ownedJob;break }
             }
-            $body=@{action=$(if($cancelled){'cancelled'}elseif($process.ExitCode -eq 0){'finish'}else{'failed'});id=$job.id;caseId=$job.caseId;claimToken=$job.claimToken}
-            if (-not $PolishMaintainer -and $body.action -eq 'finish' -and $stdout.Result.Length -lt 7000) { $result=$stdout.Result|ConvertFrom-Json;if($result.decision){$body.decision=$result.decision} }
-            if ($PolishMaintainer) {
-                $body.Remove('caseId')
-                if ($body.action -eq 'finish' -and $stdout.Result.Length -lt 7000) { $result=$stdout.Result|ConvertFrom-Json;if($result.maintenanceProposal){$body.proposal=$result.maintenanceProposal} }
-            }
+            $body=New-PolishExecutionReceipt -AssignedJob $job -OutputText $stdout.Result -ExitCode $process.ExitCode -Cancelled $cancelled -CancelReason $cancelReason -Maintainer:$PolishMaintainer
+            # A network loss after the model exits must not discard its final
+            # outcome. Replay only after the owned process has stopped.
+            Save-PolishRecovery $job $process $body.result
             [void](Invoke-PolishApi Post $body)
             Remove-Item -LiteralPath $receiptFile -Force -ErrorAction SilentlyContinue
         } catch {
             if ($process) { Stop-PolishProcess $process $ownedJob }
-            if ($job) { try { $ack=@{action='cancelled';id=$job.id;claimToken=$job.claimToken};if(-not $PolishMaintainer){$ack.caseId=$job.caseId};[void](Invoke-PolishApi Post $ack) } catch { } }
+            if ($job) { try { $ack=@{action='cancelled';id=$job.id;claimToken=$job.claimToken};if($body -and $body.ContainsKey('result')){$ack.result=$body.result};if(-not $PolishMaintainer){$ack.caseId=$job.caseId};[void](Invoke-PolishApi Post $ack) } catch { } }
             if (-not $PolishMaintainer) { try { Send-PolishStartupFailure $PolishContextKey $PolishServiceUrl 'worker_start_failed' (Get-PolishToken) } catch { } }
             Start-Sleep -Seconds 5
         }

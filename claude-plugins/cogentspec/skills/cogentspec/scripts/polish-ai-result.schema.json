@@ -74,12 +74,17 @@
           "additionalProperties": false
         }
       ]
+    },
+    "nextStep": {
+      "type": "string",
+      "maxLength": 600
     }
   },
   "required": [
     "outcome",
     "summary",
     "maintenanceProposal",
-    "decision"
+    "decision",
+    "nextStep"
   ]
 }
