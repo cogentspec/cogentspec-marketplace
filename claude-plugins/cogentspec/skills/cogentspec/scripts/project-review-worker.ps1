@@ -49,7 +49,7 @@ function Invoke-ReviewProcess($Run,[string]$Token,[string]$Executable,[string[]]
 }
 
 function Invoke-ProjectReviewRuns([string]$Token) {
-    $listing = Invoke-BridgeApi -Method Get -Path "/api/plugin/project-review-runs?$contextQuery&runnerProtocol=1" -Token $Token
+    $listing = Invoke-BridgeApi -Method Get -Path "/api/plugin/project-review-runs?$contextQuery&runnerProtocol=2" -Token $Token
     if (-not $listing.run) { return }; $run = $listing.run
     $body = @{id=[string]$run.id;claimToken=[string]$run.claimToken;action='failed';failure='background_checks_failed'}
     try {

@@ -113,3 +113,7 @@ Only after the user generates a Deployment Pack from CogentSpec Web's **Hosting*
 - Never claim sign-in from a local credential file alone; only the protected status response is authoritative.
 - Never infer, cache, reveal, or recreate protected contract content.
 - Never commit, push, deploy, delete, or perform another material repository action without the corresponding explicit user or hosted-workspace authorization.
+
+## Verify Polish controls through their entry points
+
+For user-selected Polish, follow the current `get_project_review` policy and submission schema. Routine project browser work uses `run_checks` against the isolated built output, never the user's working tabs or real database. Test public links into owner/admin pages before testing those pages directly. An unhandled application error, a link that does nothing, an action without an outcome assertion, or missing evidence cannot pass. Hover, focus and contrast observations describe visual state; they do not prove functional activation. Reference the owned run, exact source and built version, and actual action/outcome for each functional control claim. Browser workflows require browser journeys as well as relevant API tests. A local build review does not verify a separately uploaded preview. Preserve earlier verified work and report missing current evidence honestly. Never start a managed/server AI worker or publish a project as part of Polish.
