@@ -70,7 +70,7 @@ Assert (Microsoft.PowerShell.Management\Test-Path -LiteralPath (Join-Path $TestR
 # replaced by in-memory fakes. No real startup registration is changed.
 $sourceRoot = Join-Path $TestRoot 'installer-source'
 [void][IO.Directory]::CreateDirectory($sourceRoot)
-foreach ($name in @('bridge-manager.ps1','bridge-manager-core.ps1')) {
+foreach ($name in @('bridge-manager.ps1','bridge-manager-core.ps1','erp-worker.ps1','erp-installation-worker.ps1','install-erp-project.mjs','create-specification-project.ps1','fulfil-project.ps1','native-command.ps1','project-context.ps1','project-credential-worker.ps1','provision-project-credentials.mjs')) {
     Copy-Item -LiteralPath (Join-Path (Split-Path -Parent $CorePath) $name) -Destination (Join-Path $sourceRoot $name)
 }
 function Get-FileHash {
@@ -109,4 +109,42 @@ $current=Get-Content -LiteralPath $currentFile -Raw|ConvertFrom-Json
 $current.managerVersion='9.0.0';Write-ManagerJson $currentFile $current
 $newer=Install-Manager
 Assert ($newer.managerVersion -eq '9.0.0' -and $newer.startup -eq 'preserved') 'An older provider adapter downgraded the shared manager'
+# The account-bound installer starts without an AI binding or conversation.
+$script:erpStarts=0; $script:erpCommand=''; $script:erpEntry=''
+function Start-Process {
+    param($FilePath,$ArgumentList,$WindowStyle,[switch]$PassThru)
+    Assert ($WindowStyle -eq 'Hidden') 'ERP installer opened a visible shell'
+    $script:erpStarts++; $script:erpEntry=[string]$ArgumentList[-1]
+    $child=[pscustomobject]@{Id=76543}; $child|Add-Member ScriptMethod Dispose {}; return $child
+}
+function Get-CimInstance { param($ClassName,$Filter,$ErrorAction); return [pscustomobject]@{ProcessId=76543;CommandLine=$script:erpCommand} }
+Start-ManagerErpWorker
+Assert ($script:erpStarts -eq 1 -and $script:erpEntry -like '*erp-worker.ps1*') 'ERP installer depended on an AI binding'
+$script:erpCommand='powershell.exe -File ' + $script:erpEntry
+Start-ManagerErpWorker
+Assert ($script:erpStarts -eq 1) 'Duplicate ERP installer started'
+$script:erpCommand='powershell.exe unrelated.ps1'
+Start-ManagerErpWorker
+Assert ($script:erpStarts -eq 2) 'A reused PID blocked ERP recovery'
+$package=Join-Path $script:ManagerRoot ('packages\'+$current.version)
+[IO.File]::AppendAllText((Join-Path $package 'install-erp-project.mjs'),'// synthetic tamper')
+$rejected=$false
+try { Start-ManagerErpWorker } catch { $rejected=$true }
+Assert ($rejected -and $script:erpStarts -eq 2) 'A changed ERP runtime was started'
+
+. (Join-Path (Split-Path -Parent $CorePath) 'erp-installation-worker.ps1')
+$script:ErpWorkDirectory='C:\Synthetic\projects';$script:erpCalls=@();$script:privateSetups=0;$script:inspectCount=0
+$script:erpClaim=@{job=$null;installed=@(@{id='installed-job';claim='claim-a';context=$context;project=@{id='project-a'}})}
+function Invoke-InitialCredentialSetup {param($Token); Assert ($contextQuery -eq ('context='+[Uri]::EscapeDataString($context))) 'Private setup used the wrong ERP context';$script:privateSetups++}
+function Invoke-ErpProjectRunner {param($Project,[switch]$InspectOnly);Assert ($Project.id -eq 'project-a' -and $InspectOnly) 'Existing ERP data was reinitialised';$script:inspectCount++;return @{projectId=$Project.id}}
+function Invoke-BridgeApi {param($Method,$Path,$Token,$Body);Assert ($Path -eq '/api/plugin/erp-installations') 'ERP worker used an AI endpoint';$script:erpCalls+=,$Body;if($Body.action -eq 'claim'){return $script:erpClaim};return @{}}
+Invoke-ErpInstallationWork -Token 'synthetic-not-a-credential'
+Assert ($script:privateSetups -eq 1 -and $script:inspectCount -eq 1) 'Installed ERP was not checked independently'
+Assert ($script:erpCalls[0].workDirectory -eq $script:ErpWorkDirectory -and $script:erpCalls[1].action -eq 'verify') 'Installer availability or proof was not recorded'
+$script:erpClaim=@{installed=@();job=@{id='job-a';claim='claim-b';context_key=$context;mode='check';project=@{id='project-a'}}}
+Invoke-ErpInstallationWork -Token 'synthetic-not-a-credential'
+Assert ($script:erpCalls[-1].action -eq 'complete' -and $script:inspectCount -eq 2) 'Check-only adoption failed'
+function Invoke-ErpProjectRunner {param($Project,[switch]$InspectOnly);throw 'synthetic missing installation'}
+Invoke-ErpInstallationWork -Token 'synthetic-not-a-credential'
+Assert ($script:erpCalls[-1].action -eq 'fail') 'A missing native installation became an installed state'
 @{status='passed';checks=$script:checks;realWorkersStarted=$false;credentialsRead=$false}|ConvertTo-Json -Compress

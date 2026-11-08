@@ -30,7 +30,7 @@ function Install-Manager {
             return @{ protocol=$script:ManagerProtocol; status='installed'; startup='preserved'; managerVersion=$currentVersion }
         }
     }
-    $files = @('bridge-manager.ps1', 'bridge-manager-core.ps1')
+    $files = @('bridge-manager.ps1', 'bridge-manager-core.ps1', 'erp-worker.ps1', 'erp-installation-worker.ps1', 'install-erp-project.mjs', 'create-specification-project.ps1', 'fulfil-project.ps1', 'native-command.ps1', 'project-context.ps1', 'project-credential-worker.ps1', 'provision-project-credentials.mjs')
     $hashes = [ordered]@{}
     foreach ($name in $files) { $hashes[$name] = (Get-FileHash -LiteralPath (Join-Path $PSScriptRoot $name) -Algorithm SHA256).Hash.ToLowerInvariant() }
     $version = (Get-ManagerHash ($hashes.Values -join ':')).Substring(0, 24)
@@ -210,6 +210,10 @@ try {
                 $reply = Invoke-BridgeManagerApi @{ operation = 'poll'; bindings = @($bindings | ForEach-Object { @{ contextKey = $_.contextKey; surface = $_.surface; experience = $_.experience } }) }
                 if ($reply.protocol -cne $script:ManagerProtocol -or $reply.status -cne 'available') { throw 'manager_unavailable' }
                 $failures = 0
+                # ERP availability must never rewind or fail an AI connection.
+                try { Start-ManagerErpWorker } catch {
+                    Write-ManagerJson (Join-Path $script:ManagerRoot 'erp-worker-status.json') @{status='unavailable';checkedAt=[DateTime]::UtcNow.ToString('o')}
+                }
                 $paused = Test-Path -LiteralPath (Join-Path $script:ManagerRoot 'paused')
                 $statusItem.Text = if ($paused) { 'Automatic reconnection paused' } else { 'Bridge manager available' }
                 foreach ($request in @($reply.requests)) { Invoke-ManagerRequest $request $bindings }

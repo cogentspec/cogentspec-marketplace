@@ -309,6 +309,9 @@ try {
     $allowedFiles = @(
         'skills/cogentspec/scripts/bridge-manager.ps1',
         'skills/cogentspec/scripts/bridge-manager-core.ps1',
+        'skills/cogentspec/scripts/erp-worker.ps1',
+        'skills/cogentspec/scripts/erp-installation-worker.ps1',
+        'skills/cogentspec/scripts/install-erp-project.mjs',
         'skills/cogentspec/scripts/start-workspace-beacon.ps1',
         'skills/gptpop/scripts/start-gptpop.ps1',
         'skills/qwenweb/SKILL.md',

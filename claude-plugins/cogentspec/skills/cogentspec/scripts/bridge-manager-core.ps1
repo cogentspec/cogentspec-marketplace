@@ -2,7 +2,33 @@ Set-StrictMode -Version Latest
 $script:ManagerProtocol = 'cogentspec-bridge-manager-v1'
 $script:ManagerRoot = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'CogentSpec\bridge-manager\v1'
 $script:ManagerExecution = [Guid]::NewGuid().ToString()
-$script:ManagerVersion = '1.0.0'
+$script:ManagerVersion = '1.1.0'
+
+function Start-ManagerErpWorker {
+    # The ERP installer is account/computer-bound, independent of AI bindings.
+    $current = Get-Content -LiteralPath (Join-Path $script:ManagerRoot 'current.json') -Raw | ConvertFrom-Json
+    $package = Join-Path $script:ManagerRoot ('packages\' + $current.version)
+    if (-not (Test-ManagerPath $package (Join-Path $script:ManagerRoot 'packages'))) { throw 'invalid_erp_worker' }
+    foreach ($entry in $current.hashes.PSObject.Properties) {
+        if ($entry.Name -notmatch '^[a-z0-9-]+\.(ps1|mjs)$') { throw 'invalid_erp_worker' }
+        $path = Join-Path $package $entry.Name
+        if (-not (Test-ManagerPath $path $package) -or (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant() -cne $entry.Value) { throw 'invalid_erp_worker' }
+    }
+    $entryPoint = Join-Path $package 'erp-worker.ps1'
+    if (-not $current.hashes.PSObject.Properties['erp-worker.ps1']) { return }
+    $statePath = Join-Path $script:ManagerRoot 'erp-worker.json'
+    if (Test-Path -LiteralPath $statePath) {
+        try {
+            $state = Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
+            $running = Get-CimInstance Win32_Process -Filter "ProcessId=$([int]$state.processId)" -ErrorAction Stop
+            if ($running -and $running.CommandLine.Contains([string]$state.entryPoint)) { return }
+        } catch { }
+    }
+    $powershell = Join-Path ([Environment]::SystemDirectory) 'WindowsPowerShell\v1.0\powershell.exe'
+    $child = Start-Process -FilePath $powershell -ArgumentList @('-NoProfile','-NonInteractive','-WindowStyle','Hidden','-ExecutionPolicy','Bypass','-File',('"' + $entryPoint + '"')) -WindowStyle Hidden -PassThru
+    Write-ManagerJson $statePath @{ processId=$child.Id; entryPoint=$entryPoint }
+    $child.Dispose()
+}
 
 function Get-ManagerHash([string]$Text) {
     $algorithm = [Security.Cryptography.SHA256]::Create()
