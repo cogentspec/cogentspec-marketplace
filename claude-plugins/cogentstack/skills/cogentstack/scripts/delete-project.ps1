@@ -132,15 +132,19 @@ function Get-DecodedProcessCommand($Process) {
     return $commandLine
 }
 
-function Stop-VerifiedProjectProcesses([string]$ExactTargetPath, [string]$ExactRequestId) {
+function Stop-VerifiedProjectProcesses([string]$ExactTargetPath, [string]$ExactRequestId, [switch]$ErpOnly) {
     $processes = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue)
     $owned = New-Object 'Collections.Generic.HashSet[int]'
     foreach ($process in $processes) {
         $processId = [int]$process.ProcessId
         if ($processId -le 0 -or $processId -eq $PID) { continue }
         $command = Get-DecodedProcessCommand $process
+        if ($ErpOnly -and -not (
+            ([string]$process.Name -match '^node(?:\.exe)?$' -and $command -match ([Regex]::Escape((Join-Path $ExactTargetPath 'scripts\odoo-runtime.mjs')) + '(?=["\s]|$)')) -or
+            ($command.IndexOf('generate-project-preview.ps1', [StringComparison]::OrdinalIgnoreCase) -ge 0 -and $command.IndexOf($ExactRequestId, [StringComparison]::OrdinalIgnoreCase) -ge 0)
+        )) { continue }
         if (
-            $command.IndexOf($ExactTargetPath, [StringComparison]::OrdinalIgnoreCase) -ge 0 -or
+            $command -match (([Regex]::Escape($ExactTargetPath)) + '(?=[\\/"\s]|$)') -or
             ($command.IndexOf('generate-project-preview.ps1', [StringComparison]::OrdinalIgnoreCase) -ge 0 -and
              $command.IndexOf($ExactRequestId, [StringComparison]::OrdinalIgnoreCase) -ge 0)
         ) {
@@ -185,6 +189,37 @@ function Stop-VerifiedProjectProcesses([string]$ExactTargetPath, [string]$ExactR
         } catch { }
     }
     return $owned.Count
+}
+
+function Remove-VerifiedErpResources($Project) {
+    $receiptRoot = Join-Path $stateRoot 'erp-removal-receipts'
+    [void][IO.Directory]::CreateDirectory($receiptRoot)
+    if ((Get-Item -LiteralPath $receiptRoot).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Linked ERP removal receipts are not supported.' }
+    $receiptPath = Join-Path $receiptRoot ([string]$Project.id + '.json')
+    $previous = $null
+    if (Test-Path -LiteralPath $receiptPath) {
+        if ((Get-Item -LiteralPath $receiptPath).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Linked ERP removal receipts are not supported.' }
+        $previous = Get-Content -LiteralPath $receiptPath -Raw | ConvertFrom-Json
+    }
+    $process = $null
+    try {
+        $node = Get-Command node.exe, node -ErrorAction Stop | Select-Object -First 1
+        $start = New-Object Diagnostics.ProcessStartInfo
+        $start.FileName = $node.Source
+        $start.Arguments = '"' + (Join-Path $PSScriptRoot 'remove-erp-project.mjs') + '"'
+        $start.UseShellExecute = $false; $start.CreateNoWindow = $true
+        $start.RedirectStandardInput = $true; $start.RedirectStandardOutput = $true; $start.RedirectStandardError = $true
+        $process = New-Object Diagnostics.Process; $process.StartInfo = $start
+        [void]$process.Start()
+        $output = $process.StandardOutput.ReadToEndAsync(); $errors = $process.StandardError.ReadToEndAsync()
+        $process.StandardInput.Write((@{ project=$Project; previousProof=$previous } | ConvertTo-Json -Depth 12 -Compress)); $process.StandardInput.Close()
+        if (-not $process.WaitForExit(300000)) { $process.Kill(); throw 'ERP removal timed out. Its registration has been kept.' }
+        if ($process.ExitCode -ne 0) { throw 'ERP services and data could not be safely removed. Its folder and registration have been kept for retry.' }
+        $proof = $output.Result | ConvertFrom-Json
+        if ($proof.protocol -ne 1 -or $proof.projectId -cne $Project.id -or $proof.runtimeId -cne $Project.contractRuntimeId -or $proof.targetPath -cne $Project.targetPath -or $proof.resourcesRemoved -ne $true) { throw 'The ERP removal proof does not match this project.' }
+        [IO.File]::WriteAllText($receiptPath, ($proof | ConvertTo-Json -Depth 8 -Compress), [Text.UTF8Encoding]::new($false))
+        return $proof
+    } finally { if ($process) { $process.Dispose() } }
 }
 
 if (-not (Test-Path -LiteralPath $credentialPath)) {
@@ -234,11 +269,13 @@ $deletionDigest = ''
 $claimed = $false
 $folderRemoved = $false
 $processesStopped = 0
+$erpRemoval = $null
 
 try {
     $claim = Invoke-CogentSpecApi -Method Post -Path "/api/plugin/project-deletions?$contextQuery" -Token $token -Body @{
         action = 'claim'
         requestId = $RequestId
+        erpCleanupProtocol = 1
     }
     if (
         [string]$claim.status -ne 'claimed' -or
@@ -260,7 +297,12 @@ try {
     }
     $targetPath = Resolve-ApprovedDeletionTarget @targetParameters
 
-    $processesStopped = Stop-VerifiedProjectProcesses $targetPath $projectRequestId
+    $processesStopped = Stop-VerifiedProjectProcesses $targetPath $projectRequestId -ErpOnly:([bool]$claim.PSObject.Properties['erpProject'])
+
+    if ($claim.PSObject.Properties['erpProject']) {
+        if ($claim.erpProject.id -cne $projectRequestId -or $claim.erpProject.targetPath -cne $targetPath) { throw 'The ERP deletion identity changed.' }
+        $erpRemoval = Remove-VerifiedErpResources $claim.erpProject
+    }
 
     if (Test-Path -LiteralPath $targetPath) {
         Remove-Item -LiteralPath $targetPath -Recurse -Force
@@ -269,6 +311,7 @@ try {
         }
         $folderRemoved = $true
     }
+    if ($erpRemoval) { $erpRemoval | Add-Member -NotePropertyName folderRemoved -NotePropertyValue $true -Force }
 
     $completionMessage = if ($folderRemoved) {
         "Project registration and folder deleted from $targetPath."
@@ -282,12 +325,13 @@ try {
                 action = 'complete'
                 requestId = $RequestId
                 deletionDigest = $deletionDigest
+                erpRemoval = $erpRemoval
                 executionGrant = $executionGrant
                 statusMessage = $completionMessage
             }
         } catch {
-            $remainingRequests = @((Invoke-CogentSpecApi -Method Get -Path "/api/plugin/project-deletions?$contextQuery" -Token $token).requests)
-            if (-not ($remainingRequests | Where-Object { [string]$_.id -eq $RequestId })) {
+            $finalState = Invoke-CogentSpecApi -Method Get -Path "/api/plugin/project-deletions?$contextQuery&requestId=$RequestId&projectId=$projectRequestId" -Token $token
+            if ([string]$finalState.status -eq 'absent' -and $finalState.registeredProjectAbsent -eq $true) {
                 $completed = [pscustomobject]@{ status = 'deleted' }
                 break
             }

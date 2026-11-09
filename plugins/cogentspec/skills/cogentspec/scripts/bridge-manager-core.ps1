@@ -2,7 +2,7 @@ Set-StrictMode -Version Latest
 $script:ManagerProtocol = 'cogentspec-bridge-manager-v1'
 $script:ManagerRoot = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'CogentSpec\bridge-manager\v1'
 $script:ManagerExecution = [Guid]::NewGuid().ToString()
-$script:ManagerVersion = '1.1.0'
+$script:ManagerVersion = '1.2.0'
 
 function Start-ManagerErpWorker {
     # The ERP installer is account/computer-bound, independent of AI bindings.

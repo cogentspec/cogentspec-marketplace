@@ -1,5 +1,11 @@
 function Invoke-ErpInstallationWork([string]$Token) {
-    $claimed = Invoke-BridgeApi -Method Post -Path '/api/plugin/erp-installations' -Token $Token -Body @{ action = 'claim'; protocol = 1; workDirectory = $script:ErpWorkDirectory }
+    $claimed = Invoke-BridgeApi -Method Post -Path '/api/plugin/erp-installations' -Token $Token -Body @{ action = 'claim'; protocol = 2; workDirectory = $script:ErpWorkDirectory }
+    if ($claimed.PSObject.Properties['deletions']) {
+        foreach ($deletion in @($claimed.deletions)) {
+            # Only server-approved ERP deletions bound to this computer are returned.
+            Invoke-ErpDeletion -Deletion $deletion
+        }
+    }
     foreach ($installed in @($claimed.installed)) {
         # Credential work remains in its existing protected, project-bound transport.
         $contextQuery = "context=$([Uri]::EscapeDataString([string]$installed.context))"
@@ -55,5 +61,22 @@ function Invoke-ErpProjectRunner($Project, [switch]$InspectOnly) {
         if (-not $process.WaitForExit(1200000)) { $process.Kill(); throw 'Installation timed out.' }
         if ($process.ExitCode -ne 0) { throw 'Installation failed.' }
         return ($outTask.Result | ConvertFrom-Json)
+    } finally { if ($process) { $process.Dispose() } }
+}
+
+function Invoke-ErpDeletion($Deletion) {
+    if ([string]$Deletion.requestId -notmatch '^[a-f0-9-]{36}$' -or [string]$Deletion.contextKey -notmatch '^(ctx-[a-f0-9]{64}|default)$') { throw 'The approved ERP deletion identity is invalid.' }
+    $process = $null
+    try {
+        $start = New-Object Diagnostics.ProcessStartInfo
+        $start.FileName = Join-Path ([Environment]::SystemDirectory) 'WindowsPowerShell\v1.0\powershell.exe'
+        $entry = Join-Path $PSScriptRoot 'erp-delete-project.ps1'
+        $start.Arguments = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + $entry + '" -Mode delete -RequestId "' + $Deletion.requestId + '" -ContextKey "' + $Deletion.contextKey + '"'
+        $start.UseShellExecute = $false; $start.CreateNoWindow = $true
+        $start.RedirectStandardOutput = $true; $start.RedirectStandardError = $true
+        $process = New-Object Diagnostics.Process; $process.StartInfo = $start; [void]$process.Start()
+        $output = $process.StandardOutput.ReadToEndAsync(); $errors = $process.StandardError.ReadToEndAsync()
+        if (-not $process.WaitForExit(900000)) { $process.Kill(); throw 'ERP removal was interrupted and requires confirmation before retrying.' }
+        if ($process.ExitCode -ne 0) { throw 'ERP removal could not finish.' }
     } finally { if ($process) { $process.Dispose() } }
 }

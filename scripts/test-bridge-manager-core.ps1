@@ -70,7 +70,7 @@ Assert (Microsoft.PowerShell.Management\Test-Path -LiteralPath (Join-Path $TestR
 # replaced by in-memory fakes. No real startup registration is changed.
 $sourceRoot = Join-Path $TestRoot 'installer-source'
 [void][IO.Directory]::CreateDirectory($sourceRoot)
-foreach ($name in @('bridge-manager.ps1','bridge-manager-core.ps1','erp-worker.ps1','erp-installation-worker.ps1','install-erp-project.mjs','create-specification-project.ps1','fulfil-project.ps1','native-command.ps1','project-context.ps1','project-credential-worker.ps1','provision-project-credentials.mjs')) {
+foreach ($name in @('bridge-manager.ps1','bridge-manager-core.ps1','erp-worker.ps1','erp-installation-worker.ps1','install-erp-project.mjs','erp-delete-project.ps1','remove-erp-project.mjs','create-specification-project.ps1','fulfil-project.ps1','native-command.ps1','project-context.ps1','project-credential-worker.ps1','provision-project-credentials.mjs')) {
     Copy-Item -LiteralPath (Join-Path (Split-Path -Parent $CorePath) $name) -Destination (Join-Path $sourceRoot $name)
 }
 function Get-FileHash {
@@ -147,4 +147,10 @@ Assert ($script:erpCalls[-1].action -eq 'complete' -and $script:inspectCount -eq
 function Invoke-ErpProjectRunner {param($Project,[switch]$InspectOnly);throw 'synthetic missing installation'}
 Invoke-ErpInstallationWork -Token 'synthetic-not-a-credential'
 Assert ($script:erpCalls[-1].action -eq 'fail') 'A missing native installation became an installed state'
+$script:erpDeleted=@()
+function Invoke-ErpDeletion {param($Deletion);$script:erpDeleted+=,$Deletion}
+$script:erpClaim=[pscustomobject]@{installed=@();job=$null;deletions=@([pscustomobject]@{requestId='synthetic-approved-delete';contextKey=$context})}
+Invoke-ErpInstallationWork -Token 'synthetic-not-a-credential'
+Assert ($script:erpDeleted.Count -eq 1 -and $script:erpDeleted[0].requestId -eq 'synthetic-approved-delete') 'Approved ERP deletion required an AI binding'
+Assert ($script:erpCalls[-1].protocol -eq 2) 'Removal capability was not advertised'
 @{status='passed';checks=$script:checks;realWorkersStarted=$false;credentialsRead=$false}|ConvertTo-Json -Compress

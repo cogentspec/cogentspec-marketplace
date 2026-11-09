@@ -312,6 +312,8 @@ try {
         'skills/cogentspec/scripts/erp-worker.ps1',
         'skills/cogentspec/scripts/erp-installation-worker.ps1',
         'skills/cogentspec/scripts/install-erp-project.mjs',
+        'skills/cogentspec/scripts/remove-erp-project.mjs',
+        'skills/cogentspec/scripts/erp-delete-project.ps1',
         'skills/cogentspec/scripts/start-workspace-beacon.ps1',
         'skills/gptpop/scripts/start-gptpop.ps1',
         'skills/qwenweb/SKILL.md',

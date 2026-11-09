@@ -24,7 +24,7 @@ test('Web v1 pins its complete independent runtime and exactly two consumers',()
 test('versioned common worker helpers remain the reviewed immutable snapshot',()=>{
   // Account-level manager/ERP additions are separately hashed and tested for
   // shared-package parity; the original Web connection snapshot stays frozen.
-  for(const name of readdirSync(join(directory,'runtime')).filter(v=>!['connect-web.ps1','start-web-worker.ps1','watch-web-worker.ps1','bridge-manager.ps1','bridge-manager-core.ps1','erp-worker.ps1','erp-installation-worker.ps1','install-erp-project.mjs'].includes(v))){
+  for(const name of readdirSync(join(directory,'runtime')).filter(v=>!['connect-web.ps1','start-web-worker.ps1','watch-web-worker.ps1','bridge-manager.ps1','bridge-manager-core.ps1','erp-worker.ps1','erp-installation-worker.ps1','install-erp-project.mjs','erp-delete-project.ps1','remove-erp-project.mjs'].includes(v))){
     const original=execFileSync('git',['show',manifest.sourceSnapshot+':plugins/cogentspec/skills/cogentspec/scripts/'+name],{cwd:root,encoding:'utf8',windowsHide:true});
     assert.equal(readFileSync(join(directory,'runtime',name),'utf8').replaceAll('\r\n','\n'),original.replaceAll('\r\n','\n'),name);
   }
