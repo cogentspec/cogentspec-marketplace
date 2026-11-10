@@ -140,7 +140,7 @@ function Stop-VerifiedProjectProcesses([string]$ExactTargetPath, [string]$ExactR
         if ($processId -le 0 -or $processId -eq $PID) { continue }
         $command = Get-DecodedProcessCommand $process
         if ($ErpOnly -and -not (
-            ([string]$process.Name -match '^node(?:\.exe)?$' -and $command -match ([Regex]::Escape((Join-Path $ExactTargetPath 'scripts\odoo-runtime.mjs')) + '(?=["\s]|$)')) -or
+            ([string]$process.Name -match '^node(?:\.exe)?$' -and ($command -match ([Regex]::Escape((Join-Path $ExactTargetPath 'scripts\odoo-runtime.mjs')) + '(?=["\s]|$)') -or $command -match ([Regex]::Escape((Join-Path $ExactTargetPath 'scripts\erpnext-runtime.mjs')) + '(?=["\s]|$)'))) -or
             ($command.IndexOf('generate-project-preview.ps1', [StringComparison]::OrdinalIgnoreCase) -ge 0 -and $command.IndexOf($ExactRequestId, [StringComparison]::OrdinalIgnoreCase) -ge 0)
         )) { continue }
         if (

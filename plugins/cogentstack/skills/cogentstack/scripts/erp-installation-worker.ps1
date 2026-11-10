@@ -1,5 +1,5 @@
 function Invoke-ErpInstallationWork([string]$Token) {
-    $claimed = Invoke-BridgeApi -Method Post -Path '/api/plugin/erp-installations' -Token $Token -Body @{ action = 'claim'; protocol = 2; workDirectory = $script:ErpWorkDirectory }
+    $claimed = Invoke-BridgeApi -Method Post -Path '/api/plugin/erp-installations' -Token $Token -Body @{ action = 'claim'; protocol = 3; workDirectory = $script:ErpWorkDirectory }
     if ($claimed.PSObject.Properties['deletions']) {
         foreach ($deletion in @($claimed.deletions)) {
             # Only server-approved ERP deletions bound to this computer are returned.
@@ -58,7 +58,8 @@ function Invoke-ErpProjectRunner($Project, [switch]$InspectOnly) {
         [void]$process.Start()
         $outTask = $process.StandardOutput.ReadToEndAsync(); $errTask = $process.StandardError.ReadToEndAsync()
         $process.StandardInput.Write(($Project | ConvertTo-Json -Depth 8 -Compress)); $process.StandardInput.Close()
-        if (-not $process.WaitForExit(1200000)) { $process.Kill(); throw 'Installation timed out.' }
+        $installationDeadline = if ($Project.projectType -eq 'erpnext_business_app') { 2400000 } else { 1200000 }
+        if (-not $process.WaitForExit($installationDeadline)) { $process.Kill(); throw 'Installation timed out.' }
         if ($process.ExitCode -ne 0) { throw 'Installation failed.' }
         return ($outTask.Result | ConvertFrom-Json)
     } finally { if ($process) { $process.Dispose() } }

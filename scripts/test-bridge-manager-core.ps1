@@ -152,5 +152,5 @@ function Invoke-ErpDeletion {param($Deletion);$script:erpDeleted+=,$Deletion}
 $script:erpClaim=[pscustomobject]@{installed=@();job=$null;deletions=@([pscustomobject]@{requestId='synthetic-approved-delete';contextKey=$context})}
 Invoke-ErpInstallationWork -Token 'synthetic-not-a-credential'
 Assert ($script:erpDeleted.Count -eq 1 -and $script:erpDeleted[0].requestId -eq 'synthetic-approved-delete') 'Approved ERP deletion required an AI binding'
-Assert ($script:erpCalls[-1].protocol -eq 2) 'Removal capability was not advertised'
+Assert ($script:erpCalls[-1].protocol -eq 3) 'ERPNext installation and removal capability was not advertised'
 @{status='passed';checks=$script:checks;realWorkersStarted=$false;credentialsRead=$false}|ConvertTo-Json -Compress

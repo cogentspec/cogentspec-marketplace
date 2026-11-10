@@ -23,7 +23,8 @@ function matchesProof(p,project) {
     && p.resourcesRemoved===true && typeof p.canonicalRoot==='string' && equalPath(p.canonicalRoot,resolve(project.targetPath));
 }
 export async function removeErpResources(project, { run=docker, previousProof=null }={}) {
-  if (project?.projectType!=='odoo_business_app' || project.packId!=='coge.odoo-business-app.foundation'
+  const engine=project?.projectType==='erpnext_business_app'&&project?.packId==='coge.erpnext-business-app.foundation'?'erpnext':project?.projectType==='odoo_business_app'&&project?.packId==='coge.odoo-business-app.foundation'?'odoo':null;
+  if (!engine
     || !/^[a-f0-9-]{36}$/i.test(project.id||'') || !/^[a-f0-9-]{36}$/i.test(project.contractRuntimeId||'')
     || !isAbsolute(project.targetPath||'') || !isAbsolute(project.workDirectory||'')
     || !/^[a-z0-9][a-z0-9-]*$/.test(project.projectSlug||'')) throw Error('Invalid approved ERP deletion identity.');
@@ -35,7 +36,7 @@ export async function removeErpResources(project, { run=docker, previousProof=nu
   catch(error) { if(error.code!=='ENOENT' || !matchesProof(previousProof,project)) throw error; present=false;root=previousProof.canonicalRoot; }
   if(present){
     const json=async p=>{const path=resolve(root,p);await safeAncestors(path);return JSON.parse(await readFile(path,'utf8'));};
-    const identity=await json('.coge/knowledge-manifest.json'),plan=await json('.coge/odoo-project.json'),binding=await json('.coge/contract-binding.json');
+    const identity=await json('.coge/knowledge-manifest.json'),plan=await json(`.coge/${engine}-project.json`),binding=await json('.coge/contract-binding.json');
     if(identity.project?.requestId!==project.id || identity.project?.type!==project.projectType
       || identity.binding?.packRef!==`${project.packId}@${project.packVersion}` || plan.projectId!==project.id
       || plan.runtimeId!==project.contractRuntimeId || binding.projectType!==project.projectType
@@ -59,13 +60,13 @@ export async function removeErpResources(project, { run=docker, previousProof=nu
   }
   try {
     if(await run(['info','--format','{{.OSType}}'])!=='linux')throw Error('The ERP runtime is unavailable.');
-    const key='coge-odoo-'+sha(project.id).slice(0,20),rootDigest=sha(root),resources=[];
+    const key='coge-'+engine+'-'+sha(project.id).slice(0,20),rootDigest=sha(root),resources=[];
     for(const kind of ['container','volume','network']){
-      const ids=(await run([kind,'ls',...(kind==='container'?['-a']:[]),'-q','--filter','label=com.cogentspec.odoo.project='+project.id])).split(/\s+/).filter(Boolean);
+      const ids=(await run([kind,'ls',...(kind==='container'?['-a']:[]),'-q','--filter',`label=com.cogentspec.${engine}.project=`+project.id])).split(/\s+/).filter(Boolean);
       for(const id of ids){
         const data=JSON.parse(await run([kind,'inspect',id]))[0],labels=data.Labels||data.Config?.Labels||{};
         const name=String(data.Name||'').replace(/^\//,'');
-        if(labels['com.cogentspec.odoo.project']!==project.id || labels['com.cogentspec.odoo.root']!==rootDigest
+        if(labels[`com.cogentspec.${engine}.project`]!==project.id || labels[`com.cogentspec.${engine}.root`]!==rootDigest
           || !(name===key||name.startsWith(key+'-'))) throw Error('A runtime resource has a different project identity. Nothing was removed.');
         resources.push({kind,id:kind==='volume'?name:data.Id,name,data});
       }
@@ -82,12 +83,12 @@ export async function removeErpResources(project, { run=docker, previousProof=nu
     const removed={containers:0,volumes:0,networks:0};
     for(const resource of resources){
       const current=JSON.parse(await run([resource.kind,'inspect',resource.id]))[0],labels=current.Labels||current.Config?.Labels||{};
-      if(labels['com.cogentspec.odoo.project']!==project.id||labels['com.cogentspec.odoo.root']!==rootDigest
+      if(labels[`com.cogentspec.${engine}.project`]!==project.id||labels[`com.cogentspec.${engine}.root`]!==rootDigest
         ||resource.kind==='volume'&&current.CreatedAt!==resource.data.CreatedAt)throw Error('An ERP resource changed during removal.');
       await run([resource.kind,'rm',...(resource.kind==='container'?['-f']:[]),resource.id]);
       removed[resource.kind==='container'?'containers':resource.kind==='volume'?'volumes':'networks']++;
     }
-    for(const kind of ['container','volume','network']) if(await run([kind,'ls',...(kind==='container'?['-a']:[]),'-q','--filter','label=com.cogentspec.odoo.project='+project.id]))throw Error('Some ERP resources remain.');
+    for(const kind of ['container','volume','network']) if(await run([kind,'ls',...(kind==='container'?['-a']:[]),'-q','--filter',`label=com.cogentspec.${engine}.project=`+project.id]))throw Error('Some ERP resources remain.');
     return {protocol:1,projectId:project.id,runtimeId:project.contractRuntimeId,packId:project.packId,packVersion:project.packVersion,
       targetPath:project.targetPath,canonicalRoot:root,resourcesRemoved:true,removed};
   } finally { if(lock){await lock.close();await unlink(lockPath);} }
