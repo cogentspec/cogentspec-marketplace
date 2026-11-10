@@ -21,12 +21,29 @@ test('Web v1 pins its complete independent runtime and exactly two consumers',()
   const dispatch=worker.slice(worker.indexOf('$scriptName = switch'),worker.indexOf('$scriptName = switch')+1100);
   assert.doesNotMatch(dispatch,/'(?:open_chatgpt_popup|set_chatgpt_popup_topmost|set_chatgpt_desktop_topmost|set_claude_desktop_topmost)'/);
 });
-test('versioned common worker helpers remain the reviewed immutable snapshot',()=>{
+test('versioned common worker helpers preserve the snapshot and exact reviewed credential environment patch',()=>{
   // Account-level manager/ERP additions are separately hashed and tested for
   // shared-package parity; the original Web connection snapshot stays frozen.
   for(const name of readdirSync(join(directory,'runtime')).filter(v=>!['connect-web.ps1','start-web-worker.ps1','watch-web-worker.ps1','bridge-manager.ps1','bridge-manager-core.ps1','erp-worker.ps1','erp-installation-worker.ps1','install-erp-project.mjs','erp-delete-project.ps1','remove-erp-project.mjs'].includes(v))){
-    const original=execFileSync('git',['show',manifest.sourceSnapshot+':plugins/cogentspec/skills/cogentspec/scripts/'+name],{cwd:root,encoding:'utf8',windowsHide:true});
-    assert.equal(readFileSync(join(directory,'runtime',name),'utf8').replaceAll('\r\n','\n'),original.replaceAll('\r\n','\n'),name);
+    let original=execFileSync('git',['show',manifest.sourceSnapshot+':plugins/cogentspec/skills/cogentspec/scripts/'+name],{cwd:root,encoding:'utf8',windowsHide:true}).replaceAll('\r\n','\n');
+    if(name==='provision-project-credentials.mjs'){
+      // Only this reviewed environment repair may differ. Every other byte,
+      // including account, manifest, adapter and credential guards, stays frozen.
+      assert.equal(manifest.credentialEnvironmentPatch,'windows-compose-system-paths-v1');
+      const marker='// No passwords in argv, environment, files, logs or output.';
+      const helper=`// Docker discovers its Windows Compose plugin beneath Program Files. Preserve
+// those system paths without passing application secrets to project adapters.
+export function credentialAdapterEnvironment(environment = process.env) {
+  const allowed = new Set(['path','systemroot','temp','tmp','home','userprofile','programfiles','programw6432']);
+  return Object.fromEntries(Object.entries(environment).filter(([key]) => allowed.has(key.toLowerCase())));
+}
+
+`;
+      const prior="env: Object.fromEntries(Object.entries(process.env).filter(([key]) => ['PATH','Path','SystemRoot','SYSTEMROOT','TEMP','TMP','HOME','USERPROFILE'].includes(key))),";
+      assert.equal(original.split(marker).length,2);assert.equal(original.split(prior).length,2);
+      original=original.replace(marker,helper+marker).replace(prior,'env: credentialAdapterEnvironment(),');
+    }
+    assert.equal(readFileSync(join(directory,'runtime',name),'utf8').replaceAll('\r\n','\n'),original,name);
   }
 });
 test('all shipped Web PowerShell scripts parse and a missing request never prompts', {skip:process.platform!=='win32'},()=>{

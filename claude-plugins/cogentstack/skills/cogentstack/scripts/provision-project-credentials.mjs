@@ -4,6 +4,13 @@ import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { createPrivateKey, createPublicKey, createHash } from 'node:crypto';
 
+// Docker discovers its Windows Compose plugin beneath Program Files. Preserve
+// those system paths without passing application secrets to project adapters.
+export function credentialAdapterEnvironment(environment = process.env) {
+  const allowed = new Set(['path','systemroot','temp','tmp','home','userprofile','programfiles','programw6432']);
+  return Object.fromEntries(Object.entries(environment).filter(([key]) => allowed.has(key.toLowerCase())));
+}
+
 // No passwords in argv, environment, files, logs or output. Only the registered local adapter receives stdin.
 export function provisionInitialCredentials(job) {
   try {
@@ -49,7 +56,7 @@ export function provisionInitialCredentials(job) {
     if (lstatSync(adapter).isSymbolicLink() || !same(realpathSync(adapter), adapter)) return 'failed';
     const result = spawnSync(process.execPath, [adapter], {
       cwd: root, windowsHide: true, timeout: 60_000, maxBuffer: 64_000, encoding: 'utf8',
-      env: Object.fromEntries(Object.entries(process.env).filter(([key]) => ['PATH','Path','SystemRoot','SYSTEMROOT','TEMP','TMP','HOME','USERPROFILE'].includes(key))),
+      env: credentialAdapterEnvironment(),
       input: JSON.stringify(integration ? { protocol: job.keyPair ? 3 : 2, operation: 'configure_integration', jobId: job.id, projectId: job.projectId,
         runtimeId: job.runtimeId, entryId: job.entryId, kind: job.kind, integrationId: job.integrationId, environment: 'local', configuration: job.configuration, ...(job.keyPair ? {keyPair:job.keyPair} : {}) }
         : { protocol: 1, operation: 'provision_initial', jobId: job.id, projectId: job.projectId,
