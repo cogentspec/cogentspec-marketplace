@@ -47,7 +47,7 @@ try {
                 try {
                     [void]$process.Start()
                     $output = $process.StandardOutput.ReadToEndAsync(); $errors = $process.StandardError.ReadToEndAsync()
-                    $process.StandardInput.Write(({token=$token} | ConvertTo-Json -Compress)); $process.StandardInput.Close()
+                    $process.StandardInput.Write((@{token=$token} | ConvertTo-Json -Compress)); $process.StandardInput.Close()
                     if (-not $process.WaitForExit(2700000)) { $process.Kill(); throw 'Customer release helper timed out; inspect its recovery journal.' }
                     [void]$output.GetAwaiter().GetResult(); [void]$errors.GetAwaiter().GetResult()
                 } finally { $process.Dispose() }

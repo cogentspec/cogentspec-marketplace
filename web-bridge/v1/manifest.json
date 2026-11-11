@@ -21,7 +21,7 @@
     "runtime/erp-customer-worker.mjs": "70938a113ae83bdf381387fe56aa5c3619fb461f02d7effe09fe718e1ced8bde",
     "runtime/erp-delete-project.ps1": "083d2050da8a15222a4b2befce406f54787a4352841075e5e3f23cab35abe593",
     "runtime/erp-installation-worker.ps1": "6f437ac8474f0e8f8ff32560031274dbcae378701207bd517c3ebfb169e82e16",
-    "runtime/erp-worker.ps1": "e980844731ce6f206bd1819ea0a9670a0cf88effe7c1b875d95a187ddd88aa22",
+    "runtime/erp-worker.ps1": "cdccbc9079cf5f16558df7b898d69f8df118335f9c6fc3b116621b0047d5f574",
     "runtime/fulfil-project.ps1": "7664878db2ef4f683b2f6458f4e25eac8038c34eddde6120b9ad7d1094ffbb7d",
     "runtime/generate-project-preview.ps1": "245f1fb7e7776e371bcc607c70132265c45e79b997e6ff3da100ad0125228278",
     "runtime/inspect-project-git.ps1": "06977654c4e7315b40adf89453c892d031c0de2fac11afaa48abed6a2b3193c4",
