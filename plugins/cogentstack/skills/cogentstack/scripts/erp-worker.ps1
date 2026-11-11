@@ -36,6 +36,21 @@ try {
                 $bytes = [Security.Cryptography.ProtectedData]::Unprotect([Convert]::FromBase64String([string]$credential.token), $null, [Security.Cryptography.DataProtectionScope]::CurrentUser)
                 $token = [Text.Encoding]::UTF8.GetString($bytes)
                 Invoke-ErpInstallationWork -Token $token
+                $node = (Get-Command node.exe -ErrorAction Stop).Source
+                $start = New-Object Diagnostics.ProcessStartInfo
+                $start.FileName = $node
+                $start.Arguments = '"' + (Join-Path $PSScriptRoot 'erp-customer-worker.mjs') + '"'
+                $start.UseShellExecute = $false; $start.CreateNoWindow = $true
+                $start.RedirectStandardInput = $true; $start.RedirectStandardOutput = $true; $start.RedirectStandardError = $true
+                $process = New-Object Diagnostics.Process
+                $process.StartInfo = $start
+                try {
+                    [void]$process.Start()
+                    $output = $process.StandardOutput.ReadToEndAsync(); $errors = $process.StandardError.ReadToEndAsync()
+                    $process.StandardInput.Write(({token=$token} | ConvertTo-Json -Compress)); $process.StandardInput.Close()
+                    if (-not $process.WaitForExit(2700000)) { $process.Kill(); throw 'Customer release helper timed out; inspect its recovery journal.' }
+                    [void]$output.GetAwaiter().GetResult(); [void]$errors.GetAwaiter().GetResult()
+                } finally { $process.Dispose() }
             }
         } catch { } finally { $token=$null; if ($bytes) { [Array]::Clear($bytes,0,$bytes.Length) } }
         Start-Sleep -Seconds 10

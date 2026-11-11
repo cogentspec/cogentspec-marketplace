@@ -70,7 +70,7 @@ Assert (Microsoft.PowerShell.Management\Test-Path -LiteralPath (Join-Path $TestR
 # replaced by in-memory fakes. No real startup registration is changed.
 $sourceRoot = Join-Path $TestRoot 'installer-source'
 [void][IO.Directory]::CreateDirectory($sourceRoot)
-foreach ($name in @('bridge-manager.ps1','bridge-manager-core.ps1','erp-worker.ps1','erp-installation-worker.ps1','install-erp-project.mjs','erp-delete-project.ps1','remove-erp-project.mjs','create-specification-project.ps1','fulfil-project.ps1','native-command.ps1','project-context.ps1','project-credential-worker.ps1','provision-project-credentials.mjs')) {
+foreach ($name in @('bridge-manager.ps1','bridge-manager-core.ps1','erp-worker.ps1','erp-installation-worker.ps1','install-erp-project.mjs','erp-customer-runtime.mjs','erp-customer-worker.mjs','erp-delete-project.ps1','remove-erp-project.mjs','create-specification-project.ps1','fulfil-project.ps1','native-command.ps1','project-context.ps1','project-credential-worker.ps1','provision-project-credentials.mjs')) {
     Copy-Item -LiteralPath (Join-Path (Split-Path -Parent $CorePath) $name) -Destination (Join-Path $sourceRoot $name)
 }
 function Get-FileHash {

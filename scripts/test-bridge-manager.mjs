@@ -8,7 +8,7 @@ const root=resolve(import.meta.dirname,'..');
 const source=path=>readFileSync(join(root,path),'utf8').replaceAll('\r\n','\n');
 const core='plugins/cogentspec/skills/cogentspec/scripts/bridge-manager-core.ps1';
 test('all four provider packages ship identical shared manager code',()=>{
- for(const file of ['bridge-manager.ps1','bridge-manager-core.ps1','erp-worker.ps1','erp-installation-worker.ps1','install-erp-project.mjs','erp-delete-project.ps1','remove-erp-project.mjs'])for(const base of [
+ for(const file of ['bridge-manager.ps1','bridge-manager-core.ps1','erp-worker.ps1','erp-installation-worker.ps1','install-erp-project.mjs','erp-customer-runtime.mjs','erp-customer-worker.mjs','erp-delete-project.ps1','remove-erp-project.mjs'])for(const base of [
   'plugins/cogentstack/skills/cogentstack/scripts','claude-plugins/cogentspec/skills/cogentspec/scripts','claude-plugins/cogentstack/skills/cogentstack/scripts','web-bridge/v1/runtime']){
    assert.equal(source(base+'/'+file),source('plugins/cogentspec/skills/cogentspec/scripts/'+file));
  }

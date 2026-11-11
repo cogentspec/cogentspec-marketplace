@@ -3,6 +3,7 @@ import { readFile, realpath, lstat } from "node:fs/promises";
 import { resolve, isAbsolute } from "node:path";
 import { pathToFileURL, fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
+import {assertCustomerRuntime} from "./erp-customer-runtime.mjs";
 
 export async function installErpProject(project, inspectOnly = false) {
   const engine = project?.projectType === "erpnext_business_app" && project?.packId === "coge.erpnext-business-app.foundation" ? "erpnext"
@@ -22,6 +23,7 @@ export async function installErpProject(project, inspectOnly = false) {
   }
   const runtime = await import(pathToFileURL(resolve(root, runtimeFile)).href);
   const validated = await runtime.validatePlan();
+  const customer = engine === "erpnext" ? await assertCustomerRuntime(project) : null;
   if (!inspectOnly) { try { return await installErpProject(project, true); } catch { /* A stopped, identity-checked project may be restarted below. */ } }
   if (inspectOnly) {
     const inspection = await runtime.inspect(), listener = await json(".coge/runtime/listener.json");
@@ -31,10 +33,9 @@ export async function installErpProject(project, inspectOnly = false) {
     if (health.projectId !== project.id || !health.ready || health.sourceDigest !== validated.sourceDigest) throw Error("The ERP listener is not verified.");
     return { engine, projectId: project.id, targetPath: project.targetPath, runtimeId: project.contractRuntimeId,
       foundationVersion: project.packVersion, modules: inspection.modules, ready: true,
-      sourceDigest: validated.sourceDigest, localUrl: listener.url, processId: listener.pid };
+      sourceDigest: validated.sourceDigest, customerRelease: customer ? {id:customer.releaseId,imageId:customer.imageId} : null, localUrl: listener.url, processId: listener.pid };
   }
-  await runtime.build();
-  await runtime.prepare();
+  if (!customer) { await runtime.build(); await runtime.prepare(); }
   // Keep the native application running independently of this bounded installer.
   const child = spawn(process.execPath, [resolve(root, runtimeFile), "start"], {
     cwd: root, windowsHide: true, detached: true, stdio: ["ignore", "pipe", "ignore"],
@@ -63,7 +64,7 @@ export async function installErpProject(project, inspectOnly = false) {
   process.kill(listener.pid, 0);
   return { engine, projectId: project.id, targetPath: project.targetPath, runtimeId: project.contractRuntimeId,
     foundationVersion: project.packVersion, modules: inspected.modules, ready: true,
-    sourceDigest: validated.sourceDigest, localUrl: running.localUrl, processId: listener.pid };
+    sourceDigest: validated.sourceDigest, customerRelease: customer ? {id:customer.releaseId,imageId:customer.imageId} : null, localUrl: running.localUrl, processId: listener.pid };
 }
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {

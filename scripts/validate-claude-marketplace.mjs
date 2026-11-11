@@ -101,6 +101,7 @@ const requiredScripts = [
   "bridge-manager.ps1",
   "bridge-manager-core.ps1",
   "erp-worker.ps1",
+  "erp-customer-release.ps1",
   "erp-installation-worker.ps1",
   "erp-delete-project.ps1",
   "connect-cogentstack.ps1",
@@ -146,7 +147,7 @@ for (const name of requiredScripts) {
   }
 }
 
-for (const runner of ["remove-erp-project.mjs", "install-erp-project.mjs", "polish-ai-executor.mjs", "polish-ai-result.schema.json", "polish-process-job.cs", "provision-project-credentials.mjs", "project-source-fingerprint.mjs", "project-preview-build.mjs", "project-preview-bundle.mjs", "project-preview-upload.mjs", "project-review-runner.mjs", "project-review-host.mjs", "project-review-runtime-package.json", "project-review-runtime-lock.json"]) {
+for (const runner of ["remove-erp-project.mjs", "install-erp-project.mjs", "erp-customer-runtime.mjs", "erp-customer-worker.mjs", "polish-ai-executor.mjs", "polish-ai-result.schema.json", "polish-process-job.cs", "provision-project-credentials.mjs", "project-source-fingerprint.mjs", "project-preview-build.mjs", "project-preview-bundle.mjs", "project-preview-upload.mjs", "project-review-runner.mjs", "project-review-host.mjs", "project-review-runtime-package.json", "project-review-runtime-lock.json"]) {
   if (normalized(await readFile(join(scriptsRoot, runner), "utf8")) !== normalized(await readFile(join(codexScriptsRoot, runner), "utf8"))) {
     fail(`${runner} must remain identical to the shared Desktop Bridge implementation`);
   }
