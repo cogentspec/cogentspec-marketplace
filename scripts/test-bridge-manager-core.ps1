@@ -70,7 +70,7 @@ Assert (Microsoft.PowerShell.Management\Test-Path -LiteralPath (Join-Path $TestR
 # replaced by in-memory fakes. No real startup registration is changed.
 $sourceRoot = Join-Path $TestRoot 'installer-source'
 [void][IO.Directory]::CreateDirectory($sourceRoot)
-foreach ($name in @('bridge-manager.ps1','bridge-manager-core.ps1','erp-worker.ps1','erp-installation-worker.ps1','install-erp-project.mjs','erp-customer-runtime.mjs','erp-customer-worker.mjs','erp-delete-project.ps1','remove-erp-project.mjs','create-specification-project.ps1','fulfil-project.ps1','native-command.ps1','project-context.ps1','project-credential-worker.ps1','provision-project-credentials.mjs')) {
+foreach ($name in @('bridge-manager.ps1','bridge-manager-core.ps1','erp-worker.ps1','erp-installation-worker.ps1','erp-docker-setup.ps1','install-erp-project.mjs','erp-customer-runtime.mjs','erp-customer-worker.mjs','erp-delete-project.ps1','remove-erp-project.mjs','create-specification-project.ps1','fulfil-project.ps1','native-command.ps1','project-context.ps1','project-credential-worker.ps1','provision-project-credentials.mjs')) {
     Copy-Item -LiteralPath (Join-Path (Split-Path -Parent $CorePath) $name) -Destination (Join-Path $sourceRoot $name)
 }
 function Get-FileHash {
@@ -133,6 +133,7 @@ try { Start-ManagerErpWorker } catch { $rejected=$true }
 Assert ($rejected -and $script:erpStarts -eq 2) 'A changed ERP runtime was started'
 
 . (Join-Path (Split-Path -Parent $CorePath) 'erp-installation-worker.ps1')
+function Get-ErpDockerPrerequisite {return @{status='ready'}}
 $script:ErpWorkDirectory='C:\Synthetic\projects';$script:erpCalls=@();$script:privateSetups=0;$script:inspectCount=0
 $script:erpClaim=@{job=$null;installed=@(@{id='installed-job';claim='claim-a';context=$context;project=@{id='project-a'}})}
 function Invoke-InitialCredentialSetup {param($Token); Assert ($contextQuery -eq ('context='+[Uri]::EscapeDataString($context))) 'Private setup used the wrong ERP context';$script:privateSetups++}
@@ -152,5 +153,14 @@ function Invoke-ErpDeletion {param($Deletion);$script:erpDeleted+=,$Deletion}
 $script:erpClaim=[pscustomobject]@{installed=@();job=$null;deletions=@([pscustomobject]@{requestId='synthetic-approved-delete';contextKey=$context})}
 Invoke-ErpInstallationWork -Token 'synthetic-not-a-credential'
 Assert ($script:erpDeleted.Count -eq 1 -and $script:erpDeleted[0].requestId -eq 'synthetic-approved-delete') 'Approved ERP deletion required an AI binding'
-Assert ($script:erpCalls[-1].protocol -eq 3) 'ERPNext installation and removal capability was not advertised'
+Assert ($script:erpCalls[-1].protocol -eq 4) 'ERPNext installation and removal capability was not advertised'
+$script:dockerStarts=0
+function Start-ErpDockerSetup($Id,$SetupAction) {Assert ($Id -eq 'synthetic-setup' -and $SetupAction -eq 'install') 'Wrong Docker request';$script:dockerStarts++}
+function Read-ErpDockerSetup($Id) {return @{id=$Id;phase='restart_required';reason='restart_required'}}
+$script:erpClaim=[pscustomobject]@{installed=@();job=$null;deletions=@();dockerSetup=@{id='synthetic-setup';action='install'}}
+Invoke-ErpInstallationWork -Token 'synthetic-not-a-credential'
+Assert ($script:dockerStarts -eq 1) 'Explicit Docker setup was not dispatched'
+Invoke-ErpInstallationWork -Token 'synthetic-not-a-credential'
+Assert ($script:erpCalls[-1].docker.phase -eq 'restart_required') 'Restart recovery was not reported'
+
 @{status='passed';checks=$script:checks;realWorkersStarted=$false;credentialsRead=$false}|ConvertTo-Json -Compress

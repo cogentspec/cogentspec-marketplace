@@ -33,10 +33,11 @@ if (process.argv.includes('--initialize-snapshot')) {
 `);
   writeFileSync(new URL('runtime/watch-web-worker.ps1',target),worker);
 }
+const previous=JSON.parse(readFileSync(new URL('manifest.json',target),'utf8'));
 const files = Object.fromEntries(readdirSync(new URL('runtime/',target)).sort().map(file => {
   if (!/^[a-z0-9-]+\.(ps1|mjs)$/.test(file)) throw new Error('Unexpected runtime file: '+file);
   return ['runtime/'+file,createHash('sha256').update(readFileSync(new URL('runtime/'+file,target))).digest('hex')];
 }));
-writeFileSync(new URL('manifest.json',target),JSON.stringify({ protocol:'cogentspec-web-runtime-v1',version:'1.0.0',
+writeFileSync(new URL('manifest.json',target),JSON.stringify({ ...previous, protocol:'cogentspec-web-runtime-v1',version:'1.0.0',
   commands:['$gptweb','$claudeweb'],bridgeCompatibilityVersion:'0.6.175',sourceSnapshot:baseline,files },null,2)+'\n');
 console.log(JSON.stringify({files:Object.keys(files).length,manifestSha256:createHash('sha256').update(readFileSync(new URL('manifest.json',target))).digest('hex')}));

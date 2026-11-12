@@ -311,6 +311,7 @@ try {
         'skills/cogentstack/scripts/bridge-manager-core.ps1',
         'skills/cogentstack/scripts/erp-worker.ps1',
         'skills/cogentstack/scripts/erp-installation-worker.ps1',
+        'skills/cogentstack/scripts/erp-docker-setup.ps1',
         'skills/cogentstack/scripts/install-erp-project.mjs',
         'skills/cogentstack/scripts/erp-customer-runtime.mjs',
         'skills/cogentstack/scripts/erp-customer-worker.mjs',

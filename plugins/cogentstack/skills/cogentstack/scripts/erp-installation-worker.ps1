@@ -1,5 +1,18 @@
+. (Join-Path $PSScriptRoot "erp-docker-setup.ps1")
+$script:LastDockerSetupId=''
 function Invoke-ErpInstallationWork([string]$Token) {
-    $claimed = Invoke-BridgeApi -Method Post -Path '/api/plugin/erp-installations' -Token $Token -Body @{ action = 'claim'; protocol = 3; workDirectory = $script:ErpWorkDirectory }
+    $docker=Get-ErpDockerPrerequisite
+    if($script:LastDockerSetupId){
+        try {
+            $setup=Read-ErpDockerSetup $script:LastDockerSetupId
+            if($setup){$docker.requestId=$setup.id;$docker.phase=$setup.phase;$docker.reason=$setup.reason}
+        } catch {$docker.requestId=$script:LastDockerSetupId;$docker.phase='failed';$docker.reason='finish_setup'}
+    }
+    $claimed = Invoke-BridgeApi -Method Post -Path '/api/plugin/erp-installations' -Token $Token -Body @{ action = 'claim'; protocol = 4; workDirectory = $script:ErpWorkDirectory; docker=$docker }
+    if($claimed.PSObject.Properties['dockerSetup'] -and $claimed.dockerSetup){
+        $script:LastDockerSetupId=[string]$claimed.dockerSetup.id
+        Start-ErpDockerSetup $script:LastDockerSetupId ([string]$claimed.dockerSetup.action)
+    }
     if ($claimed.PSObject.Properties['deletions']) {
         foreach ($deletion in @($claimed.deletions)) {
             # Only server-approved ERP deletions bound to this computer are returned.
