@@ -8,20 +8,21 @@
   "bridgeCompatibilityVersion": "0.6.175",
   "sourceSnapshot": "2fe075a1b10e000a573cc0fbc808d9f3cbc2bf7f",
   "files": {
-    "runtime/bridge-manager-core.ps1": "4abe4245a1061336f24136e278d05734401372c4fbedd0ebd83e2d93241648a0",
-    "runtime/bridge-manager.ps1": "b193a9b42eb4558201abe5f59541ac6b2cd11d575fe2568ffe538bb887d771e0",
+    "runtime/bridge-manager-core.ps1": "a8a1aa8be74e780d21df33b387a916b7d71bf5b08214c9fb7cb237262bb7ea3a",
+    "runtime/bridge-manager.ps1": "f2d5d3b8431f8a66d5b6657be7ef7b5ab9cb4f25e25ba57a15147adaf61ddef0",
     "runtime/connect-cogentstack.ps1": "8199400c7bcb848de420820a7e411a039a9e5364fd9f4d6c32b5a53f2aa064aa",
     "runtime/connect-web.ps1": "9589e4aee2bf9fcfa027be81989feee6217b6e0a7dc910405e169a7fbe3264e6",
     "runtime/create-specification-project.ps1": "33d1043a4f09622b2325a193ffc1d21ad56686606c15c6b966a0031bbf26aa1a",
     "runtime/delete-project.ps1": "ceb4dd562faa2f9232f6941972d3d8a9c6c7bda4cb07db06dd9bb659b8c8f40c",
     "runtime/delete-specification-project.ps1": "b20898d571c7defe2fa3c120d0c6382921651167f5b6db794fb0a335c5f9f400",
     "runtime/ensure-default-project-directory.ps1": "962c8d83ce6ac4ce1e7ad40d77a01c94a66c2306d932f0f577785588fe6251c2",
+    "runtime/erp-computer-setup.ps1": "9552363f767d645c26ea9b313d5e6c4b193c591bb1b2100b5890e22c9542d0fa",
     "runtime/erp-customer-release.ps1": "282f6c2031c43e0fa63a347afb8221d3ce3a70573da8daf0953e26b3658850f7",
     "runtime/erp-customer-runtime.mjs": "95100048df37ad0940a8ac48c2f008878cace18f6d629d46422460c70a9cbfa5",
     "runtime/erp-customer-worker.mjs": "241ad2a3c81b63bb24fc02d71ef35222bafceefef62cc5035f71e4670ae398fc",
     "runtime/erp-delete-project.ps1": "083d2050da8a15222a4b2befce406f54787a4352841075e5e3f23cab35abe593",
-    "runtime/erp-docker-setup.ps1": "5078b658810278e4d0f6180f4e7f73acb5be50f19cebebb5b46f54bb897b01d4",
-    "runtime/erp-installation-worker.ps1": "6ccc058a5837a4220a793644407e267e7bd891046fadc116856c5668c7b37cf1",
+    "runtime/erp-docker-setup.ps1": "7bf50956b3f034fbfecfc5b4eacbdb649ee90413b067169ae9ae080c77d7f9b8",
+    "runtime/erp-installation-worker.ps1": "93c1c08d47f7c91cc9922ac20d4b213411dab65eac77e3e4561acf0a066480df",
     "runtime/erp-worker.ps1": "cdccbc9079cf5f16558df7b898d69f8df118335f9c6fc3b116621b0047d5f574",
     "runtime/fulfil-project.ps1": "7664878db2ef4f683b2f6458f4e25eac8038c34eddde6120b9ad7d1094ffbb7d",
     "runtime/generate-project-preview.ps1": "245f1fb7e7776e371bcc607c70132265c45e79b997e6ff3da100ad0125228278",
@@ -43,5 +44,6 @@
   },
   "credentialEnvironmentPatch": "windows-compose-system-paths-v1",
   "customerLayerProtocol": 2,
-  "dockerPrerequisiteProtocol": 4
+  "dockerPrerequisiteProtocol": 4,
+  "computerPrerequisiteProtocol": 5
 }

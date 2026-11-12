@@ -21,7 +21,7 @@ function Get-ErpDockerPaths {
     $rows
 }
 function Find-ErpDockerCli {
-    $command=Get-Command docker.exe -ErrorAction SilentlyContinue
+    $command=Get-Command docker.exe -CommandType Application -ErrorAction SilentlyContinue|Select-Object -First 1
     if ($command) { return $command.Source }
     foreach($root in @(Get-ErpDockerPaths)) {
         $file=Join-Path $root 'resources\bin\docker.exe'

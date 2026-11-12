@@ -1,4 +1,6 @@
 . (Join-Path $PSScriptRoot "erp-docker-setup.ps1")
+. (Join-Path $PSScriptRoot 'erp-computer-setup.ps1')
+$script:LastComputerSetupId=''
 $script:LastDockerSetupId=''
 function Invoke-ErpInstallationWork([string]$Token) {
     $docker=Get-ErpDockerPrerequisite
@@ -8,7 +10,12 @@ function Invoke-ErpInstallationWork([string]$Token) {
             if($setup){$docker.requestId=$setup.id;$docker.phase=$setup.phase;$docker.reason=$setup.reason}
         } catch {$docker.requestId=$script:LastDockerSetupId;$docker.phase='failed';$docker.reason='finish_setup'}
     }
-    $claimed = Invoke-BridgeApi -Method Post -Path '/api/plugin/erp-installations' -Token $Token -Body @{ action = 'claim'; protocol = 4; workDirectory = $script:ErpWorkDirectory; docker=$docker }
+    $computer=Get-ErpComputerPrerequisite $script:ErpWorkDirectory ($docker.status -eq 'ready')
+    if($script:LastComputerSetupId){
+        try{$setup=Read-ErpComputerSetup $script:LastComputerSetupId;if($setup){$computer.requestId=$setup.id;$computer.phase=$setup.phase;$computer.reason=$setup.reason}}catch{$computer.requestId=$script:LastComputerSetupId;$computer.phase='failed';$computer.reason='finish_setup'}
+    }
+    $claimed = Invoke-BridgeApi -Method Post -Path '/api/plugin/erp-installations' -Token $Token -Body @{ action = 'claim'; protocol = 5; workDirectory = $script:ErpWorkDirectory; docker=$docker;computer=$computer }
+    if($claimed.PSObject.Properties['computerSetup'] -and $claimed.computerSetup){$script:LastComputerSetupId=[string]$claimed.computerSetup.id;Start-ErpComputerSetup $script:LastComputerSetupId}
     if($claimed.PSObject.Properties['dockerSetup'] -and $claimed.dockerSetup){
         $script:LastDockerSetupId=[string]$claimed.dockerSetup.id
         Start-ErpDockerSetup $script:LastDockerSetupId ([string]$claimed.dockerSetup.action)

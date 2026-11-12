@@ -8,7 +8,7 @@ const root=resolve(import.meta.dirname,'..');
 const source=path=>readFileSync(join(root,path),'utf8').replaceAll('\r\n','\n');
 const core='plugins/cogentspec/skills/cogentspec/scripts/bridge-manager-core.ps1';
 test('all four provider packages ship identical shared manager code',()=>{
- for(const file of ['bridge-manager.ps1','bridge-manager-core.ps1','erp-worker.ps1','erp-installation-worker.ps1','erp-docker-setup.ps1','install-erp-project.mjs','erp-customer-runtime.mjs','erp-customer-worker.mjs','erp-delete-project.ps1','remove-erp-project.mjs'])for(const base of [
+ for(const file of ['bridge-manager.ps1','bridge-manager-core.ps1','erp-worker.ps1','erp-installation-worker.ps1','erp-docker-setup.ps1','erp-computer-setup.ps1','install-erp-project.mjs','erp-customer-runtime.mjs','erp-customer-worker.mjs','erp-delete-project.ps1','remove-erp-project.mjs'])for(const base of [
   'plugins/cogentstack/skills/cogentstack/scripts','claude-plugins/cogentspec/skills/cogentspec/scripts','claude-plugins/cogentstack/skills/cogentstack/scripts','web-bridge/v1/runtime']){
    assert.equal(source(base+'/'+file),source('plugins/cogentspec/skills/cogentspec/scripts/'+file));
  }
@@ -26,7 +26,7 @@ test('native model rejects changed runtimes and PID reuse; cancellation fences w
  }
 });
 test('native manager parses under Windows PowerShell and the URI cannot select an executable or context',{skip:process.platform!=='win32'},()=>{
- for(const file of ['bridge-manager-core.ps1','bridge-manager.ps1','erp-worker.ps1','erp-installation-worker.ps1','erp-docker-setup.ps1','erp-delete-project.ps1']){
+ for(const file of ['bridge-manager-core.ps1','bridge-manager.ps1','erp-worker.ps1','erp-installation-worker.ps1','erp-docker-setup.ps1','erp-computer-setup.ps1','erp-delete-project.ps1']){
   const p=join(root,'plugins/cogentspec/skills/cogentspec/scripts',file).replaceAll("'","''");
   const command=`$tokens=$null;$errors=$null;[void][System.Management.Automation.Language.Parser]::ParseFile('${p}',[ref]$tokens,[ref]$errors);if($errors.Count){$errors|ForEach-Object{$_.Message};exit 1}`;
   const result=spawnSync('powershell.exe',['-NoProfile','-NonInteractive','-Command',command],{encoding:'utf8',windowsHide:true,timeout:15000});assert.equal(result.status,0,result.stdout+result.stderr);

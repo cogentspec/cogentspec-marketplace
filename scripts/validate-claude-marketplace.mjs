@@ -104,6 +104,7 @@ const requiredScripts = [
   "erp-customer-release.ps1",
   "erp-installation-worker.ps1",
   "erp-docker-setup.ps1",
+  "erp-computer-setup.ps1",
   "erp-delete-project.ps1",
   "connect-cogentstack.ps1",
   "ensure-default-project-directory.ps1",
