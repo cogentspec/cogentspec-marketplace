@@ -1,10 +1,101 @@
 // Private Bridge worker. The plan comes only from the protected installation queue.
-import { readFile, realpath, lstat } from "node:fs/promises";
+import { readFile, realpath, lstat, mkdir, open, rename, unlink, statfs, writeFile } from "node:fs/promises";
+import {createReadStream} from 'node:fs';
 import { resolve, isAbsolute } from "node:path";
 import { pathToFileURL, fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 import {assertCustomerRuntime,execute} from "./erp-customer-runtime.mjs";
 import {createHash} from 'node:crypto';
+
+// Delivery belongs to the Bridge. Published Foundation source stays immutable.
+export async function prepareErpDistribution(root,descriptor,{run=(program,args,options)=>execute(program,args,options),fetcher=fetch,space=statfs,onProgress=async()=>{},idleMs=120000,maxDurationMs=5400000,attempts=3}={}){
+  const distribution=await import(pathToFileURL(resolve(root,'scripts/distribution.mjs')).href);
+  const lock=distribution.validateDistributionLock(descriptor),cache=resolve(root,'.coge/runtime/distribution');
+  await mkdir(cache,{recursive:true});
+  for(const part of ['.coge','.coge/runtime','.coge/runtime/distribution'])if((await lstat(resolve(root,part))).isSymbolicLink())throw Error('Linked ERP download directories are not supported.');
+  const digest=b=>createHash('sha256').update(b).digest('hex');
+  const inspect=async()=>{
+    const rows=JSON.parse(await run('docker',['image','inspect',...Object.values(lock.tags)]));
+    for(const [role,id]of Object.entries(lock.images)){
+      const image=rows.find(row=>row.RepoTags?.includes(lock.tags[role]));
+      if(!image||![id,lock.configImages[role]].includes(image.Id)||image.Os!=='linux'||image.Architecture!=='amd64'||role==='runtime'&&image.Config?.Labels?.['com.cogentspec.erpnext.source']!==lock.imageSourceDigest)throw Error('The approved ERP image identity is unavailable.');
+    }
+  };
+  try{await inspect();await onProgress({phase:'preparing'});return;}catch{/* Fetch only the exact pinned release. */}
+  const manifestResponse=await fetcher(distribution.distributionUrl(lock.manifestUrl,lock.version),{redirect:'error',headers:{'accept-encoding':'identity'},signal:AbortSignal.timeout(30000)});
+  if(!manifestResponse.ok||manifestResponse.redirected||!manifestResponse.body)throw Error('The approved ERP manifest is unavailable.');
+  const chunks=[];let length=0;
+  for await(const chunk of manifestResponse.body){length+=chunk.length;if(length>65536)throw Error('The ERP manifest is too large.');chunks.push(chunk);}
+  const manifestBytes=Buffer.concat(chunks);if(digest(manifestBytes)!==lock.manifestSha256)throw Error('The ERP manifest failed its integrity check.');
+  const manifest=JSON.parse(manifestBytes);
+  for(const key of ['protocol','engine','version','imageSourceDigest','imageRecipeDigest'])if(manifest[key]!==lock[key])throw Error('The ERP distribution identity changed.');
+  for(const key of ['images','configImages','tags'])if(JSON.stringify(Object.entries(manifest[key]||{}).sort())!==JSON.stringify(Object.entries(lock[key]).sort()))throw Error('The ERP image identity changed.');
+  const bundle=manifest.bundle;
+  if(!/^[a-f0-9]{64}$/.test(bundle?.sha256)||!Number.isSafeInteger(bundle.bytes)||bundle.bytes<1||bundle.bytes>4*1024**3)throw Error('Invalid approved ERP download.');
+  const url=distribution.distributionUrl(bundle.url,lock.version),partial=resolve(cache,bundle.sha256+'.partial'),archive=resolve(cache,bundle.sha256+'.tar.gz');
+  const size=async path=>{try{const info=await lstat(path);if(!info.isFile()||info.isSymbolicLink()||info.nlink!==1)throw Error('Linked ERP archives are not supported.');return info.size;}catch(error){if(error.code==='ENOENT')return 0;throw error;}};
+  const verify=async path=>{const hash=createHash('sha256');for await(const chunk of createReadStream(path))hash.update(chunk);return hash.digest('hex')===bundle.sha256;};
+  let archiveReady=await size(archive)===bundle.bytes&&await verify(archive);
+  if(!archiveReady){
+    if(await size(archive))await unlink(archive);
+    if(await size(partial)>bundle.bytes)await unlink(partial);
+    const available=await space(cache);
+    if(Number(available.bavail)*Number(available.bsize)<bundle.bytes-await size(partial)+256*1024**2)throw Error('Free enough disk space for the remaining ERP download plus 256 MiB.');
+    const deadline=Date.now()+maxDurationMs;
+    for(let attempt=0;attempt<attempts;attempt++){
+      let received=await size(partial),handle,reader,timer,overall;
+      if(received===bundle.bytes){
+        await onProgress({phase:'verifying',receivedBytes:received,totalBytes:bundle.bytes});
+        if(!await verify(partial)){await unlink(partial);throw Error('The ERP download failed its integrity check. Retry to download a fresh verified copy.');}
+        await rename(partial,archive);archiveReady=true;break;
+      }
+      const controller=new AbortController(),arm=()=>{clearTimeout(timer);timer=setTimeout(()=>controller.abort(),idleMs);};
+      try{
+        if(Date.now()>=deadline)throw Error('Download time limit reached.');
+        overall=setTimeout(()=>controller.abort(),Math.max(1,deadline-Date.now()));arm();
+        await onProgress({phase:received?'resuming':'downloading',receivedBytes:received,totalBytes:bundle.bytes});
+        const headers={'accept-encoding':'identity',...(received?{Range:`bytes=${received}-`}:{})};
+        const response=await fetcher(url,{redirect:'error',headers,signal:controller.signal});arm();
+        if(!response.ok||response.redirected||!response.body)throw Error('The approved ERP download is unavailable.');
+        if(response.status===206){
+          const range=/^bytes (\d+)-(\d+)\/(\d+)$/.exec(response.headers.get('content-range')||'');
+          if(!range||Number(range[1])!==received||Number(range[2])!==bundle.bytes-1||Number(range[3])!==bundle.bytes)throw Error('The ERP resume response changed.');
+        }else if(response.status===200){received=0;}else throw Error('Unexpected ERP download response.');
+        const declared=response.headers.get('content-length');if(declared!==null&&Number(declared)!==bundle.bytes-received)throw Error('The ERP download size changed.');
+        // Range-ignoring servers safely restart from zero rather than append.
+        handle=await open(partial,received?'r+':'w',0o600);reader=response.body.getReader();
+        while(true){
+          const {done,value}=await reader.read();if(done)break;arm();
+          if(received+value.length>bundle.bytes)throw Error('The ERP download exceeded its approved size.');
+          let written=0;while(written<value.length){const result=await handle.write(value,written,value.length-written,received+written);if(!result.bytesWritten)throw Error('The ERP download could not be written.');written+=result.bytesWritten;}
+          received+=value.length;
+          await onProgress({phase:'downloading',receivedBytes:received,totalBytes:bundle.bytes});
+        }
+        await handle.sync();await handle.close();handle=null;
+        if(received!==bundle.bytes)throw Error('The ERP download was interrupted.');
+      }catch(error){
+        if(handle){await handle.close();handle=null;}
+        if(attempt+1>=attempts||Date.now()>=deadline)throw Error('The ERP download was interrupted. Downloaded bytes have been kept; Retry installation will resume.');
+        await onProgress({phase:'retrying',receivedBytes:await size(partial),totalBytes:bundle.bytes});
+      }finally{
+        clearTimeout(timer);clearTimeout(overall);controller.abort();
+        if(reader)await reader.cancel().catch(()=>{});if(handle)await handle.close();
+      }
+    }
+    // A completed final attempt still needs digest verification and promotion.
+    if(!archiveReady&&await size(partial)===bundle.bytes){
+      await onProgress({phase:'verifying',receivedBytes:bundle.bytes,totalBytes:bundle.bytes});
+      if(!await verify(partial)){await unlink(partial);throw Error('The ERP download failed its integrity check. Retry to download a fresh verified copy.');}
+      await rename(partial,archive);archiveReady=true;
+    }
+    if(!archiveReady)throw Error('The ERP download is incomplete. Downloaded bytes have been kept.');
+  }
+  await onProgress({phase:'loading',receivedBytes:bundle.bytes,totalBytes:bundle.bytes});
+  await run('docker',['image','load','--input',archive],{timeout:600000});await inspect();
+  // Keep the verified archive through setup, so a Docker/setup failure can retry.
+  await onProgress({phase:'preparing'});
+  return {archive,sha256:bundle.sha256,bytes:bundle.bytes};
+}
 
 export async function stopErpInstallation(project,{run=args=>execute('docker',args)}={}){
   const engine=project?.projectType==='erpnext_business_app'?'erpnext':project?.projectType==='odoo_business_app'?'odoo':null;
@@ -74,7 +165,25 @@ export async function installErpProject(project, inspectOnly = false) {
       foundationVersion: project.packVersion, modules: inspection.modules, ready: true,
       sourceDigest: validated.sourceDigest, customerRelease: customer ? {id:customer.releaseId,imageId:customer.imageId} : null, localUrl: listener.url, processId: listener.pid };
   }
-  if (!customer) { await runtime.build(); await runtime.prepare(); }
+  let delivery;
+  let lastProgress=0,currentProgress;
+  const progressPath=resolve(root,'.coge/runtime/installation-progress.json');
+  const progress=async value=>{
+    currentProgress=value;
+    if(value.phase==='downloading'&&Date.now()-lastProgress<1000)return;
+    lastProgress=Date.now();await mkdir(resolve(root,'.coge/runtime'),{recursive:true});
+    const target=progressPath+'.'+process.pid+'.tmp';
+    await writeFile(target,JSON.stringify({...value,projectId:project.id,updatedAt:new Date().toISOString()}),{mode:0o600});await rename(target,progressPath);
+  };
+  if (!customer) {
+    await progress({phase:'checking'});
+    if(validated.distribution){
+      try{delivery=await prepareErpDistribution(root,validated.distribution,{onProgress:progress});}
+      catch(error){if(['downloading','resuming','retrying'].includes(currentProgress?.phase))await progress({...currentProgress,phase:'paused'});throw error;}
+    }
+    await progress({phase:'preparing'});await runtime.build();await runtime.prepare();
+  }
+  await progress({phase:'starting'});
   // Keep the native application running independently of this bounded installer.
   const child = spawn(process.execPath, [resolve(root, runtimeFile), "start"], {
     cwd: root, windowsHide: true, detached: true, stdio: ["ignore", "pipe", "ignore"],
@@ -101,6 +210,7 @@ export async function installErpProject(project, inspectOnly = false) {
   const listener = await json(".coge/runtime/listener.json");
   if (listener.url !== running.localUrl || listener.projectId !== project.id || !Number.isInteger(listener.pid)) throw Error("The ERP listener ownership could not be verified.");
   process.kill(listener.pid, 0);
+  if(delivery?.archive){try{await unlink(delivery.archive);}catch{/* A retained verified archive is safe to reuse. */}}
   return { engine, projectId: project.id, targetPath: project.targetPath, runtimeId: project.contractRuntimeId,
     foundationVersion: project.packVersion, modules: inspected.modules, ready: true,
     sourceDigest: validated.sourceDigest, customerRelease: customer ? {id:customer.releaseId,imageId:customer.imageId} : null, localUrl: running.localUrl, processId: listener.pid };

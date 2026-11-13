@@ -76,7 +76,8 @@ function Invoke-ErpInstallationWork([string]$Token) {
 
 function Assert-ErpInstallationActive($Job,[string]$Token){
     if(-not $Job){return}
-    $status=Invoke-BridgeApi -Method Post -Path '/api/plugin/erp-installations' -Token $Token -Body @{action='status';id=$Job.id;claim=$Job.claim}
+    $progress=if($Job.PSObject.Properties['progress']){$Job.progress}else{$null}
+    $status=Invoke-BridgeApi -Method Post -Path '/api/plugin/erp-installations' -Token $Token -Body @{action='status';id=$Job.id;claim=$Job.claim;progress=$progress}
     if($status.cancelRequested -or $status.state -ne 'installing'){throw 'ERP installation cancelled.'}
 }
 function New-ErpInstallationProcessJob($Process){
@@ -103,7 +104,16 @@ public sealed class CogentErpInstallationProcessJob : IDisposable {
     }
     return [CogentErpInstallationProcessJob]::new($Process.Handle)
 }
-function Invoke-ErpControlledProcess($Start,[string]$InputText,$Job,[string]$Token,[int]$Deadline=2400000){
+function Read-ErpInstallationProgress($Job,[string]$Path,$Started){
+    if(-not $Job -or -not $Path){return}
+    try{
+        $file=Get-Item -LiteralPath $Path -ErrorAction Stop
+        if($file.Length -gt 4096 -or ($file.Attributes -band [IO.FileAttributes]::ReparsePoint)){return}
+        $sample=Get-Content -Raw -LiteralPath $Path | ConvertFrom-Json
+        if($sample.projectId -eq $Job.project.id -and ([DateTime]$sample.updatedAt).ToUniversalTime() -ge $Started.ToUniversalTime()){$Job|Add-Member -NotePropertyName progress -NotePropertyValue $sample -Force}
+    }catch{}
+}
+function Invoke-ErpControlledProcess($Start,[string]$InputText,$Job,[string]$Token,[int]$Deadline=2400000,[string]$ProgressPath=''){
     $process=$null;$guard=$null
     try{
         Assert-ErpInstallationActive $Job $Token
@@ -115,8 +125,9 @@ function Invoke-ErpControlledProcess($Start,[string]$InputText,$Job,[string]$Tok
         $timer=[Diagnostics.Stopwatch]::StartNew();$lastPoll=0
         while(-not $process.WaitForExit(1000)){
             if($timer.ElapsedMilliseconds -ge $Deadline){throw 'Installation timed out.'}
-            if($Job -and $timer.ElapsedMilliseconds-$lastPoll -ge 5000){Assert-ErpInstallationActive $Job $Token;$lastPoll=$timer.ElapsedMilliseconds}
+            if($Job -and $timer.ElapsedMilliseconds-$lastPoll -ge 5000){Read-ErpInstallationProgress $Job $ProgressPath $process.StartTime;Assert-ErpInstallationActive $Job $Token;$lastPoll=$timer.ElapsedMilliseconds}
         }
+        Read-ErpInstallationProgress $Job $ProgressPath $process.StartTime
         Assert-ErpInstallationActive $Job $Token
         if($process.ExitCode -ne 0){throw 'Installation failed.'}
         $output=$outTask.GetAwaiter().GetResult();[void]$errTask.GetAwaiter().GetResult()
@@ -149,9 +160,10 @@ function Invoke-ErpProjectRunner($Project, [switch]$InspectOnly,[switch]$StopOnl
         if ($StopOnly) { $start.Arguments += ' --stop' }
         $start.UseShellExecute = $false; $start.CreateNoWindow = $true
         $start.RedirectStandardInput = $true; $start.RedirectStandardOutput = $true; $start.RedirectStandardError = $true
-        $installationDeadline = if ($Project.projectType -eq 'erpnext_business_app') { 2400000 } else { 1200000 }
+        $installationDeadline = if ($Project.projectType -eq 'erpnext_business_app') { 7200000 } else { 1200000 }
         if($StopOnly){$installationDeadline=120000}
-        $output=Invoke-ErpControlledProcess $start ($Project|ConvertTo-Json -Depth 8 -Compress) $InstallationJob $Token $installationDeadline
+        $progressPath=if($InstallationJob){Join-Path $Project.targetPath '.coge\runtime\installation-progress.json'}else{''}
+        $output=Invoke-ErpControlledProcess $start ($Project|ConvertTo-Json -Depth 8 -Compress) $InstallationJob $Token $installationDeadline $progressPath
         return ($output|ConvertFrom-Json)
 }
 
