@@ -106,12 +106,19 @@ public sealed class CogentErpInstallationProcessJob : IDisposable {
 }
 function Read-ErpInstallationProgress($Job,[string]$Path,$Started){
     if(-not $Job -or -not $Path){return}
+    $stream=$null;$reader=$null
     try{
         $file=Get-Item -LiteralPath $Path -ErrorAction Stop
         if($file.Length -gt 4096 -or ($file.Attributes -band [IO.FileAttributes]::ReparsePoint)){return}
-        $sample=Get-Content -Raw -LiteralPath $Path | ConvertFrom-Json
+        # The writer atomically replaces this file. Permit that replacement
+        # while reading the previous complete sample on Windows.
+        $sharing=[IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete
+        $stream=[IO.File]::Open($Path,[IO.FileMode]::Open,[IO.FileAccess]::Read,$sharing)
+        if($stream.Length -gt 4096){return}
+        $reader=[IO.StreamReader]::new($stream,[Text.Encoding]::UTF8)
+        $sample=$reader.ReadToEnd() | ConvertFrom-Json
         if($sample.projectId -eq $Job.project.id -and ([DateTime]$sample.updatedAt).ToUniversalTime() -ge $Started.ToUniversalTime()){$Job|Add-Member -NotePropertyName progress -NotePropertyValue $sample -Force}
-    }catch{}
+    }catch{}finally{if($reader){$reader.Dispose()}elseif($stream){$stream.Dispose()}}
 }
 function Invoke-ErpControlledProcess($Start,[string]$InputText,$Job,[string]$Token,[int]$Deadline=2400000,[string]$ProgressPath=''){
     $process=$null;$guard=$null

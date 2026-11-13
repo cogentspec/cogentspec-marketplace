@@ -6,9 +6,33 @@ import { pathToFileURL, fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 import {assertCustomerRuntime,execute} from "./erp-customer-runtime.mjs";
 import {createHash} from 'node:crypto';
+import {setTimeout as delay} from 'node:timers/promises';
+
+// Progress is advisory. A reader or virus scanner may briefly hold the old
+// Windows file without delete sharing; never truncate the last valid sample.
+export async function writeErpInstallationProgress(path,value){
+  const temporary=path+'.'+process.pid+'.tmp';
+  try{
+    await writeFile(temporary,JSON.stringify(value),{mode:0o600});
+    for(let attempt=0;;attempt++){
+      try{await rename(temporary,path);return;}
+      catch(error){
+        if(!['EPERM','EACCES','EBUSY'].includes(error.code)||attempt>=5)throw error;
+        await delay(20*2**attempt);
+      }
+    }
+  }finally{await unlink(temporary).catch(()=>{});}
+}
+async function recordErpInstallerDiagnostic(root,stage,error,details={}){
+  const code=value=>typeof value==='string'&&/^[A-Za-z0-9_ -]{1,64}$/.test(value)?value:undefined;
+  // Record codes, not exception messages, URLs, credentials or machine paths.
+  const value={stage,...details,error:{name:code(error?.name),code:code(error?.code),syscall:code(error?.syscall),causeCode:code(error?.cause?.code)},updatedAt:new Date().toISOString()};
+  await writeFile(resolve(root,'.coge/runtime/installation-diagnostic.json'),JSON.stringify(value),{mode:0o600}).catch(()=>{});
+}
 
 // Delivery belongs to the Bridge. Published Foundation source stays immutable.
 export async function prepareErpDistribution(root,descriptor,{run=(program,args,options)=>execute(program,args,options),fetcher=fetch,space=statfs,onProgress=async()=>{},idleMs=120000,maxDurationMs=5400000,attempts=3}={}){
+  const report=async value=>{try{await onProgress(value);}catch(error){await recordErpInstallerDiagnostic(root,'progress',error);}};
   const distribution=await import(pathToFileURL(resolve(root,'scripts/distribution.mjs')).href);
   const lock=distribution.validateDistributionLock(descriptor),cache=resolve(root,'.coge/runtime/distribution');
   await mkdir(cache,{recursive:true});
@@ -21,7 +45,7 @@ export async function prepareErpDistribution(root,descriptor,{run=(program,args,
       if(!image||![id,lock.configImages[role]].includes(image.Id)||image.Os!=='linux'||image.Architecture!=='amd64'||role==='runtime'&&image.Config?.Labels?.['com.cogentspec.erpnext.source']!==lock.imageSourceDigest)throw Error('The approved ERP image identity is unavailable.');
     }
   };
-  try{await inspect();await onProgress({phase:'preparing'});return;}catch{/* Fetch only the exact pinned release. */}
+  try{await inspect();await report({phase:'preparing'});return;}catch{/* Fetch only the exact pinned release. */}
   const manifestResponse=await fetcher(distribution.distributionUrl(lock.manifestUrl,lock.version),{redirect:'error',headers:{'accept-encoding':'identity'},signal:AbortSignal.timeout(30000)});
   if(!manifestResponse.ok||manifestResponse.redirected||!manifestResponse.body)throw Error('The approved ERP manifest is unavailable.');
   const chunks=[];let length=0;
@@ -45,7 +69,7 @@ export async function prepareErpDistribution(root,descriptor,{run=(program,args,
     for(let attempt=0;attempt<attempts;attempt++){
       let received=await size(partial),handle,reader,timer,overall;
       if(received===bundle.bytes){
-        await onProgress({phase:'verifying',receivedBytes:received,totalBytes:bundle.bytes});
+        await report({phase:'verifying',receivedBytes:received,totalBytes:bundle.bytes});
         if(!await verify(partial)){await unlink(partial);throw Error('The ERP download failed its integrity check. Retry to download a fresh verified copy.');}
         await rename(partial,archive);archiveReady=true;break;
       }
@@ -53,7 +77,7 @@ export async function prepareErpDistribution(root,descriptor,{run=(program,args,
       try{
         if(Date.now()>=deadline)throw Error('Download time limit reached.');
         overall=setTimeout(()=>controller.abort(),Math.max(1,deadline-Date.now()));arm();
-        await onProgress({phase:received?'resuming':'downloading',receivedBytes:received,totalBytes:bundle.bytes});
+        await report({phase:received?'resuming':'downloading',receivedBytes:received,totalBytes:bundle.bytes});
         const headers={'accept-encoding':'identity',...(received?{Range:`bytes=${received}-`}:{})};
         const response=await fetcher(url,{redirect:'error',headers,signal:controller.signal});arm();
         if(!response.ok||response.redirected||!response.body)throw Error('The approved ERP download is unavailable.');
@@ -69,14 +93,15 @@ export async function prepareErpDistribution(root,descriptor,{run=(program,args,
           if(received+value.length>bundle.bytes)throw Error('The ERP download exceeded its approved size.');
           let written=0;while(written<value.length){const result=await handle.write(value,written,value.length-written,received+written);if(!result.bytesWritten)throw Error('The ERP download could not be written.');written+=result.bytesWritten;}
           received+=value.length;
-          await onProgress({phase:'downloading',receivedBytes:received,totalBytes:bundle.bytes});
+          await report({phase:'downloading',receivedBytes:received,totalBytes:bundle.bytes});
         }
         await handle.sync();await handle.close();handle=null;
         if(received!==bundle.bytes)throw Error('The ERP download was interrupted.');
       }catch(error){
         if(handle){await handle.close();handle=null;}
+        await recordErpInstallerDiagnostic(root,'download',error,{attempt:attempt+1,receivedBytes:received,totalBytes:bundle.bytes});
         if(attempt+1>=attempts||Date.now()>=deadline)throw Error('The ERP download was interrupted. Downloaded bytes have been kept; Retry installation will resume.');
-        await onProgress({phase:'retrying',receivedBytes:await size(partial),totalBytes:bundle.bytes});
+        await report({phase:'retrying',receivedBytes:await size(partial),totalBytes:bundle.bytes});
       }finally{
         clearTimeout(timer);clearTimeout(overall);controller.abort();
         if(reader)await reader.cancel().catch(()=>{});if(handle)await handle.close();
@@ -84,16 +109,16 @@ export async function prepareErpDistribution(root,descriptor,{run=(program,args,
     }
     // A completed final attempt still needs digest verification and promotion.
     if(!archiveReady&&await size(partial)===bundle.bytes){
-      await onProgress({phase:'verifying',receivedBytes:bundle.bytes,totalBytes:bundle.bytes});
+      await report({phase:'verifying',receivedBytes:bundle.bytes,totalBytes:bundle.bytes});
       if(!await verify(partial)){await unlink(partial);throw Error('The ERP download failed its integrity check. Retry to download a fresh verified copy.');}
       await rename(partial,archive);archiveReady=true;
     }
     if(!archiveReady)throw Error('The ERP download is incomplete. Downloaded bytes have been kept.');
   }
-  await onProgress({phase:'loading',receivedBytes:bundle.bytes,totalBytes:bundle.bytes});
+  await report({phase:'loading',receivedBytes:bundle.bytes,totalBytes:bundle.bytes});
   await run('docker',['image','load','--input',archive],{timeout:600000});await inspect();
   // Keep the verified archive through setup, so a Docker/setup failure can retry.
-  await onProgress({phase:'preparing'});
+  await report({phase:'preparing'});
   return {archive,sha256:bundle.sha256,bytes:bundle.bytes};
 }
 
@@ -172,8 +197,8 @@ export async function installErpProject(project, inspectOnly = false) {
     currentProgress=value;
     if(value.phase==='downloading'&&Date.now()-lastProgress<1000)return;
     lastProgress=Date.now();await mkdir(resolve(root,'.coge/runtime'),{recursive:true});
-    const target=progressPath+'.'+process.pid+'.tmp';
-    await writeFile(target,JSON.stringify({...value,projectId:project.id,updatedAt:new Date().toISOString()}),{mode:0o600});await rename(target,progressPath);
+    try{await writeErpInstallationProgress(progressPath,{...value,projectId:project.id,updatedAt:new Date().toISOString()});}
+    catch(error){await recordErpInstallerDiagnostic(root,'progress',error);}
   };
   if (!customer) {
     await progress({phase:'checking'});
