@@ -3,7 +3,46 @@ import { readFile, realpath, lstat } from "node:fs/promises";
 import { resolve, isAbsolute } from "node:path";
 import { pathToFileURL, fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
-import {assertCustomerRuntime} from "./erp-customer-runtime.mjs";
+import {assertCustomerRuntime,execute} from "./erp-customer-runtime.mjs";
+import {createHash} from 'node:crypto';
+
+export async function stopErpInstallation(project,{run=args=>execute('docker',args)}={}){
+  const engine=project?.projectType==='erpnext_business_app'?'erpnext':project?.projectType==='odoo_business_app'?'odoo':null;
+  if(!engine||project.packId!==`coge.${engine}-business-app.foundation`||!/^[a-f0-9-]{36}$/.test(project.id||'')||!isAbsolute(project.targetPath||''))throw Error('Invalid installation stop identity.');
+  const ids=(await run(['container','ls','-a','-q','--no-trunc','--filter',`label=com.cogentspec.${engine}.project=`+project.id])).split(/\s+/).filter(Boolean);
+  const stopped=()=>({stopped:true,projectId:project.id,runtimeId:project.contractRuntimeId,targetPath:project.targetPath,containersStopped:ids.length,dataKept:true});
+  let root,identity,plan;
+  try{
+    root=await realpath(project.targetPath);if(root.toLowerCase()!==resolve(project.targetPath).toLowerCase())throw Error('Linked ERP folders are not supported.');
+    for(const path of ['.coge','.coge/knowledge-manifest.json',`.coge/${engine}-project.json`])if((await lstat(resolve(root,path))).isSymbolicLink())throw Error('Linked installation metadata is not supported.');
+    identity=JSON.parse(await readFile(resolve(root,'.coge/knowledge-manifest.json')));plan=JSON.parse(await readFile(resolve(root,`.coge/${engine}-project.json`)));
+  }catch(error){
+    if(error.code!=='ENOENT'||ids.length)throw error;
+    try{await lstat(resolve(project.targetPath,'.coge/runtime/listener.json'));throw Error('An incomplete installation still has a listener.');}catch(listenerError){if(listenerError.code!=='ENOENT')throw listenerError;}
+    return stopped();
+  }
+  if(identity.project?.requestId!==project.id||identity.binding?.packRef!==`${project.packId}@${project.packVersion}`||plan.projectId!==project.id||plan.runtimeId!==project.contractRuntimeId)throw Error('The stopped installation identity changed.');
+  const sha=s=>createHash('sha256').update(s).digest('hex'),key=`coge-${engine}-`+sha(project.id).slice(0,20),rootDigest=sha(root);
+  const verify=c=>{const labels=c.Config?.Labels||{},name=String(c.Name||'').replace(/^\//,'');if(labels[`com.cogentspec.${engine}.project`]!==project.id||labels[`com.cogentspec.${engine}.root`]!==rootDigest||!(name===key||name.startsWith(key+'-')))throw Error('An installation container belongs to another folder.');};
+  if(ids.length){
+    for(const container of JSON.parse(await run(['container','inspect',...ids])))verify(container);
+    await run(['container','stop','--time','15',...ids]);
+    for(const container of JSON.parse(await run(['container','inspect',...ids]))){verify(container);if(container.State?.Running)throw Error('An installation container is still running.');}
+  }
+  let listener;try{listener=JSON.parse(await readFile(resolve(root,'.coge/runtime/listener.json')));}catch(error){if(error.code!=='ENOENT')throw error;}
+  if(listener){
+    if(listener.projectId!==project.id||!Number.isInteger(listener.pid)||listener.pid<=0||listener.pid===process.pid)throw Error('The installation listener cannot be safely stopped.');
+    const runtimeFile=resolve(root,`scripts/${engine}-runtime.mjs`);
+    if(process.platform==='win32'){
+      const script=`$ErrorActionPreference='Stop';$v=[Console]::In.ReadToEnd()|ConvertFrom-Json;$p=Get-CimInstance Win32_Process -Filter ("ProcessId="+[int]$v.pid);if($p){if($p.Name -notmatch '^node(?:\\.exe)?$' -or $p.CommandLine -notmatch ('(?:^|["\\s])'+[Regex]::Escape([string]$v.runtimeFile)+'(?=["\\s]|$)')){throw 'Listener identity changed'};Stop-Process -Id $p.ProcessId -Force}`;
+      await execute('powershell.exe',['-NoProfile','-NonInteractive','-Command',script],{input:JSON.stringify({pid:listener.pid,runtimeFile})});
+    }else{
+      let command;try{command=(await readFile(`/proc/${listener.pid}/cmdline`,'utf8')).split('\0');}catch(error){if(error.code!=='ENOENT')throw error;}
+      if(command){if(!command.includes(runtimeFile))throw Error('Listener identity changed');try{process.kill(listener.pid);}catch(error){if(error.code!=='ESRCH')throw error;}}
+    }
+  }
+  return stopped();
+}
 
 export async function installErpProject(project, inspectOnly = false) {
   const engine = project?.projectType === "erpnext_business_app" && project?.packId === "coge.erpnext-business-app.foundation" ? "erpnext"
@@ -69,6 +108,6 @@ export async function installErpProject(project, inspectOnly = false) {
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
     let input = ""; for await (const chunk of process.stdin) { input += chunk; if (input.length > 8192) throw Error("Invalid plan."); }
-    console.log(JSON.stringify(await installErpProject(JSON.parse(input), process.argv.includes("--inspect"))));
+    console.log(JSON.stringify(process.argv.includes('--stop')?await stopErpInstallation(JSON.parse(input)):await installErpProject(JSON.parse(input), process.argv.includes("--inspect"))));
   } catch { console.error("The ERP installation could not be verified. Existing project data was kept."); process.exitCode = 1; }
 }
