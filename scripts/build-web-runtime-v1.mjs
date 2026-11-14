@@ -36,7 +36,12 @@ if (process.argv.includes('--initialize-snapshot')) {
 const previous=JSON.parse(readFileSync(new URL('manifest.json',target),'utf8'));
 const files = Object.fromEntries(readdirSync(new URL('runtime/',target)).sort().map(file => {
   if (!/^[a-z0-9-]+\.(ps1|mjs)$/.test(file)) throw new Error('Unexpected runtime file: '+file);
-  return ['runtime/'+file,createHash('sha256').update(readFileSync(new URL('runtime/'+file,target))).digest('hex')];
+  // These files are distributed from Git with eol=lf. Hash the exact bytes
+  // Git publishes, even when a Windows copy operation introduced CRLF.
+  const path=new URL('runtime/'+file,target);
+  const bytes=Buffer.from(readFileSync(path).toString('utf8').replaceAll('\r\n','\n'),'utf8');
+  writeFileSync(path,bytes);
+  return ['runtime/'+file,createHash('sha256').update(bytes).digest('hex')];
 }));
 writeFileSync(new URL('manifest.json',target),JSON.stringify({ ...previous, protocol:'cogentspec-web-runtime-v1',version:'1.0.0',
   commands:['$gptweb','$claudeweb'],bridgeCompatibilityVersion:'0.6.175',sourceSnapshot:baseline,files },null,2)+'\n');
