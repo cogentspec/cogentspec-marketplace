@@ -1,7 +1,7 @@
 // Protected ERP removal. Read identity data, never execute customer project code.
-import { readFile, writeFile, realpath, lstat, open, unlink } from 'node:fs/promises';
+import { readFile, writeFile, realpath, lstat, open, unlink, statfs } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
-import { resolve, dirname, basename, isAbsolute } from 'node:path';
+import { resolve, dirname, basename, isAbsolute, parse } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -98,7 +98,61 @@ async function removeImages(ids,run,project,engine) {
   }
   return result;
 }
-export async function removeErpResources(project, { run=docker, previousProof=null }={}) {
+// Anonymous volumes are identified from approved containers, not a global prune.
+// Keep their creation identity before removing containers so interrupted retries
+// can finish without treating arbitrary unreferenced Docker data as disposable.
+const anonymousName=name=>/^[a-f0-9]{64}$/.test(name||'');
+async function anonymousVolumes({run,project,root,present,resources}) {
+  const path=resolve(root,'.coge/erp-removal-volumes.json'),entries=new Map();
+  if(present){
+    await safeAncestors(path);
+    let prior;try{prior=JSON.parse(await readFile(path,'utf8'));}catch(error){if(error.code!=='ENOENT')throw error;}
+    if(prior){
+      if(prior.projectId!==project.id||prior.runtimeId!==project.contractRuntimeId||prior.rootDigest!==sha(root)||!Array.isArray(prior.volumes)||prior.volumes.length>1000)throw Error('The ERP volume cleanup identity changed.');
+      for(const v of prior.volumes){if(!anonymousName(v.name)||typeof v.createdAt!=='string'||!v.createdAt)throw Error('The ERP volume cleanup receipt is invalid.');entries.set(v.name,v);}
+    }
+  }
+  for(const {data} of resources.filter(r=>r.kind==='container')){
+    for(const mount of data.Mounts||[]){
+      if(mount.Type!=='volume'||!anonymousName(mount.Name))continue;
+      // Explicit named mounts remain outside this automatic-volume cleanup.
+      if((data.HostConfig?.Mounts||[]).some(m=>m.Source===mount.Name)||(data.HostConfig?.Binds||[]).some(b=>b.startsWith(mount.Name+':')))continue;
+      const volume=JSON.parse(await run(['volume','inspect',mount.Name]))[0];
+      if(!Object.hasOwn(volume.Labels||{},'com.docker.volume.anonymous'))continue;
+      if(volume.Name!==mount.Name||typeof volume.CreatedAt!=='string'||!volume.CreatedAt)throw Error('The ERP anonymous volume identity is invalid.');
+      const prior=entries.get(mount.Name);if(prior&&prior.createdAt!==volume.CreatedAt)throw Error('An ERP anonymous volume changed during removal.');
+      entries.set(mount.Name,{name:mount.Name,createdAt:volume.CreatedAt});
+    }
+  }
+  // Validate retry identities before any container or named volume is removed.
+  for(const entry of entries.values())await checkedAnonymousVolume(entry,run);
+  if(present)await writeFile(path,JSON.stringify({projectId:project.id,runtimeId:project.contractRuntimeId,rootDigest:sha(root),volumes:[...entries.values()]}),{mode:0o600});
+  return [...entries.values()];
+}
+async function checkedAnonymousVolume(entry,run){
+  const exists=await run(['volume','ls','-q','--filter','name=^'+entry.name+'$']);if(!exists)return false;
+  const current=JSON.parse(await run(['volume','inspect',entry.name]))[0];
+  if(current.Name!==entry.name||current.CreatedAt!==entry.createdAt||!Object.hasOwn(current.Labels||{},'com.docker.volume.anonymous'))throw Error('An ERP anonymous volume changed during removal.');
+  return true;
+}
+async function removeAnonymousVolumes(entries,run){
+  let removed=0;
+  for(const entry of entries){
+    if(!await checkedAnonymousVolume(entry,run))continue;
+    const containers=words(await run(['container','ls','-a','-q']));
+    for(let at=0;at<containers.length;at+=100)if(JSON.parse(await run(['container','inspect',...containers.slice(at,at+100)])).some(c=>(c.Mounts||[]).some(m=>m.Type==='volume'&&m.Name===entry.name)))throw Error('An ERP anonymous volume is shared with another container.');
+    await run(['volume','rm',entry.name]);
+    if(await run(['volume','ls','-q','--filter','name=^'+entry.name+'$']))throw Error('An ERP anonymous volume remains. Retry removal.');
+    removed++;
+  }
+  return removed;
+}
+async function hostFreeSpace(root){
+  const roots=[...new Set([parse(root).root,...(process.platform==='win32'&&process.env.LOCALAPPDATA?[parse(process.env.LOCALAPPDATA).root]:[])])];
+  const drives=[];for(const drive of roots){try{const v=await statfs(drive);drives.push({drive,availableBytes:Number(v.bavail)*Number(v.bsize)});}catch{drives.push({drive,availableBytes:null});}}
+  return {measuredAt:new Date().toISOString(),drives};
+}
+export async function removeErpResources(project, { run=docker, previousProof=null, measureSpace=hostFreeSpace }={}) {
   const engine=project?.projectType==='erpnext_business_app'&&project?.packId==='coge.erpnext-business-app.foundation'?'erpnext':project?.projectType==='odoo_business_app'&&project?.packId==='coge.odoo-business-app.foundation'?'odoo':null;
   if (!engine
     || !/^[a-f0-9-]{36}$/i.test(project.id||'') || !/^[a-f0-9-]{36}$/i.test(project.contractRuntimeId||'')
@@ -147,13 +201,16 @@ export async function removeErpResources(project, { run=docker, previousProof=nu
         resources.push({kind,id:kind==='volume'?name:data.Id,name,data});
       }
     }
+    const storageBefore=await measureSpace(root);
+    const anonymous=await anonymousVolumes({run,project,root,present,resources});
+    const anonymousNames=new Set(anonymous.map(v=>v.name));
     // Refuse shared volumes/networks before removing any resource.
     const all=(await run(['container','ls','-a','-q'])).split(/\s+/).filter(Boolean);
     const ours=new Set(resources.filter(r=>r.kind==='container').map(r=>r.id));
     for(let i=0;i<all.length;i+=100){
       for(const data of JSON.parse(await run(['container','inspect',...all.slice(i,i+100)]))){
         if(ours.has(data.Id))continue;
-        if(resources.some(r=>r.kind==='volume'&&(data.Mounts||[]).some(m=>m.Name===r.name)
+        if((data.Mounts||[]).some(m=>m.Type==='volume'&&anonymousNames.has(m.Name))||resources.some(r=>r.kind==='volume'&&(data.Mounts||[]).some(m=>m.Name===r.name)
           ||r.kind==='network'&&Object.values(data.NetworkSettings?.Networks||{}).some(n=>n.NetworkID===r.id))) throw Error('An ERP resource is shared with another container. Nothing was removed.');
       }
     }
@@ -167,9 +224,12 @@ export async function removeErpResources(project, { run=docker, previousProof=nu
       removed[resource.kind==='container'?'containers':resource.kind==='volume'?'volumes':'networks']++;
     }
     for(const kind of ['container','volume','network']) if(await run([kind,'ls',...(kind==='container'?['-a']:[]),'-q','--filter',`label=com.cogentspec.${engine}.project=`+project.id]))throw Error('Some ERP resources remain.');
+    const anonymousRemoved=await removeAnonymousVolumes(anonymous,run);removed.volumes+=anonymousRemoved;
     const images=await removeImages(imageIds,run,project,engine);removed.images=images.removed;
+    const storageAfter=await measureSpace(root);
     return {protocol:1,projectId:project.id,runtimeId:project.contractRuntimeId,packId:project.packId,packVersion:project.packVersion,
-      targetPath:project.targetPath,canonicalRoot:root,resourcesRemoved:true,removed,retainedImages:images.retained};
+      targetPath:project.targetPath,canonicalRoot:root,resourcesRemoved:true,removed,retainedImages:images.retained,anonymousVolumeCleanup:{tracked:anonymous.length,removed:anonymousRemoved},
+      storage:{before:storageBefore,afterResourceRemoval:storageAfter,hostReclamation:'not_attempted',retainedImageCount:images.retained.length}};
   } finally { if(lock){await lock.close();await unlink(lockPath);} }
 }
 if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)){

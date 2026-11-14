@@ -311,7 +311,22 @@ try {
         }
         $folderRemoved = $true
     }
-    if ($erpRemoval) { $erpRemoval | Add-Member -NotePropertyName folderRemoved -NotePropertyValue $true -Force }
+    if ($erpRemoval) {
+        $erpRemoval | Add-Member -NotePropertyName folderRemoved -NotePropertyValue $true -Force
+        if ($erpRemoval.PSObject.Properties['storage']) {
+            $roots = @([IO.Path]::GetPathRoot($targetPath), [IO.Path]::GetPathRoot([Environment]::GetFolderPath('LocalApplicationData'))) | Select-Object -Unique
+            $drives = @($roots | ForEach-Object { $drive = New-Object IO.DriveInfo $_; @{ drive = $_; availableBytes = $drive.AvailableFreeSpace } })
+            $erpRemoval.storage | Add-Member -NotePropertyName afterFolderRemoval -NotePropertyValue @{ measuredAt = [DateTime]::UtcNow.ToString('o'); drives = $drives } -Force
+        }
+        # Keep the final host measurement after the download/project folder is
+        # gone. A completed removal does not imply Docker's VHDX was compacted.
+        $receiptRoot = Join-Path $stateRoot 'erp-removal-receipts'
+        $receiptPath = Join-Path $receiptRoot ($projectRequestId + '.json')
+        foreach ($path in @($receiptRoot, $receiptPath)) {
+            if ((Test-Path -LiteralPath $path) -and ((Get-Item -LiteralPath $path).Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Linked ERP removal receipts are not supported.' }
+        }
+        [IO.File]::WriteAllText($receiptPath, ($erpRemoval | ConvertTo-Json -Depth 12 -Compress), [Text.UTF8Encoding]::new($false))
+    }
 
     $completionMessage = if ($folderRemoved) {
         "Project registration and folder deleted from $targetPath."
