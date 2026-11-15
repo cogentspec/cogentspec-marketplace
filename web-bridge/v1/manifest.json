@@ -8,7 +8,7 @@
   "bridgeCompatibilityVersion": "0.6.175",
   "sourceSnapshot": "2fe075a1b10e000a573cc0fbc808d9f3cbc2bf7f",
   "files": {
-    "runtime/bridge-manager-core.ps1": "69d69bb709904dda6f3f11da67ec9f699c2ff06ec549ed5060247c880bb0933d",
+    "runtime/bridge-manager-core.ps1": "27a56de0ecb513627222a9095a40826d2ac31cd156319080e45f3cf811e70569",
     "runtime/bridge-manager.ps1": "f2d5d3b8431f8a66d5b6657be7ef7b5ab9cb4f25e25ba57a15147adaf61ddef0",
     "runtime/connect-cogentstack.ps1": "8199400c7bcb848de420820a7e411a039a9e5364fd9f4d6c32b5a53f2aa064aa",
     "runtime/connect-web.ps1": "9589e4aee2bf9fcfa027be81989feee6217b6e0a7dc910405e169a7fbe3264e6",
@@ -16,7 +16,7 @@
     "runtime/delete-project.ps1": "ceb4dd562faa2f9232f6941972d3d8a9c6c7bda4cb07db06dd9bb659b8c8f40c",
     "runtime/delete-specification-project.ps1": "b20898d571c7defe2fa3c120d0c6382921651167f5b6db794fb0a335c5f9f400",
     "runtime/ensure-default-project-directory.ps1": "962c8d83ce6ac4ce1e7ad40d77a01c94a66c2306d932f0f577785588fe6251c2",
-    "runtime/erp-computer-setup.ps1": "9552363f767d645c26ea9b313d5e6c4b193c591bb1b2100b5890e22c9542d0fa",
+    "runtime/erp-computer-setup.ps1": "3aef112244eb4a631a0c8e88ab7dfc87320bc34d305697d6dc335ba6b68a5cba",
     "runtime/erp-customer-release.ps1": "282f6c2031c43e0fa63a347afb8221d3ce3a70573da8daf0953e26b3658850f7",
     "runtime/erp-customer-runtime.mjs": "95100048df37ad0940a8ac48c2f008878cace18f6d629d46422460c70a9cbfa5",
     "runtime/erp-customer-worker.mjs": "241ad2a3c81b63bb24fc02d71ef35222bafceefef62cc5035f71e4670ae398fc",

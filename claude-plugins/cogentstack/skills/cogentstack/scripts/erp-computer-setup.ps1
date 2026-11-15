@@ -3,6 +3,7 @@ param([Alias('Mode')][ValidateSet('Library','Run')][string]$ComputerMode='Librar
 . (Join-Path $PSScriptRoot 'erp-docker-setup.ps1')
 $script:ComputerSetupEntry=Join-Path $PSScriptRoot 'erp-computer-setup.ps1'
 $script:ComputerFactsKey='';$script:ComputerFactsCache=$null;$script:ComputerFactsAt=[DateTime]::MinValue
+$script:ErpStorageReport=$null
 function Get-ErpComputerRoot {Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'CogentSpec\tools\v1'}
 function Assert-ErpComputerPath([string]$Path) {
     $cursor=[IO.Path]::GetFullPath($Path)
@@ -71,11 +72,82 @@ function Get-ErpDockerStorageRoot {
     return $fallback
 }
 function Get-ErpDriveFreeBytes([string]$Root){return (New-Object IO.DriveInfo $Root).AvailableFreeSpace}
-function Get-ErpStorageCheck([string]$WorkDirectory){
-    # A conservative installation allowance, not a guarantee for future business data.
-    $systemRoot=[IO.Path]::GetPathRoot([Environment]::GetFolderPath('LocalApplicationData'));$projectRoot=[IO.Path]::GetPathRoot([IO.Path]::GetFullPath($WorkDirectory))
-    $dockerRoot=Get-ErpDockerStorageRoot
-    if((Get-ErpDriveFreeBytes $dockerRoot) -lt 21474836480 -or (Get-ErpDriveFreeBytes $systemRoot) -lt 1073741824 -or (Get-ErpDriveFreeBytes $projectRoot) -lt 2147483648){return 'low'};return 'ready'
+function Get-ErpDockerDataDisk {
+    $roots=@();$settings=Join-Path ([Environment]::GetFolderPath('ApplicationData')) 'Docker\settings-store.json'
+    if(Test-Path -LiteralPath $settings -PathType Leaf){
+        Assert-ErpComputerPath $settings;$json=Get-Content -LiteralPath $settings -Raw|ConvertFrom-Json
+        foreach($key in @('dataFolder','diskImageLocation')){$p=$json.PSObject.Properties[$key];if($p -and $p.Value -is [string] -and $p.Value -match '^[A-Za-z]:[\\/]'){$roots+= [IO.Path]::GetFullPath($p.Value)}}
+    }
+    if(-not $roots.Count){$roots+=Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'Docker\wsl'}
+    $files=@();foreach($root in $roots){
+        if([IO.Path]::GetExtension($root) -ieq '.vhdx'){$files+=$root}else{foreach($part in @('docker_data.vhdx','disk\docker_data.vhdx','wsl\disk\docker_data.vhdx')){$files+=Join-Path $root $part}}
+    }
+    $found=@($files|Select-Object -Unique|Where-Object{Test-Path -LiteralPath $_ -PathType Leaf})
+    if($found.Count -ne 1){return ''};Assert-ErpComputerPath $found[0];return $found[0]
+}
+function Get-ErpFileAllocatedBytes([string]$Path){
+    Assert-ErpComputerPath $Path
+    if(-not ('CogentErpFileAllocationV1' -as [type])){
+        Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class CogentErpFileAllocationV1 {
+ [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)]
+ public static extern uint GetCompressedFileSizeW(string path, out uint high);
+}
+'@
+    }
+    [uint32]$high=0;$low=[CogentErpFileAllocationV1]::GetCompressedFileSizeW($Path,[ref]$high)
+    if($low -eq [uint32]::MaxValue -and [Runtime.InteropServices.Marshal]::GetLastWin32Error() -ne 0){throw 'Allocation measurement unavailable'}
+    return [long][Math]::Min([double]([uint64]$high*4294967296+[uint64]$low),[double](Get-Item -LiteralPath $Path).Length)
+}
+function Test-ErpDockerDiskAttached([string]$Path){
+    try{$stream=[IO.File]::Open($Path,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::None);$stream.Dispose();return $false}
+    catch [IO.IOException]{return (($_.Exception.HResult -band 65535) -in @(32,33))}
+}
+function ConvertFrom-ErpDockerDiskUsage([string]$Text){
+    if($Text -notmatch '(?m)^/dev/\S+\s+(\d+)\s+(\d+)\s+(\d+)\s+\d+%\s+/mnt/docker-desktop-disk\s*$'){return $null}
+    $total=[long]$Matches[1];$used=[long]$Matches[2];$free=[long]$Matches[3]
+    if($total -le 0 -or $used -lt 0 -or $free -lt 0 -or $used -gt $total -or $free -gt $total-$used){return $null}
+    return @{usedBytes=$used;availableBytes=$free}
+}
+function Get-ErpDockerAllocatedStorage([string]$DockerRoot,[bool]$DockerReady){
+    # Read only: never start a distro, stop Docker or prune another workload.
+    if(-not $DockerReady){return $null}
+    try{
+        $cli=Find-ErpDockerCli;if(-not $cli){return $null}
+        $endpoint=$env:DOCKER_HOST
+        if(-not $endpoint){$endpoint=Invoke-ErpDockerProbeCommand $cli 'context inspect --format "{{json .Endpoints.docker.Host}}"'|ConvertFrom-Json}
+        if($endpoint -notin @('npipe:////./pipe/dockerDesktopLinuxEngine','npipe:////./pipe/docker_engine')){return $null}
+        if((Invoke-ErpDockerProbeCommand $cli 'info --format "{{.OperatingSystem}}"') -notmatch '^Docker Desktop'){return $null}
+        $wsl=Join-Path ([Environment]::SystemDirectory) 'wsl.exe'
+        $running=(Invoke-ErpDockerProbeCommand $wsl '--list --running --quiet').Replace([string][char]0,'')
+        if($running -notmatch '(?m)^\s*docker-desktop\s*$'){return $null}
+        $disk=Get-ErpDockerDataDisk;if(-not $disk -or [IO.Path]::GetPathRoot($disk) -ine $DockerRoot){return $null}
+        if(([IO.DriveInfo]::new($DockerRoot)).DriveFormat -cne 'NTFS' -or -not(Test-ErpDockerDiskAttached $disk)){return $null}
+        $diskArgs='-d docker-desktop -u root -- df -B 1 -P /mnt/docker-desktop-disk'
+        $before=ConvertFrom-ErpDockerDiskUsage (Invoke-ErpDockerProbeCommand $wsl $diskArgs);if(-not $before){return $null}
+        $allocated=Get-ErpFileAllocatedBytes $disk
+        $after=ConvertFrom-ErpDockerDiskUsage (Invoke-ErpDockerProbeCommand $wsl $diskArgs);if(-not $after){return $null}
+        $allocated=[Math]::Min($allocated,(Get-ErpFileAllocatedBytes $disk))
+        return @{allocatedBytes=[long]$allocated;usedBytes=[long][Math]::Max($before.usedBytes,$after.usedBytes);availableBytes=[long][Math]::Min($before.availableBytes,$after.availableBytes)}
+    }catch{return $null}
+}
+function Get-ErpReusableDockerBytes($Snapshot){
+    if(-not $Snapshot){return [long]0}
+    # Never count WSL's virtual maximum. Credit only committed Windows blocks
+    # beyond live filesystem use, with an additional 1 GiB metadata/race reserve.
+    foreach($key in @('allocatedBytes','usedBytes','availableBytes')){if($null -eq $Snapshot[$key] -or [double]$Snapshot[$key] -lt 0 -or [double]$Snapshot[$key] -gt 9007199254740991){return [long]0}}
+    return [long][Math]::Max([double]0,[Math]::Min(([double]$Snapshot.allocatedBytes-[double]$Snapshot.usedBytes-1073741824),[double]$Snapshot.availableBytes))
+}
+function Get-ErpStorageCheck([string]$WorkDirectory,[bool]$DockerReady=$false){
+    $script:ErpStorageReport=$null
+    $systemRoot=[IO.Path]::GetPathRoot([Environment]::GetFolderPath('LocalApplicationData'));$projectRoot=[IO.Path]::GetPathRoot([IO.Path]::GetFullPath($WorkDirectory));$dockerRoot=Get-ErpDockerStorageRoot
+    $snapshot=Get-ErpDockerAllocatedStorage $dockerRoot $DockerReady;$reusable=Get-ErpReusableDockerBytes $snapshot
+    $hostFree=Get-ErpDriveFreeBytes $dockerRoot;$systemFree=Get-ErpDriveFreeBytes $systemRoot;$projectFree=Get-ErpDriveFreeBytes $projectRoot
+    $usable=[double]$hostFree+$reusable;if($snapshot){$usable=[Math]::Min($usable,[double]$snapshot.availableBytes)}
+    $script:ErpStorageReport=@{dockerHostFreeBytes=[long]$hostFree;dockerReusableBytes=[long]$reusable;dockerUsableBytes=[long]$usable;projectFreeBytes=[long]$projectFree;systemFreeBytes=[long]$systemFree;requiredDockerBytes=[long]21474836480;requiredProjectBytes=[long]2147483648;requiredSystemBytes=[long]1073741824;reuseVerified=[bool]$snapshot}
+    if($usable -lt 21474836480 -or $systemFree -lt 1073741824 -or $projectFree -lt 2147483648){return 'low'};return 'ready'
 }
 function Test-ErpWritableDirectory([string]$WorkDirectory){
     $parent=[IO.Path]::GetFullPath($WorkDirectory);Assert-ErpComputerPath $parent
@@ -89,16 +161,19 @@ function Get-ErpComputerPrerequisite([string]$WorkDirectory,[bool]$DockerReady){
         $static=@{windows='unknown';virtualisation='unknown';wsl='unknown';memory='unknown';storage='unknown';directory='unknown';network='unknown'}
         try{$facts=Get-ErpMachineFacts;$static.windows=if($facts.client -and $facts.x64 -and (($facts.build -ge 19045 -and $facts.build -lt 22000) -or $facts.build -ge 22631)){'ready'}else{'unsupported'};$static.virtualisation=if($facts.virtualisation){'ready'}else{'unavailable'};$static.memory=if($facts.memory -ge 8053063680){'ready'}else{'low'}}catch{}
         try{$static.wsl=Get-ErpWslCheck}catch{}
-        try{$static.storage=Get-ErpStorageCheck $WorkDirectory}catch{}
         try{$static.directory=if(Test-ErpWritableDirectory $WorkDirectory){'ready'}else{'unavailable'}}catch{$static.directory='unavailable'}
         $urls=@('https://cogentspec.com/downloads/erpnext/releases/1.0.6/manifest.json');if($checks.node -ne 'ready'){$urls+='https://nodejs.org/dist/v22.23.4/SHASUMS256.txt'};if($checks.git -ne 'ready'){$urls+='https://github.com/git-for-windows/git/releases'}
         $connected=$true;foreach($url in $urls){if(-not(Test-ErpHttps $url)){$connected=$false}};$static.network=if($connected){'ready'}else{'unavailable'}
         $script:ComputerFactsCache=$static;$script:ComputerFactsKey=$cacheKey;$script:ComputerFactsAt=[DateTime]::UtcNow
     }
     foreach($key in $script:ComputerFactsCache.Keys){$checks[$key]=$script:ComputerFactsCache[$key]}
+    # Storage changes immediately after installation/removal; do not cache it
+    # with relatively static machine facts or retain a previous successful probe.
+    $checks.storage='unknown';$script:ErpStorageReport=$null
+    try{$checks.storage=Get-ErpStorageCheck $WorkDirectory $DockerReady}catch{}
     # A running Linux engine also qualifies supported Hyper-V installations.
     if($DockerReady){$checks.wsl='ready';$checks.virtualisation='ready'}
-    return @{checks=$checks}
+    return @{checks=$checks;capacity=$script:ErpStorageReport}
 }
 function Save-ErpToolArchive([string]$Url,[string]$Target,[string]$Sha256){
     [Net.ServicePointManager]::SecurityProtocol=[Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12

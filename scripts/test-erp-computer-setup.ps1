@@ -16,6 +16,8 @@ $report=Get-ErpComputerPrerequisite 'C:\Synthetic' $false
 Assert ($report.checks.node -eq 'missing' -and $report.checks.git -eq 'missing' -and $report.checks.wsl -eq 'missing') 'Missing dependencies were hidden'
 $report=Get-ErpComputerPrerequisite 'C:\Synthetic' $true
 Assert ($report.checks.wsl -eq 'ready' -and $report.checks.virtualisation -eq 'ready') 'Working Hyper-V Docker was rejected'
+$script:storage='low';$freshStorage=Get-ErpComputerPrerequisite 'C:\Synthetic' $true
+Assert ($freshStorage.checks.storage -eq 'low') 'Storage changes were hidden by the machine-facts cache'
 $script:ComputerFactsCache=$null;$script:storage='low';$script:online=$false;$script:writable=$false
 $report=Get-ErpComputerPrerequisite 'D:\Synthetic' $false
 Assert ($report.checks.storage -eq 'low' -and $report.checks.network -eq 'unavailable' -and $report.checks.directory -eq 'unavailable') 'Capacity or network failures were hidden'
