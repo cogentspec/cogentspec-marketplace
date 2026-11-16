@@ -314,6 +314,8 @@ try {
         'skills/cogentspec/scripts/erp-docker-setup.ps1',
         'skills/cogentspec/scripts/erp-computer-setup.ps1',
         'skills/cogentspec/scripts/install-erp-project.mjs',
+        'skills/cogentspec/scripts/erp-installation-address.mjs',
+        'skills/cogentspec/scripts/erp-installation-gateway.mjs',
         'skills/cogentspec/scripts/erp-customer-runtime.mjs',
         'skills/cogentspec/scripts/erp-customer-worker.mjs',
         'skills/cogentspec/scripts/erp-customer-release.ps1',

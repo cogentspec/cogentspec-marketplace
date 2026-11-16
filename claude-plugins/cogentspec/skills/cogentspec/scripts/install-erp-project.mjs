@@ -7,6 +7,8 @@ import { spawn } from "node:child_process";
 import {assertCustomerRuntime,execute} from "./erp-customer-runtime.mjs";
 import {createHash} from 'node:crypto';
 import {setTimeout as delay} from 'node:timers/promises';
+import {readErpAddress} from './erp-installation-address.mjs';
+import {startErpInstallationGateway,erpGatewaySourceDigest} from './erp-installation-gateway.mjs';
 
 // Progress is advisory. A reader or virus scanner may briefly hold the old
 // Windows file without delete sharing; never truncate the last valid sample.
@@ -161,7 +163,7 @@ export async function stopErpInstallation(project,{run=args=>execute('docker',ar
 }
 
 // Reconnection must never enter distribution download, build or site preparation.
-export async function installErpProject(project, inspectOnly = false, reconnectOnly = false, {run = execute} = {}) {
+export async function installErpProject(project, inspectOnly = false, reconnectOnly = false, {run = execute,launch=spawn,addressStore} = {}) {
   const engine = project?.projectType === "erpnext_business_app" && project?.packId === "coge.erpnext-business-app.foundation" ? "erpnext"
     : project?.projectType === "odoo_business_app" && project?.packId === "coge.odoo-business-app.foundation" ? "odoo" : null;
   if (!project || !engine
@@ -180,13 +182,20 @@ export async function installErpProject(project, inspectOnly = false, reconnectO
   const runtime = await import(pathToFileURL(resolve(root, runtimeFile)).href);
   const validated = await runtime.validatePlan();
   const customer = engine === "erpnext" ? await assertCustomerRuntime(project) : null;
-  if (!inspectOnly) { try { return await installErpProject(project, true); } catch { /* A stopped, identity-checked project may be restarted below. */ } }
+  let addressMigration=false;
+  if (!inspectOnly) { try { return await installErpProject(project, true,false,{run,launch,addressStore}); } catch(error) { if(error.code==='ERP_ADDRESS_STATE_INVALID')throw error;addressMigration=error.code==='ERP_ADDRESS_MIGRATION_REQUIRED'; /* Only the verified host listener needs replacement in this case. */ } }
   if (inspectOnly) {
     const inspection = await runtime.inspect(), listener = await json(".coge/runtime/listener.json");
     if (!inspection.ready || listener.projectId !== project.id || listener.sourceDigest !== validated.sourceDigest || !Number.isInteger(listener.pid)) throw Error("The ERP connection needs refreshing.");
     process.kill(listener.pid, 0);
     const health = await fetch(new URL("/__cogentspec/health", listener.url), { signal: AbortSignal.timeout(3000) }).then(r => r.json());
     if (health.projectId !== project.id || !health.ready || health.sourceDigest !== validated.sourceDigest) throw Error("The ERP listener is not verified.");
+    if(engine==='erpnext'){
+      let address;try{address=await readErpAddress(project,{store:addressStore});}catch(error){throw Object.assign(error,{code:'ERP_ADDRESS_STATE_INVALID'});}
+      const gatewayDigest=await erpGatewaySourceDigest();
+      if(!address||listener.url!==address.url||listener.addressProtocol!==1||health.addressProtocol!==1||health.runtimeId!==project.contractRuntimeId||listener.gatewaySourceDigest!==gatewayDigest||health.gatewaySourceDigest!==gatewayDigest)
+        throw Object.assign(Error('Reconnect this ERP to give it its own saved installation address.'),{code:'ERP_ADDRESS_MIGRATION_REQUIRED'});
+    }
     return { engine, projectId: project.id, targetPath: project.targetPath, runtimeId: project.contractRuntimeId,
       foundationVersion: project.packVersion, modules: inspection.modules, ready: true,
       sourceDigest: validated.sourceDigest, customerRelease: customer ? {id:customer.releaseId,imageId:customer.imageId} : null, localUrl: listener.url, processId: listener.pid };
@@ -201,7 +210,7 @@ export async function installErpProject(project, inspectOnly = false, reconnectO
     try{await writeErpInstallationProgress(progressPath,{...value,projectId:project.id,updatedAt:new Date().toISOString()});}
     catch(error){await recordErpInstallerDiagnostic(root,'progress',error);}
   };
-  if (reconnectOnly && !customer) {
+  if ((reconnectOnly||addressMigration) && !customer) {
     // Verify locally retained images before start() can invoke compose. An
     // unavailable Docker engine is a recovery failure, never a cache miss.
     const installed = await json('.coge/runtime/image.json');
@@ -217,7 +226,7 @@ export async function installErpProject(project, inspectOnly = false, reconnectO
         ||image.Os!=='linux'||image.Architecture!=='amd64')throw Error('An existing ERP dependency image needs repair. Reconnect will not download it.');
     }
   }
-  if (!customer && !reconnectOnly) {
+  if (!customer && !reconnectOnly && !addressMigration) {
     await progress({phase:'checking'});
     if(validated.distribution){
       try{delivery=await prepareErpDistribution(root,validated.distribution,{onProgress:progress});}
@@ -227,9 +236,10 @@ export async function installErpProject(project, inspectOnly = false, reconnectO
   }
   await progress({phase:'starting'});
   // Keep the native application running independently of this bounded installer.
-  const child = spawn(process.execPath, [resolve(root, runtimeFile), "start"], {
-    cwd: root, windowsHide: true, detached: true, stdio: ["ignore", "pipe", "ignore"],
+  const child = launch(process.execPath, engine==='erpnext'?[fileURLToPath(import.meta.url),'--gateway','--runtime-entry',resolve(root,runtimeFile)]:[resolve(root, runtimeFile), "start"], {
+    cwd: root, windowsHide: true, detached: true, stdio: [engine==='erpnext'?'pipe':'ignore', "pipe", "ignore"],
   });
+  if(engine==='erpnext')child.stdin.end(JSON.stringify(project));
   const running = await new Promise((done, fail) => {
     let output = "", finished = false;
     const timer = setTimeout(() => { if (!finished) { child.kill(); fail(Error("The ERP did not start in time.")); } }, 120_000);
@@ -252,6 +262,10 @@ export async function installErpProject(project, inspectOnly = false, reconnectO
   const listener = await json(".coge/runtime/listener.json");
   if (listener.url !== running.localUrl || listener.projectId !== project.id || !Number.isInteger(listener.pid)) throw Error("The ERP listener ownership could not be verified.");
   process.kill(listener.pid, 0);
+  if(engine==='erpnext'){
+    const address=await readErpAddress(project,{store:addressStore});
+    if(!address||address.url!==running.localUrl||listener.addressProtocol!==1)throw Error('The ERP installation address reservation could not be verified.');
+  }
   if(delivery?.archive){try{await unlink(delivery.archive);}catch{/* A retained verified archive is safe to reuse. */}}
   return { engine, projectId: project.id, targetPath: project.targetPath, runtimeId: project.contractRuntimeId,
     foundationVersion: project.packVersion, modules: inspected.modules, ready: true,
@@ -260,6 +274,7 @@ export async function installErpProject(project, inspectOnly = false, reconnectO
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
     let input = ""; for await (const chunk of process.stdin) { input += chunk; if (input.length > 8192) throw Error("Invalid plan."); }
-    console.log(JSON.stringify(process.argv.includes('--stop')?await stopErpInstallation(JSON.parse(input)):await installErpProject(JSON.parse(input), process.argv.includes("--inspect"), process.argv.includes('--reconnect'))));
+    if(process.argv.includes('--gateway'))await startErpInstallationGateway(JSON.parse(input));
+    else console.log(JSON.stringify(process.argv.includes('--stop')?await stopErpInstallation(JSON.parse(input)):await installErpProject(JSON.parse(input), process.argv.includes("--inspect"), process.argv.includes('--reconnect'))));
   } catch { console.error("The ERP installation could not be verified. Existing project data was kept."); process.exitCode = 1; }
 }

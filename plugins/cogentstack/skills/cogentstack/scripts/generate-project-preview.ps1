@@ -193,7 +193,16 @@ if ($Mode -eq 'watch') {
     if (-not $safeUrl) { exit 0 }
     try {
         while ($true) {
-            $readiness = Get-CogentSpecProjectPreviewReadiness $exactTarget $RequestId $projectContext.ContextKey
+            # ERP_WATCH_ADDRESS_BEGIN: installed ERP readiness is native health, not changed foundation source.
+            $watchManifest = Get-Content -LiteralPath (Join-Path $exactTarget '.coge\knowledge-manifest.json') -Raw | ConvertFrom-Json
+            if ([string]$watchManifest.project.type -eq 'erpnext_business_app') {
+                $watchPlan = Get-Content -LiteralPath (Join-Path $exactTarget '.coge\erpnext-project.json') -Raw | ConvertFrom-Json
+                $watchHealth = Invoke-RestMethod -Uri ([Uri]::new($safeUrl,'/__cogentspec/health')) -TimeoutSec 5
+                $readiness = @{ Ready=([string]$watchManifest.project.requestId -eq $RequestId -and [string]$watchPlan.projectId -eq $RequestId -and [string]$watchHealth.projectId -eq $RequestId -and [string]$watchHealth.runtimeId -eq [string]$watchPlan.runtimeId -and $watchHealth.ready -and $watchHealth.addressProtocol -eq 1) }
+            } else {
+                $readiness = Get-CogentSpecProjectPreviewReadiness $exactTarget $RequestId $projectContext.ContextKey
+            }
+            # ERP_WATCH_ADDRESS_END
             if (-not $readiness.Ready) {
                 Report-PreviewState $token $RequestId $exactTarget 'unavailable' $safeUrl.AbsoluteUri 0 | Out-Null
                 break
@@ -246,6 +255,26 @@ $activeProject = $listing.activeProject
 $exactRequestId = [string]$activeProject.requestId
 $exactTarget = Resolve-ExactProjectTarget ([string]$activeProject.targetPath)
 if ($exactRequestId -notmatch '^[0-9a-fA-F-]{36}$') { throw 'CogentSpec returned an invalid active project identity.' }
+
+# ERP uses its installation gateway, including a persistent address reservation.
+# The generic development-server path below must never restart it on port 3000.
+if ([string]$activeProject.projectType -eq 'erpnext_business_app') {
+    $erpManifest = Get-Content -LiteralPath (Join-Path $exactTarget '.coge\knowledge-manifest.json') -Raw | ConvertFrom-Json
+    $erpBinding = Get-Content -LiteralPath (Join-Path $exactTarget '.coge\contract-binding.json') -Raw | ConvertFrom-Json
+    $erpPlan = Get-Content -LiteralPath (Join-Path $exactTarget '.coge\erpnext-project.json') -Raw | ConvertFrom-Json
+    if ([string]$erpManifest.project.requestId -ne $exactRequestId -or [string]$erpPlan.projectId -ne $exactRequestId -or [string]$erpBinding.projectType -ne 'erpnext_business_app') { throw 'The selected ERP installation identity changed.' }
+    $erpProject = @{ id=$exactRequestId; targetPath=$exactTarget; projectType='erpnext_business_app'; contractRuntimeId=[string]$erpPlan.runtimeId; packId=[string]$erpBinding.packId; packVersion=[string]$erpBinding.packVersion }
+    $node = Get-Command node.exe, node -ErrorAction Stop | Select-Object -First 1
+    $erpOutput = ($erpProject | ConvertTo-Json -Compress) | & $node.Source (Join-Path $PSScriptRoot 'install-erp-project.mjs') --reconnect
+    if ($LASTEXITCODE -ne 0) { throw 'This ERP could not reconnect. Its saved installation address and business data were kept.' }
+    $erpPreview = ($erpOutput -join "`n") | ConvertFrom-Json
+    $verifiedErpPreview = Get-VerifiedPreview ([string]$erpPreview.localUrl) $exactTarget
+    if (-not $erpPreview.ready -or -not $verifiedErpPreview) { throw 'The ERP installation address could not be verified.' }
+    Report-PreviewState $token $exactRequestId $exactTarget 'running' $verifiedErpPreview.Url $verifiedErpPreview.ProcessId | Out-Null
+    $erpWatcher = Start-PreviewWatcher $exactRequestId $exactTarget $verifiedErpPreview.Url $verifiedErpPreview.ProcessId
+    Write-CompactJson ([ordered]@{status='already_running';requestId=$exactRequestId;projectName=[string]$activeProject.projectName;targetPath=$exactTarget;localUrl=$verifiedErpPreview.Url;port=$verifiedErpPreview.Port;processId=$verifiedErpPreview.ProcessId;remembered=$true;watcherStarted=$erpWatcher;nextAction='use_view_project_button'})
+    exit 0
+}
 
 $readiness = Get-CogentSpecProjectPreviewReadiness `
     $exactTarget `
