@@ -14,7 +14,7 @@ function Invoke-ErpInstallationWork([string]$Token) {
     if($script:LastComputerSetupId){
         try{$setup=Read-ErpComputerSetup $script:LastComputerSetupId;if($setup){$computer.requestId=$setup.id;$computer.phase=$setup.phase;$computer.reason=$setup.reason}}catch{$computer.requestId=$script:LastComputerSetupId;$computer.phase='failed';$computer.reason='finish_setup'}
     }
-    $claimed = Invoke-BridgeApi -Method Post -Path '/api/plugin/erp-installations' -Token $Token -Body @{ action = 'claim'; protocol = 6; workDirectory = $script:ErpWorkDirectory; docker=$docker;computer=$computer }
+    $claimed = Invoke-BridgeApi -Method Post -Path '/api/plugin/erp-installations' -Token $Token -Body @{ action = 'claim'; protocol = 7; workDirectory = $script:ErpWorkDirectory; docker=$docker;computer=$computer }
     if($claimed.PSObject.Properties['cancellations']){foreach($cancellation in @($claimed.cancellations)){Complete-ErpInstallationCancellation $cancellation $Token}}
     if($claimed.PSObject.Properties['computerSetup'] -and $claimed.computerSetup){$script:LastComputerSetupId=[string]$claimed.computerSetup.id;Start-ErpComputerSetup $script:LastComputerSetupId}
     if($claimed.PSObject.Properties['dockerSetup'] -and $claimed.dockerSetup){
@@ -41,7 +41,7 @@ function Invoke-ErpInstallationWork([string]$Token) {
     try {
         $contextQuery = "context=$([Uri]::EscapeDataString([string]$job.context_key))"
         if ($job.mode -in @('reconnect','check')) {
-            $proof = Invoke-ErpProjectRunner -Project $job.project -InspectOnly:($job.mode -eq 'check')
+            $proof = Invoke-ErpProjectRunner -Project $job.project -InspectOnly:($job.mode -eq 'check') -ReconnectOnly
             Invoke-BridgeApi -Method Post -Path '/api/plugin/erp-installations' -Token $Token -Body @{ action = 'complete'; id = $job.id; claim = $job.claim; proof = $proof } | Out-Null
             return
         }
@@ -158,12 +158,13 @@ function Complete-ErpInstallationCancellation($Job,[string]$Token){
     $proof=if($Job.project){Invoke-ErpProjectRunner -Project $Job.project -StopOnly}else{@{stopped=$true;dataKept=$true}}
     Invoke-BridgeApi -Method Post -Path '/api/plugin/erp-installations' -Token $Token -Body @{action='cancelled';id=$Job.id;claim=$Job.claim;proof=$proof}|Out-Null
 }
-function Invoke-ErpProjectRunner($Project, [switch]$InspectOnly,[switch]$StopOnly,$InstallationJob=$null,[string]$Token='') {
+function Invoke-ErpProjectRunner($Project, [switch]$InspectOnly,[switch]$StopOnly,[switch]$ReconnectOnly,$InstallationJob=$null,[string]$Token='') {
         $node = Get-Command node.exe, node -ErrorAction Stop | Select-Object -First 1
         $start = New-Object Diagnostics.ProcessStartInfo
         $start.FileName = $node.Source
         $start.Arguments = '"' + (Join-Path $PSScriptRoot 'install-erp-project.mjs') + '"'
         if ($InspectOnly) { $start.Arguments += ' --inspect' }
+        if ($ReconnectOnly) { $start.Arguments += ' --reconnect' }
         if ($StopOnly) { $start.Arguments += ' --stop' }
         $start.UseShellExecute = $false; $start.CreateNoWindow = $true
         $start.RedirectStandardInput = $true; $start.RedirectStandardOutput = $true; $start.RedirectStandardError = $true

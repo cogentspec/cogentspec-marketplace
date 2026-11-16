@@ -160,7 +160,8 @@ export async function stopErpInstallation(project,{run=args=>execute('docker',ar
   return stopped();
 }
 
-export async function installErpProject(project, inspectOnly = false) {
+// Reconnection must never enter distribution download, build or site preparation.
+export async function installErpProject(project, inspectOnly = false, reconnectOnly = false, {run = execute} = {}) {
   const engine = project?.projectType === "erpnext_business_app" && project?.packId === "coge.erpnext-business-app.foundation" ? "erpnext"
     : project?.projectType === "odoo_business_app" && project?.packId === "coge.odoo-business-app.foundation" ? "odoo" : null;
   if (!project || !engine
@@ -200,7 +201,23 @@ export async function installErpProject(project, inspectOnly = false) {
     try{await writeErpInstallationProgress(progressPath,{...value,projectId:project.id,updatedAt:new Date().toISOString()});}
     catch(error){await recordErpInstallerDiagnostic(root,'progress',error);}
   };
-  if (!customer) {
+  if (reconnectOnly && !customer) {
+    // Verify locally retained images before start() can invoke compose. An
+    // unavailable Docker engine is a recovery failure, never a cache miss.
+    const installed = await json('.coge/runtime/image.json');
+    const references = validated.distribution ? Object.values(validated.distribution.tags || {}) : [];
+    if (!/^sha256:[a-f0-9]{64}$/.test(installed.image || '') || !references.length && engine === 'erpnext'
+      || validated.distribution && installed.sourceDigest !== validated.imageSourceDigest) throw Error('The existing ERP images need repair. Reconnect will not download or rebuild them.');
+    const images = JSON.parse(await run('docker', ['image', 'inspect', installed.image, ...references], {timeout:15000}));
+    if (!Array.isArray(images) || images.length !== references.length + 1) throw Error('Start Docker Desktop and verify the existing ERP images before reconnecting.');
+    if(images[0].Id!==installed.image)throw Error('The existing ERP image identity changed.');
+    for(const [role,tag] of Object.entries(validated.distribution?.tags || {})){
+      const image=images.find(value=>value.RepoTags?.includes(tag));
+      if(!image||![validated.distribution.images[role],validated.distribution.configImages?.[role]].includes(image.Id)
+        ||image.Os!=='linux'||image.Architecture!=='amd64')throw Error('An existing ERP dependency image needs repair. Reconnect will not download it.');
+    }
+  }
+  if (!customer && !reconnectOnly) {
     await progress({phase:'checking'});
     if(validated.distribution){
       try{delivery=await prepareErpDistribution(root,validated.distribution,{onProgress:progress});}
@@ -243,6 +260,6 @@ export async function installErpProject(project, inspectOnly = false) {
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
     let input = ""; for await (const chunk of process.stdin) { input += chunk; if (input.length > 8192) throw Error("Invalid plan."); }
-    console.log(JSON.stringify(process.argv.includes('--stop')?await stopErpInstallation(JSON.parse(input)):await installErpProject(JSON.parse(input), process.argv.includes("--inspect"))));
+    console.log(JSON.stringify(process.argv.includes('--stop')?await stopErpInstallation(JSON.parse(input)):await installErpProject(JSON.parse(input), process.argv.includes("--inspect"), process.argv.includes('--reconnect'))));
   } catch { console.error("The ERP installation could not be verified. Existing project data was kept."); process.exitCode = 1; }
 }
