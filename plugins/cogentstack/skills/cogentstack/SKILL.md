@@ -179,18 +179,28 @@ Only after the user selects **Generate Deployment Pack** in Hosting:
 
 For user-selected Polish, follow the current `get_project_review` policy and submission schema. Routine project browser work uses `run_checks` against the isolated built output, never the user's working tabs or real database. Test public links into owner/admin pages before testing those pages directly. An unhandled application error, a link that does nothing, an action without an outcome assertion, or missing evidence cannot pass. Hover, focus and contrast observations describe visual state; they do not prove functional activation. Reference the owned run, exact source and built version, and actual action/outcome for each functional control claim. Browser workflows require browser journeys as well as relevant API tests. A local build review does not verify a separately uploaded preview. Preserve earlier verified work and report missing current evidence honestly. Never start a managed/server AI worker or publish a project as part of Polish.
 
-### ERPNext customer VRC releases
+### ERPNext editable customer layers
 
-When the protected project change handoff includes `erpCustomerBuild`, prepare
-its separate customer workspace with `erp-customer-release.ps1 -Mode initialize`.
-Implement the saved brief only in the returned `sourceDirectory`, set the customer
-package version and add meaningful native Frappe application tests. Build with
-`-Mode build -Version <version>` and read `-Mode status`. The trusted worker uses
-native Frappe build, migration and tests on an isolated restored copy. Do not run
-the generic foundation installer/build flow, edit either foundation, provision
-another ERP, or reset any existing credentials. Candidate verification does not
-authorise deployment. The user approves the exact tested customer release in the
-signed-in workspace; no worker token or AI message can replace that approval.
-For a blocked or interrupted operation, inspect the private journal and retained
-recovery copies and request a concrete recovery decision that preserves all later
-business data. Do not remove locks or overwrite data to make an operation pass.
+The selected customisation layer is the user-visible revision. After inspecting
+its live interface, discussing the change and saving the approved scope, prepare
+its separate source workspace with `erp-customer-release.ps1 -Mode initialize -Wait`
+if needed. Implement only in the fresh handoff's `erpCustomerBuild.sourceDirectory`.
+Keep the same layer identity and package metadata; preserve parent and sibling
+source, the immutable foundations, credentials, files and business records.
+
+After the approved edit, run `erp-customer-release.ps1 -Mode refresh -Wait -ContextKey
+<exact-context>`. The protocol 3 worker builds and runs meaningful native tests on
+an isolated restored copy, then makes the exact checked changes available in that
+layer automatically. This selected-layer refresh is part of implementing the
+approved change; do not require another release version or signed-in deployment
+approval. Do not use the legacy candidate/build flow for normal layer edits.
+
+If the helper returns in_progress, read `-Mode status` instead of queuing another
+update. Reread the handoff and inspect the actual updated UI before telling the
+user to refresh their ERP page. If the result is right, no more action is needed;
+further adjustments stay in the same layer. Do not commit, push or publish.
+
+For failed or interrupted operations, inspect the private journal and retained
+recovery copies. Preserve recovery holds and all later business data; do not clear
+locks, delete copies or overwrite records to force an update through. Explain the
+specific failure and use the supported recovery path.

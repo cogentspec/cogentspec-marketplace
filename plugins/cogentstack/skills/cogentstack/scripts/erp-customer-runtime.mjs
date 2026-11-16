@@ -240,13 +240,24 @@ async function cleanupVerification(b,release,site,{keepVolumes=false}={}){
 export async function verifyCustomerRelease(project,handoff,id){const b=await customerBinding(project,handoff);return locked(b,async()=>{
  const release=await readRelease(b,id);if(release.workRevision!==b.work.updatedAt||(await sourceInventory(b.source)).digest!==release.sourceDigest)throw Error('Customer source or brief changed. Build a new release.');
  await assertLiveOwnership(b);let backup,site;await freeze(b);
- try{backup=await branchBackup(b,release);}finally{await compose(b,liveCompose(b),['up','-d',...writers],{timeout:180000});await compose(b,liveCompose(b),['restart','frontend']);}
+ try{backup=await branchBackup(b,release);}finally{await compose(b,liveCompose(b),['up','-d',...writers,'frontend'],{timeout:180000});}
  try{site=await verificationSite(b,release,backup);const proof={...releaseEvidence(release),status:'verified',backupVolume:backup.volume,backupSnapshotDigest:backup.snapshotDigest,...site.receipt,verifiedAt:new Date().toISOString()};await save(resolve(b.directory,'releases',id,'verification.json'),proof);return proof;}
  finally{await cleanupVerification(b,release,site);}
  });}
-async function assertLiveOwnership(b){const document=await json(liveCompose(b));
+async function assertLiveOwnership(b){const previous=await readFile(liveCompose(b)),document=JSON.parse(previous);
  for(const definition of Object.values(document.volumes))await assertResource(b,'volume',definition.name);
  for(const [role,service]of Object.entries(document.services))for(const [key,value]of Object.entries(baseLabels(b)))if(service.labels?.[key]!==value)throw Error('Live service '+role+' belongs to another installation.');
+ // A legacy dynamic port can move even when verification merely stops and
+ // restarts the frontend. Pin its actual socket before the first pause, and
+ // keep the existing active-image receipt bound to that runtime configuration.
+ const frontend=await assertResource(b,'container',b.plan.key+'-frontend-1'),listener=frontend.NetworkSettings?.Ports?.['8080/tcp'];
+ if(!Array.isArray(listener)||listener.length!==1||listener[0].HostIp!=='127.0.0.1'||!/^\d+$/.test(listener[0].HostPort))throw Error('The current private ERP listener could not be verified.');
+ const ports=['127.0.0.1:'+listener[0].HostPort+':8080'];
+ if(JSON.stringify(document.services.frontend.ports)!==JSON.stringify(ports)){
+  const active=await assertCustomerRuntime(b.project);document.services.frontend.ports=ports;
+  try{await save(liveCompose(b),document);if(active)await save(rootActive(b),{...active,composeDigest:hash(await readFile(liveCompose(b)))});}
+  catch(error){await writeFile(liveCompose(b),previous);if(active)await save(rootActive(b),active);throw error;}
+ }
  return document;
 }
 async function waitNativeHealth(b){for(let attempt=0;attempt<90;attempt++){try{const value=await b.runtime.inspect();if(value.ready)return value;}catch{}await new Promise(done=>setTimeout(done,1000));}throw Error('The deployed ERP did not pass its exact installation health check.');}
@@ -257,15 +268,21 @@ export async function deployCustomerRelease(project,handoff,grant,authorize=asyn
  const release=await readRelease(b,grant.id),verification=await json(resolve(b.directory,'releases',release.id,'verification.json'));
  if(grant.state!=='deploying'||!uuid(grant.claim)||grant.work_revision!==b.work.updatedAt||grant.proof?.imageId!==release.imageId||grant.proof?.sourceDigest!==release.sourceDigest||verification.nativeTestsPassed!==true||(await sourceInventory(b.source)).digest!==release.sourceDigest)throw Error('An exact, current server-approved customer deployment is required.');
  const previous=await assertLiveOwnership(b),previousBytes=await readFile(liveCompose(b)),activePath=rootActive(b),previousActive=await exists(activePath)?await json(activePath):null;
+ const frontend=await assertResource(b,'container',b.plan.key+'-frontend-1'),listener=frontend.NetworkSettings?.Ports?.['8080/tcp'];
+ if(!Array.isArray(listener)||listener.length!==1||listener[0].HostIp!=='127.0.0.1'||!/^\d+$/.test(listener[0].HostPort))throw Error('The current private ERP listener could not be verified.');
+ const frontendPorts=['127.0.0.1:'+listener[0].HostPort+':8080'];
  let backup,checked,clean,switched=false,opened=false;
  await freeze(b);
  try{
   backup=await branchBackup(b,release);
   checked=await verificationSite(b,release,backup);await cleanupVerification(b,release,checked);checked=null;
   // Deploy a separate clean restored copy. Test data can never enter production.
-  clean=await verificationSite(b,release,backup,{runTests:false});await restoreOriginalFlags(b,clean.file,backup);
+  clean=await verificationSite(b,release,backup,{runTests:false});await restoreOriginalFlags({...b,plan:{...b.plan,key:clean.prefix}},clean.file,backup);
   await cleanupVerification(b,release,clean,{keepVolumes:true});
   const candidate=clean.document;for(const service of Object.values(candidate.services))service.restart='unless-stopped';
+  // Keep the user's open ERP address stable across edits. The clean test copy
+  // uses an ephemeral port, which must not replace the installation's listener.
+  candidate.services.frontend.ports=frontendPorts;
   await save(resolve(b.directory,'releases',release.id,'recovery.json'),{previousCompose:previous,previousActive,backupVolume:backup.volume,liveDataReplaced:false});
   await authorize();await save(liveCompose(b),candidate);switched=true;
   await compose(b,liveCompose(b),['up','-d','--wait','--wait-timeout','180','database','cache','queue'],{timeout:240000});

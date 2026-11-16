@@ -13,16 +13,16 @@ async function localLease(){
 }
 let job,timer,failed=false;
 try{
- await localLease();job=(await api({action:'claim',protocol:2})).job;
+ await localLease();job=(await api({action:'claim',protocol:3})).job;
  if(job){
   const heartbeat=async()=>{await localLease();if(failed)throw Error('The customer release lease was lost.');await api({action:'heartbeat',id:job.id,claim:job.claim});};
   timer=setInterval(()=>heartbeat().catch(()=>{failed=true;}),30000);
   let proof;
   if(job.kind==='initialize')proof=await initializeCustomerLayer(job.project,job.work);
-  else if(job.kind==='build'){
+  else if(job.kind==='build'||job.kind==='refresh'&&job.state==='building'){
    await buildCustomerRelease(job.project,job.work,{id:job.id,version:job.version,revision:job.revision,workRevision:job.work_revision});await heartbeat();
    proof=await verifyCustomerRelease(job.project,job.work,job.id);
-  }else if(job.kind==='deploy')proof=await deployCustomerRelease(job.project,job.work,job,heartbeat);
+  }else if(job.kind==='deploy'||job.kind==='refresh'&&job.state==='deploying')proof=await deployCustomerRelease(job.project,job.work,job,heartbeat);
   else if(job.kind==='rollback')proof=await rollbackCustomerRelease(job.project,job.work,job,heartbeat);
   else throw Error('Unsupported customer release work.');
   await heartbeat();await api({action:'complete',id:job.id,claim:job.claim,proof});console.log(JSON.stringify({status:'customer_release_reported',id:job.id}));
