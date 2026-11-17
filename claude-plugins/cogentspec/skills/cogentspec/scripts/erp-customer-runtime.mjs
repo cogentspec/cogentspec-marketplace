@@ -50,11 +50,14 @@ export function renderLayerHooks(layer){
  }
  return Object.entries(maps).map(([key,value])=>key+' = '+JSON.stringify(value)).join('\n')+'\n';
 }
-export async function execute(program,args,{input,timeout=120000,logPath,captureStderr=false}={}){
+export async function execute(program,args,{input,timeout=120000,logPath,captureStderr=false,signal}={}){
+ signal?.throwIfAborted();
  return new Promise((done,fail)=>{const child=spawn(program,args,{windowsHide:true,stdio:['pipe','pipe','pipe']});let output='',size=0,settled=false;
   const log=logPath?createWriteStream(logPath,{mode:0o600,flags:'a'}):null;
-  const finish=error=>{if(settled)return;settled=true;clearTimeout(timer);log?.end();error?fail(error):done(output.trim());};
+  const finish=error=>{if(settled)return;settled=true;clearTimeout(timer);signal?.removeEventListener('abort',abort);log?.end();error?fail(error):done(output.trim());};
+  const abort=()=>{child.kill();finish(signal.reason||Error('Operation cancelled.'));};
   const timer=setTimeout(()=>{child.kill();finish(Error('Customer release operation timed out. Inspect its state before retrying.'));},timeout);
+  signal?.addEventListener('abort',abort,{once:true});if(signal?.aborted)abort();
   child.on('error',()=>finish(Error('A required local build tool is unavailable.')));child.stdout.on('data',chunk=>{log?.write(chunk);size+=chunk.length;if(size>4*1024*1024){child.kill();finish(Error('Build output exceeded its limit.'));}else output+=chunk;});
   // Process output may contain customer data. Return only structured receipts.
   child.stderr.on('data',chunk=>{log?.write(chunk);if(captureStderr){size+=chunk.length;if(size>4*1024*1024){child.kill();finish(Error('Build output exceeded its limit.'));}else output+=chunk;}});child.on('close',code=>finish(code===0?null:Object.assign(Error('Customer release operation failed ('+program+', exit '+code+').'+(logPath?' Inspect the private operation log.':'')),{code:'local_operation_failed'})));child.stdin.on('error',()=>{});child.stdin.end(input);
@@ -284,8 +287,10 @@ async function serveLayerGateway(inputFile){
 }
 export async function prepareLayerEnvironment(project,work,input){
  const original=await customerBinding(project,work,{environmentOnly:true});
- return locked(original,async()=>{
+ const checkpoint=async()=>{await input.checkCancelled?.();input.signal?.throwIfAborted();};
+ try{return await locked(original,async()=>{
   await input.onProgress?.('checking');
+  await checkpoint();
   const directory=resolve(original.root,'.coge/customer-vrc/layers',work.id,'runtime');await noLinks(original.root,directory);
   if(!await exists(resolve(directory,'environment.json'))){
    if(!uuid(input.id))throw Error('Choose a current customer layer environment request.');
@@ -316,12 +321,15 @@ export async function prepareLayerEnvironment(project,work,input){
    const sourceCompose=await assertLiveOwnership(source,{pinListener:false}),sourceFile=resolve(original.directory,'releases',input.id,'source-compose.json');
    await save(sourceFile,sourceCompose);source={...source,runtimeFile:sourceFile};let backup,site;
    await input.onProgress?.('copying');
+   await checkpoint();
    await freeze(source);
    try{backup=await privateBackup(source,release);}finally{await compose(source,liveCompose(source),['up','-d',...writers,'frontend'],{timeout:180000});}
+   await checkpoint();
    try{
-    site=await verificationSite(original,release,backup,{runTests:false});
+    site=await verificationSite(original,release,backup,{runTests:false,signal:input.signal,checkCancelled:input.checkCancelled});
     const isolated={...original,plan:{...original.plan,key:site.prefix}};
     await restoreOriginalFlags(isolated,site.file,backup);
+    await checkpoint();
     // Preserve this clean restored copy as the layer's permanent environment.
     for(const service of Object.values(site.document.services))service.restart='unless-stopped';
     await mkdir(directory,{recursive:true});await save(resolve(directory,'compose.json'),site.document);
@@ -339,21 +347,46 @@ export async function prepareLayerEnvironment(project,work,input){
   const b=await layerRuntimeBinding(original);
   if(await exists(rootActive(b)))await assertCustomerRuntime(project,work);
   await input.onProgress?.('starting');
+  await checkpoint();
   try{
    await compose(b,liveCompose(b),['up','-d','--wait','--wait-timeout','180','database','cache','queue'],{timeout:240000});
    await compose(b,liveCompose(b),['up','-d',...writers,'frontend'],{timeout:180000});
   }catch(error){if(error.code==='local_operation_failed')error.layerPreparationRetryable=true;throw error;}
   // Pin the layer socket for subsequent starts and refreshes.
   await input.onProgress?.('verifying');
+  await checkpoint();
   const health=await waitLayerHealth(b),document=await json(liveCompose(b));document.services.frontend.ports=['127.0.0.1:'+new URL(health.localUrl).port+':8080'];await save(liveCompose(b),document);
   const active=await exists(rootActive(b))?await json(rootActive(b)):null;
   if(active)await save(rootActive(b),{...active,composeDigest:hash(await readFile(liveCompose(b)))});
   const address=await startLayerGateway(b);
+  await checkpoint();
   const proof={status:'ready',projectId:project.id,runtimeId:work.runtimeId,customisationId:work.id,packId:work.packId,packVersion:work.packVersion,parentReleaseId:work.parentReleaseId??null,...(work.parentRuntime?{parentRuntime:work.parentRuntime}:{}),environmentId:b.environment.id,releaseId:active?.releaseId??null,imageId:active?.imageId??b.environment.imageId,isolated:true,healthVerified:true,resourceVerified:true,restoreVerified:true,credentialsPreserved:true,filesPreserved:true,businessRecordsPreserved:true,...health,...address,verifiedAt:new Date().toISOString()};
   await save(resolve(directory,'ready.json'),proof);return proof;
+ });}catch(error){
+  if(error.code==='layer_setup_cancelled')error.cancellationProof=await cancelPreparedLayerEnvironment(project,work,{operationId:input.id});
+  throw error;
+ }
+}
+export async function cancelPreparedLayerEnvironment(project,work,{operationId}){
+ if(!uuid(operationId))throw Error('Choose the owned layer setup request.');
+ const original=await customerBinding(project,work,{environmentOnly:true});
+ if(work.storageVersion!==2)throw Error('Only an independent layer setup can be stopped.');
+ return locked(original,async()=>{
+  const directory=resolve(original.directory,'runtime'),environmentFile=resolve(directory,'environment.json');await noLinks(original.root,directory);
+  if(await exists(environmentFile)){
+   const b=await layerRuntimeBinding(original);await stopLayerGateway(b);
+   await compose(b,liveCompose(b),['stop'],{timeout:180000});
+   const ids=(await compose(b,liveCompose(b),['ps','--all','--quiet'])).split(/\s+/).filter(Boolean);
+   for(const id of ids){const resource=await assertResource(b,'container',id);if(resource.Config?.Labels?.['com.cogentspec.customer.work']!==work.id||resource.State.Running)throw Error('The selected layer did not stop safely.');}
+   if(await exists(resolve(directory,'ready.json')))await unlink(resolve(directory,'ready.json'));
+  }else{
+   const journal=resolve(original.directory,'releases',operationId,'verification-active.json');await noLinks(original.root,resolve(original.directory,'releases',operationId));
+   if(await exists(journal))await cleanupVerification(original,{id:operationId},await json(journal));
+  }
+  return {cancelled:true,resourcesStopped:true,sourcePreserved:true,operationId,projectId:project.id,runtimeId:work.runtimeId,customisationId:work.id,packId:work.packId,packVersion:work.packVersion};
  });
 }
-async function verificationSite(b,release,backup,{runTests=true}={}){
+async function verificationSite(b,release,backup,{runTests=true,signal,checkCancelled}={}){
  const prefix=b.plan.key+'-vrc-'+release.id.replaceAll('-','').slice(0,12)+'-'+randomUUID().slice(0,8),document=structuredClone(backup.compose),resources=[];
  for(const [role,definition]of Object.entries(document.volumes)){const name=prefix+'-'+role;await volume(b,name,release.id);definition.name=name;resources.push(name);}
  const labels={...baseLabels(b),'com.cogentspec.customer.release':release.id,'com.cogentspec.customer.work':b.work.id};
@@ -361,12 +394,23 @@ async function verificationSite(b,release,backup,{runTests=true}={}){
  for(const [role,network]of Object.entries(document.networks)){network.name=prefix+'-'+role;network.labels=labels;}
  const file=resolve(b.directory,'releases',release.id,'verify-'+prefix.slice(-8)+'.json');await save(file,document);
  const args=extra=>['compose','--project-name',prefix,'-f',file,...extra];
- const run=(extra,options)=>docker(args(extra),{logPath:resolve(b.directory,'private-operation.log'),...options});
- const site={prefix,file,document,resources};await save(resolve(b.directory,'releases',release.id,'verification-active.json'),site);
+ const journal=resolve(b.directory,'releases',release.id,'verification-active.json');
+ const site={prefix,file,document,resources,commandContainers:[]};await save(journal,site);
+ const checkpoint=async()=>{await checkCancelled?.();signal?.throwIfAborted();};
+ const run=async(extra,options)=>{
+  await checkpoint();let value;
+  if(extra[0]==='run'){
+   const name=prefix+'-step-'+randomUUID().slice(0,8);site.commandContainers.push(name);await save(journal,site);
+   value=await docker(args(['run','--name',name,...extra.slice(1).filter(item=>item!=='--rm')]),{logPath:resolve(b.directory,'private-operation.log'),...options,signal});
+   await assertResource(b,'container',name,release.id);await docker(['container','rm',name]);
+  }else value=await docker(args(extra),{logPath:resolve(b.directory,'private-operation.log'),...options});
+  await checkpoint();return value;
+ };
  try{
+ await checkpoint();
  await cloneConfiguration(b,release,document.volumes.config.name,backup.compose.volumes.config.name);
  await docker(['run','-i','--rm','--pull','never','--network','none','--user','0','--entrypoint','/home/frappe/frappe-bench/env/bin/python','--mount','type=volume,source='+document.volumes.sites.name+',target=/sites','--mount','type=volume,source='+document.volumes.logs.name+',target=/logs',release.imageId,'-'],{input:"import os\nos.chown('/sites',1000,0);os.chown('/logs',1000,0)\n"});
- await docker(args(['up','-d','--wait','--wait-timeout','180','database','cache','queue']),{timeout:240000});
+ await run(['up','-d','--wait','--wait-timeout','180','database','cache','queue'],{timeout:240000});
  const restore=`import frappe,json,pathlib,secrets,hashlib\nfrom frappe.installer import _new_site,extract_files\np=pathlib.Path('.')\n(p/'common_site_config.json').write_text(json.dumps({'db_host':'database','db_port':3306,'redis_cache':'redis://cache:6379','redis_queue':'redis://queue:6379','redis_socketio':'redis://queue:6379','socketio_port':9000,'serve_default_site':True}))\n(p/'apps.txt').write_text('frappe\\nerpnext\\ncogent_erp\\n${(release.layerChain??[{app:release.app}]).map(layer=>layer.app).join('\\n')}\\n')\nmanifest=json.loads(pathlib.Path('/backup/manifest.json').read_text())\nassert manifest['projectId']==${JSON.stringify(b.project.id)} and manifest['runtimeId']==${JSON.stringify(b.project.contractRuntimeId)}\nfor name,digest in manifest['digests'].items():assert hashlib.sha256((pathlib.Path('/backup')/name).read_bytes()).hexdigest()==digest\nfrappe.init(site='cogent.local',new_site=True)\n_new_site(None,'cogent.local',db_root_username='root',db_root_password=pathlib.Path('/run/cogent/database-password').read_text(),admin_password=secrets.token_urlsafe(48),source_sql='/backup/'+manifest['roles']['database'],install_apps=['erpnext','cogent_erp'],mariadb_user_host_login_scope='%')\nfrappe.destroy()\nconfig=pathlib.Path('cogent.local/site_config.json');settings=json.loads(config.read_text());original=json.loads((pathlib.Path('/backup')/manifest['roles']['config']).read_text())\nfor key,value in original.items():\n if key not in ['db_name','db_password','db_user','db_host','db_port','db_type','redis_cache','redis_queue','redis_socketio']:settings[key]=value\nsettings['allow_tests']=True;settings['pause_scheduler']=True;config.write_text(json.dumps(settings));config.chmod(0o600)\nfor role in ['public','private']:extract_files('cogent.local','/backup/'+manifest['roles'][role])\nfrappe.init(site='cogent.local');frappe.connect();frappe.set_user('Administrator')\n`+snapshotCode+`assert_protected(manifest['snapshot'])\nfrappe.destroy();print('COGENT_VRC='+json.dumps({'restoreVerified':True,'credentialsPreserved':True,'filesPreserved':True,'businessRecordsPreserved':True}))\n`;
  const receipt=result(await run(['run','--rm','--no-deps','-T','--volume',backup.volume+':/backup:ro','--workdir','/home/frappe/frappe-bench/sites','backend','/home/frappe/frappe-bench/env/bin/python','-'],{input:restore,timeout:900000}));
  // Native Frappe installation, migrations and test discovery; never a simulated check.
@@ -389,8 +433,22 @@ async function verificationSite(b,release,backup,{runTests=true}={}){
  }catch(error){try{await cleanupVerification(b,release,site);error.verificationCleanupVerified=true;}catch{}throw error;}
 }
 async function cleanupVerification(b,release,site,{keepVolumes=false}={}){
- if(!site)return;await docker(['compose','--project-name',site.prefix,'-f',site.file,'down','--remove-orphans'],{timeout:180000});
+ if(!site)return;
+ const root=resolve(b.directory,'releases',release.id);await noLinks(b.root,root);
+ if(!site.prefix?.startsWith(b.plan.key+'-vrc-'+release.id.replaceAll('-','').slice(0,12)+'-')||!/^verify-[a-f0-9]{8}\.json$/.test(basename(site.file))||dirname(resolve(site.file))!==root)throw Error('The temporary layer cleanup identity changed.');
+ const document=await json(site.file);
+ for(const service of Object.values(document.services))if(service.labels?.['com.cogentspec.customer.work']!==b.work.id||service.labels?.['com.cogentspec.customer.release']!==release.id)throw Error('Temporary services belong to another layer.');
+ for(const name of site.commandContainers??[]){
+  if(typeof name!=='string'||!name.startsWith(site.prefix+'-step-')||!/^[-a-z0-9]+$/.test(name))throw Error('Temporary command ownership changed.');
+  const ids=await docker(['ps','-aq','--filter','name=^/'+name+'$']);
+  if(ids){await assertResource(b,'container',name,release.id);await docker(['container','stop','--time','10',name],{timeout:30000});await docker(['container','rm',name]);}
+ }
+ const ids=(await docker(['ps','-aq','--filter','label=com.docker.compose.project='+site.prefix])).split(/\s+/).filter(Boolean);
+ for(const id of ids){const resource=await assertResource(b,'container',id,release.id);if(resource.Config?.Labels?.['com.cogentspec.customer.work']!==b.work.id)throw Error('Temporary containers belong to another layer.');}
+ await docker(['compose','--project-name',site.prefix,'-f',site.file,'down','--remove-orphans'],{timeout:180000});
  if(!keepVolumes)for(const name of site.resources){await assertResource(b,'volume',name,release.id);await docker(['volume','rm',name]);}
+ await save(resolve(root,'verification-cleaned.json'),{...site,resourcesStopped:true,volumesKept:keepVolumes,cleanedAt:new Date().toISOString()});
+ const journal=resolve(root,'verification-active.json');if(await exists(journal))await unlink(journal);
 }
 export async function verifyCustomerRelease(project,handoff,id){const b=await layerRuntimeBinding(await customerBinding(project,handoff));return locked(b,async()=>{
  const release=await readRelease(b,id);if(release.workRevision!==b.work.updatedAt||(await sourceInventory(b.source)).digest!==release.sourceDigest)throw Error('Customer source or brief changed. Build a new release.');
