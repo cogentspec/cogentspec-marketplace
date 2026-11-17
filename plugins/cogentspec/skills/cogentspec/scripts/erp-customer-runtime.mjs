@@ -3,8 +3,8 @@ import {createHash,randomUUID} from 'node:crypto';
 import {createWriteStream} from 'node:fs';
 import {spawn} from 'node:child_process';
 import {readFile,writeFile,mkdir,readdir,lstat,realpath,open,unlink,cp} from 'node:fs/promises';
-import {resolve,dirname,relative,isAbsolute} from 'node:path';
-import {pathToFileURL} from 'node:url';
+import {resolve,dirname,relative,isAbsolute,basename} from 'node:path';
+import {pathToFileURL,fileURLToPath} from 'node:url';
 
 const hash=value=>createHash('sha256').update(value).digest('hex');
 const releaseEvidence=release=>{const {layerManifests,composition,...proof}=release;return {...proof,...(composition?{compositionDigest:hash(JSON.stringify(layerManifests)),resolvedConflicts:composition.conflicts.length}: {})};};
@@ -63,10 +63,10 @@ export async function execute(program,args,{input,timeout=120000,logPath,capture
 const docker=(args,options)=>execute('docker',args,options);
 async function safeRoot(path){if(!isAbsolute(path))throw Error('An absolute installation folder is required.');const root=await realpath(path);if(root.toLowerCase()!==resolve(path).toLowerCase()||(await lstat(path)).isSymbolicLink())throw Error('Linked installation folders are not supported.');return root;}
 async function noLinks(root,path){let current=root;for(const part of relative(root,path).split(/[\\/]/)){if(!part||part==='..')throw Error('Invalid customer layer path.');current=resolve(current,part);if(await exists(current)&&(await lstat(current)).isSymbolicLink())throw Error('Linked customer source is not supported.');}}
-export async function customerBinding(project,handoff){
+export async function customerBinding(project,handoff,{environmentOnly=false}={}){
  const root=await safeRoot(project.targetPath),runtime=await import(pathToFileURL(resolve(root,'scripts/erpnext-runtime.mjs'))),plan=await runtime.validatePlan();
  const work=handoff.erpCustomisation||handoff;
- if(project.projectType!=='erpnext_business_app'||!uuid(work.id)||work.installationId!==project.id||work.runtimeId!==project.contractRuntimeId||work.packVersion!==project.packVersion||work.packId!==project.packId||work.contextKey!==project.contextKey||plan.projectId!==project.id||plan.runtimeId!==project.contractRuntimeId||!Array.isArray(work.selectedApps)||!work.selectedApps.length||work.selectedApps.some(app=>!plan.apps.includes(app)))throw Error('The customer work does not match this installed ERP and module scope.');
+ if(project.projectType!=='erpnext_business_app'||!uuid(work.id)||work.installationId!==project.id||work.runtimeId!==project.contractRuntimeId||work.packVersion!==project.packVersion||work.packId!==project.packId||work.contextKey!==project.contextKey||plan.projectId!==project.id||plan.runtimeId!==project.contractRuntimeId||!Array.isArray(work.selectedApps)||!environmentOnly&&!work.selectedApps.length||work.selectedApps.some(app=>!plan.apps.includes(app)))throw Error('The customer work does not match this installed ERP and module scope.');
  const app='customer_'+work.id.replaceAll('-','').slice(0,20),directory=work.storageVersion===2?resolve(root,'.coge/customer-vrc/layers',work.id):resolve(root,'.coge/customer-vrc'),source=resolve(directory,'apps',app);
  const ancestors=work.ancestors??[];
  if(ancestors.length>32||new Set(ancestors.map(layer=>layer.id)).size!==ancestors.length||ancestors.some(layer=>!uuid(layer.id)||!uuid(layer.releaseId)||!/^sha256:[a-f0-9]{64}$/.test(layer.imageId)||!/^customer_[a-f0-9]{20}$/.test(layer.app))||work.parentId&&ancestors.at(-1)?.id!==work.parentId)throw Error('The pinned parent chain is invalid.');
@@ -146,14 +146,15 @@ const baseLabels=b=>({'com.cogentspec.erpnext.project':b.project.id,'com.cogents
 async function assertResource(b,kind,name,releaseId){const data=JSON.parse(await docker([kind,'inspect',name]))[0],labels=data.Labels||data.Config?.Labels||{};for(const [key,value]of Object.entries(baseLabels(b)))if(labels[key]!==value)throw Error('An ERP resource belongs to another installation.');if(releaseId&&labels['com.cogentspec.customer.release']!==releaseId)throw Error('A customer release resource belongs to another operation.');return data;}
 const composeArgs=(b,file,args)=>['compose','--project-name',b.plan.key,'-f',file,...args];
 const siteSession="import frappe,json,pathlib,hashlib,os\nfrappe.init(site='cogent.local');frappe.connect();frappe.set_user('Administrator')\n";
-const rootActive=b=>resolve(b.root,'.coge/customer-vrc/active.json');
+const rootActive=b=>resolve(b.runtimeDirectory??resolve(b.root,'.coge/customer-vrc'),'active.json');
 const dataSnapshot=`def snapshot():\n result={}\n for table in sorted(frappe.db.get_tables()):\n  if table in ['tabSessions','tabError Log','tabAccess Log','tabActivity Log','tabScheduled Job Log','tabRoute History','tabConsole Log','tabPatch Log','tabVersion']:continue\n  rows=frappe.db.sql('select * from '+chr(96)+table.replace(chr(96),chr(96)*2)+chr(96))\n  values=sorted(json.dumps(row,default=str,separators=(',',':')) for row in rows)\n  result[table]=hashlib.sha256('\\n'.join(values).encode()).hexdigest()\n return result\n`;
 async function python(b,file,code,mounts=[]){return result(await docker(composeArgs(b,file,['run','--rm','--no-deps','-T',...mounts,'--workdir','/home/frappe/frappe-bench/sites','backend','/home/frappe/frappe-bench/env/bin/python','-']),{input:code,timeout:900000,logPath:resolve(b.directory,'private-operation.log')}));}
-export async function assertCustomerRuntime(project){
- const root=await safeRoot(project.targetPath),path=resolve(root,'.coge/customer-vrc/active.json');if(!await exists(path))return null;
- const active=await json(path),b=await customerBinding(project,active.binding),release=await readRelease(b,active.releaseId);
- if(hash(await readFile(resolve(root,'.coge/runtime/compose.json')))!==active.composeDigest||active.imageId!==release.imageId)throw Error('The active customer runtime configuration changed.');
- const config=await json(resolve(root,'.coge/runtime/compose.json'));for(const role of ['backend','worker','scheduler','websocket','frontend'])if(config.services[role].image!==release.imageId)throw Error('The active services do not match the customer release.');return active;
+export async function assertCustomerRuntime(project,work){
+ const root=await safeRoot(project.targetPath),path=work?resolve(root,'.coge/customer-vrc/layers',work.id,'runtime/active.json'):resolve(root,'.coge/customer-vrc/active.json');if(!await exists(path))return null;
+ const active=await json(path);let b=await customerBinding(project,active.binding);if(work)b=await layerRuntimeBinding(b);
+ const release=await readRelease(b,active.releaseId);
+ if(hash(await readFile(liveCompose(b)))!==active.composeDigest||active.imageId!==release.imageId)throw Error('The active customer runtime configuration changed.');
+ const config=await json(liveCompose(b));for(const role of ['backend','worker','scheduler','websocket','frontend'])if(config.services[role].image!==release.imageId)throw Error('The active services do not match the customer release.');return active;
 }
 const writers=['backend','worker','scheduler','websocket'];
 async function freeze(b){
@@ -168,11 +169,11 @@ async function freeze(b){
  }catch(error){await compose(b,liveCompose(b),['up','-d',...writers,'frontend'],{timeout:180000});throw error;}
 }
 
-const liveCompose=b=>resolve(b.root,'.coge/runtime/compose.json');
+const liveCompose=b=>b.runtimeFile??resolve(b.root,'.coge/runtime/compose.json');
 async function compose(b,file,args,options){return docker(composeArgs(b,file,args),{logPath:resolve(b.directory,'private-operation.log'),...options});}
 const snapshotCode=`def protected_snapshot():\n tables={}\n modules=['CRM','Selling','Accounts','Buying','Stock','Manufacturing','Projects','Assets','Quality Management','Support']\n for app in frappe.get_installed_apps():\n  if app.startswith('customer_'):modules+=frappe.get_module_list(app)\n names=frappe.get_all('DocType',filters={'module':['in',modules],'issingle':0},pluck='name')\n names+=['__Auth']\n for name in sorted(set(names)):\n  table=name if name=='__Auth' else 'tab'+name\n  if table not in frappe.db.get_tables():continue\n  columns=frappe.db.get_table_columns(name if name!='__Auth' else '__Auth') if name!='__Auth' else [r[0] for r in frappe.db.sql('SHOW COLUMNS FROM '+chr(96)+table+chr(96))]\n  quoted=','.join(chr(96)+c.replace(chr(96),chr(96)*2)+chr(96) for c in columns)\n  rows=frappe.db.sql('SELECT '+quoted+' FROM '+chr(96)+table.replace(chr(96),chr(96)*2)+chr(96))\n  tables[table]={'columns':columns,'digest':hashlib.sha256('\\n'.join(sorted(json.dumps(r,default=str,separators=(',',':')) for r in rows)).encode()).hexdigest()}\n files={}\n for role in ['public/files','private/files']:\n  folder=pathlib.Path(frappe.get_site_path(role))\n  if folder.exists():\n   for path in sorted(folder.rglob('*')):\n    if path.is_symlink():raise Exception('Linked site files are unsupported')\n    if path.is_file():files[role+'/'+str(path.relative_to(folder))]=hashlib.sha256(path.read_bytes()).hexdigest()\n return {'tables':tables,'files':files,'encryptionKeyDigest':hashlib.sha256(str(frappe.conf.encryption_key).encode()).hexdigest()}\ndef assert_protected(expected):\n for table,entry in expected['tables'].items():\n  quoted=','.join(chr(96)+c.replace(chr(96),chr(96)*2)+chr(96) for c in entry['columns'])\n  rows=frappe.db.sql('SELECT '+quoted+' FROM '+chr(96)+table.replace(chr(96),chr(96)*2)+chr(96))\n  digest=hashlib.sha256('\\n'.join(sorted(json.dumps(r,default=str,separators=(',',':')) for r in rows)).encode()).hexdigest()\n  assert digest==entry['digest'],'Existing business records or credentials changed: '+table\n current=protected_snapshot()\n assert current['files']==expected['files'],'Uploaded files changed'\n assert current['encryptionKeyDigest']==expected['encryptionKeyDigest'],'Encryption configuration changed'\n`;
 async function volume(b,name,id){if(await docker(['volume','ls','-q','--filter','name=^'+name+'$'])){await assertResource(b,'volume',name,id);return;}
- const labels={...baseLabels(b),'com.cogentspec.customer.release':id};await docker(['volume','create',...Object.entries(labels).flatMap(([k,v])=>['--label',k+'='+v]),name]);}
+ const labels={...baseLabels(b),'com.cogentspec.customer.release':id,'com.cogentspec.customer.work':b.work.id};await docker(['volume','create',...Object.entries(labels).flatMap(([k,v])=>['--label',k+'='+v]),name]);}
 async function privateBackup(b,release){
  const id=randomUUID(),name=b.plan.key+'-vrc-backup-'+id.replaceAll('-','').slice(0,12);await volume(b,name,release.id);
  const current=await json(liveCompose(b));
@@ -182,26 +183,153 @@ async function privateBackup(b,release){
  const receipt=await python(b,liveCompose(b),code,['--volume',name+':/backup']);return {volume:name,id,...receipt,compose:current};
 }
 async function branchBackup(b,release){
- const current=await privateBackup(b,release),root=resolve(b.root,'.coge/customer-vrc');
- const active=await exists(rootActive(b))?await json(rootActive(b)):null;
- const saved=active?resolve(root,'branches',active.binding.id+'.json'):resolve(root,'foundation-data.json');
- await noLinks(b.root,saved);await save(saved,current);
- if(active){const snapshot=resolve(root,'snapshots',active.releaseId+'.json');await noLinks(b.root,snapshot);await save(snapshot,current);}
- // Reuse this branch’s own data, then the closest recorded ancestor, then the
- // original foundation snapshot. A sibling’s custom schema is never inherited.
- const choices=[resolve(root,'branches',b.work.id+'.json'),...(b.work.ancestors??[]).toReversed().map(layer=>resolve(root,'snapshots',layer.releaseId+'.json'))];
- for(const file of choices){await noLinks(b.root,file);if(await exists(file))return json(file);}
- const foundation=resolve(root,'foundation-data.json');
- if(!await exists(foundation))throw Error('A clean foundation data snapshot is required before creating an independent branch from a legacy customer runtime.');
- return json(foundation);
+ if(!b.runtimeDirectory)throw Error('A customer update requires its own layer runtime.');
+ const current=await privateBackup(b,release),active=await exists(rootActive(b))?await json(rootActive(b)):null;
+ if(active)await save(resolve(b.directory,'snapshots',active.releaseId+'.json'),current);
+ return current;
 }
+
 async function cloneConfiguration(b,release,configVolume,sourceConfig){
  await docker(['run','-i','--rm','--pull','never','--network','none','--user','0','--entrypoint','/home/frappe/frappe-bench/env/bin/python','--mount','type=volume,source='+sourceConfig+',target=/source,readonly','--mount','type=volume,source='+configVolume+',target=/target',release.baseImage,'-'],{input:"import pathlib,shutil,os\nsource=pathlib.Path('/source');target=pathlib.Path('/target');os.chown(target,1000,0)\nfor name in ['database-password','identity.json']:\n path=target/name;shutil.copyfile(source/name,path);path.chmod(0o400);os.chown(path,1000,0)\n"});
+}
+// A layer owns a permanent compose project and all of its writable volumes.
+// Never resolve customer edits through the installation's compose file.
+async function layerRuntimeBinding(b){
+ const runtimeDirectory=resolve(b.root,'.coge/customer-vrc/layers',b.work.id,'runtime');await noLinks(b.root,runtimeDirectory);
+ const environment=await json(resolve(runtimeDirectory,'environment.json'));
+ if(environment.workId!==b.work.id||environment.installationId!==b.project.id||environment.runtimeId!==b.work.runtimeId||environment.parentReleaseId!==(b.work.parentReleaseId??null)||!uuid(environment.id)||!environment.key?.startsWith(b.plan.key+'-vrc-'))throw Error('Prepare this layer’s separate runtime and data copy first.');
+ const runtimeFile=resolve(runtimeDirectory,'compose.json'),document=await json(runtimeFile),base=await json(resolve(b.root,'.coge/runtime/compose.json'));
+ const baseVolumes=new Set(Object.values(base.volumes).map(value=>value.name));
+ for(const definition of Object.values(document.volumes)){
+  if(baseVolumes.has(definition.name))throw Error('A layer cannot share writable volumes with its base.');
+  const resource=await assertResource(b,'volume',definition.name);
+  if(resource.Labels?.['com.cogentspec.customer.work']!==b.work.id)throw Error('A layer volume belongs to another layer.');
+ }
+ for(const service of Object.values(document.services)){
+  if(service.labels?.['com.cogentspec.customer.work']!==b.work.id)throw Error('A layer service belongs to another layer.');
+  for(const mount of service.volumes??[])if(typeof mount!=='string'||!Object.hasOwn(document.volumes,mount.split(':')[0]))throw Error('Layer services must use their own named volumes.');
+ }
+ const baseNetworks=new Set(Object.values(base.networks).map(value=>value.name));
+ for(const network of Object.values(document.networks))if(baseNetworks.has(network.name)||network.labels?.['com.cogentspec.customer.work']!==b.work.id)throw Error('A layer cannot share its base or sibling network.');
+ return {...b,runtimeDirectory,runtimeFile,environment,plan:{...b.plan,key:environment.key}};
+}
+async function layerHealth(b){
+ const document=await json(liveCompose(b)),active=await exists(rootActive(b))?await json(rootActive(b)):null;
+ const imageId=active?.imageId??b.environment.imageId;
+ for(const role of ['backend','worker','scheduler','websocket','frontend']){
+  const resource=await assertResource(b,'container',b.plan.key+'-'+role+'-1');
+  if(resource.Config.Labels?.['com.cogentspec.customer.work']!==b.work.id||resource.Image!==imageId||document.services[role].image!==imageId)throw Error('The layer services do not match their isolated image.');
+ }
+ const container=await assertResource(b,'container',b.plan.key+'-frontend-1');
+ if(container.Config.Labels?.['com.cogentspec.customer.work']!==b.work.id||!container.State?.Running)throw Error('The selected layer listener is unavailable.');
+ const ports=container.NetworkSettings?.Ports?.['8080/tcp'];
+ if(ports?.length!==1||ports[0].HostIp!=='127.0.0.1'||!/^\d+$/.test(ports[0].HostPort))throw Error('The selected layer listener is not private.');
+ const proof=await python(b,liveCompose(b),`import time,urllib.request,json\nfor attempt in range(90):\n try:\n  request=urllib.request.Request('http://backend:8000/api/method/cogent_erp.api.health',headers={'Host':'cogent.local'});value=json.load(urllib.request.urlopen(request,timeout=3))['message']\n  assert value['projectId']==${JSON.stringify(b.project.id)} and value['runtimeId']==${JSON.stringify(b.work.runtimeId)} and value['ready']\n  print('COGENT_VRC='+json.dumps({'ready':True}));break\n except Exception:time.sleep(1)\nelse:raise Exception('Layer native health check failed')\n`);
+ return {...proof,localUrl:'http://127.0.0.1:'+ports[0].HostPort+'/',processId:container.State.Pid};
+}
+async function waitLayerHealth(b){
+ const deadline=Date.now()+180000;let failure;
+ while(Date.now()<deadline){try{return await layerHealth(b);}catch(error){failure=error;await new Promise(done=>setTimeout(done,1000));}}
+ throw failure??Error('The selected layer did not become ready.');
+}
+async function layerGatewayDigest(){const {erpGatewaySourceDigest}=await import('./erp-installation-gateway.mjs');return hash((await readFile(fileURLToPath(import.meta.url),'utf8')).replaceAll('\r\n','\n')+await erpGatewaySourceDigest());}
+async function stopLayerGateway(b){
+ const file=resolve(b.runtimeDirectory,'listener.json');if(!await exists(file))return;
+ const previous=await json(file),runtimeFile=previous.runtimeFile??fileURLToPath(import.meta.url),inputFile=resolve(b.runtimeDirectory,'gateway-input.json');
+ if(!isAbsolute(runtimeFile)||basename(runtimeFile)!=='erp-customer-runtime.mjs')throw Error('The previous layer gateway helper identity changed.');
+ if(previous.workId!==b.work.id||previous.environmentId!==b.environment.id||!Number.isInteger(previous.pid)||previous.pid<=0)throw Error('The previous layer listener identity changed.');
+ if(process.platform==='win32'){
+  await execute('powershell.exe',['-NoProfile','-NonInteractive','-Command',"$ErrorActionPreference='Stop';$x=[Console]::In.ReadToEnd()|ConvertFrom-Json;$p=Get-CimInstance Win32_Process -Filter ('ProcessId='+$x.pid);if($p){if($p.Name -notmatch '^node(?:\\.exe)?$' -or $p.CommandLine -notmatch [Regex]::Escape([string]$x.runtimeFile) -or $p.CommandLine -notmatch [Regex]::Escape([string]$x.inputFile)){return};Stop-Process -Id $x.pid -ErrorAction Stop}"],{input:JSON.stringify({pid:previous.pid,runtimeFile,inputFile}),timeout:15000});
+ }else{
+  let command;try{command=(await readFile('/proc/'+previous.pid+'/cmdline','utf8')).split('\0');}catch(error){if(error.code!=='ENOENT')throw error;}
+  if(command){if(!command.includes(runtimeFile)||!command.includes(inputFile))return;try{process.kill(previous.pid);}catch(error){if(error.code!=='ESRCH')throw error;}}
+ }
+}
+export async function stopLayerEnvironmentGateway(project,work){return stopLayerGateway(await layerRuntimeBinding(await customerBinding(project,work,{environmentOnly:true})));}
+async function startLayerGateway(b){
+ const {readErpAddress}=await import('./erp-installation-address.mjs'),identity={id:b.work.id,contractRuntimeId:b.work.runtimeId,targetPath:b.runtimeDirectory},digest=await layerGatewayDigest();
+ const check=async()=>{
+  const address=await readErpAddress(identity);if(!address)return null;
+  try{const response=await fetch(new URL('/__cogentspec/health',address.url),{redirect:'error',signal:AbortSignal.timeout(30000)}),proof=await response.json();
+   if(!response.ok||proof.customisationId!==b.work.id||proof.environmentId!==b.environment.id||proof.layerGatewayDigest!==digest||proof.ready!==true)return null;
+   const listener=await json(resolve(b.runtimeDirectory,'listener.json'));if(listener.url!==address.url||listener.workId!==b.work.id||listener.environmentId!==b.environment.id)return null;
+   return {localUrl:address.url,processId:listener.pid};
+  }catch{return null;}
+ };
+ const current=await check();if(current)return current;
+ await stopLayerGateway(b);
+ const inputFile=resolve(b.runtimeDirectory,'gateway-input.json');
+ const {id,targetPath,projectType,contractRuntimeId,packId,packVersion,contextKey}=b.project;
+ const {installationId,runtimeId,parentId,parentReleaseId,ancestors,storageVersion,updatedAt}=b.work;
+ const work={id:b.work.id,installationId,runtimeId,packId,packVersion,contextKey,parentId,parentReleaseId,ancestors,storageVersion,updatedAt,selectedApps:[]};
+ await save(inputFile,{project:{id,targetPath,projectType,contractRuntimeId,packId,packVersion,contextKey},work});const log=await open(resolve(b.runtimeDirectory,'gateway.log'),'a',0o600);
+ try{const child=spawn(process.execPath,[fileURLToPath(import.meta.url),'--layer-gateway',inputFile],{windowsHide:true,detached:true,stdio:['ignore',log.fd,log.fd]});await new Promise((done,fail)=>{child.once('spawn',done);child.once('error',fail);});child.unref();}finally{await log.close();}
+ const deadline=Date.now()+120000;while(Date.now()<deadline){const ready=await check();if(ready)return ready;await new Promise(done=>setTimeout(done,1000));}
+ throw Error('The layer’s private browser address did not become ready. Its data copy has been kept.');
+}
+async function serveLayerGateway(inputFile){
+ const {project,work}=await json(inputFile),b=await layerRuntimeBinding(await customerBinding(project,work,{environmentOnly:true}));
+ if(resolve(inputFile)!==resolve(b.runtimeDirectory,'gateway-input.json'))throw Error('The layer gateway request belongs to another directory.');
+ await noLinks(b.root,inputFile);await noLinks(b.root,resolve(b.root,'scripts/erpnext-session.mjs'));
+ const {createErpAddressGateway}=await import('./erp-installation-gateway.mjs'),{bindErpAddress}=await import('./erp-installation-address.mjs'),session=await import(pathToFileURL(resolve(b.root,'scripts/erpnext-session.mjs')));
+ const digest=await layerGatewayDigest();
+ const inspect=async()=>({...await layerHealth(b),projectId:project.id,runtimeId:work.runtimeId,sourceDigest:b.plan.sourceDigest,planDigest:b.plan.planDigest,customisationId:work.id,environmentId:b.environment.id,layerGatewayDigest:digest});
+ const server=createErpAddressGateway({plan:b.plan,inspect,connection:async()=>{const frontend=await assertResource(b,'container',b.plan.key+'-frontend-1');if(frontend.Config.Labels?.['com.cogentspec.customer.work']!==b.work.id)throw Error('Wrong layer listener');const ports=frontend.NetworkSettings?.Ports?.['8080/tcp'];if(ports?.length!==1||ports[0].HostIp!=='127.0.0.1')throw Error('Layer listener changed');return Number(ports[0].HostPort);},owner:async()=>false,session,gatewaySourceDigest:digest});
+ const address=await bindErpAddress({id:work.id,contractRuntimeId:work.runtimeId,targetPath:b.runtimeDirectory},server);
+ await save(resolve(b.runtimeDirectory,'listener.json'),{workId:work.id,environmentId:b.environment.id,pid:process.pid,runtimeFile:fileURLToPath(import.meta.url),url:address.url});
+ process.once('SIGTERM',()=>server.close());process.once('SIGINT',()=>server.close());
+}
+export async function prepareLayerEnvironment(project,work,input){
+ const original=await customerBinding(project,work,{environmentOnly:true});
+ return locked(original,async()=>{
+  const directory=resolve(original.root,'.coge/customer-vrc/layers',work.id,'runtime');await noLinks(original.root,directory);
+  if(!await exists(resolve(directory,'environment.json'))){
+   if(!uuid(input.id))throw Error('Choose a current customer layer environment request.');
+   if(await exists(rootActive(original)))throw Error('A legacy shared customer runtime needs a recovery review before independent layers can be prepared. Its data has been preserved.');
+   const {receipt}=await verifiedBase(original),parent=work.ancestors?.at(-1);
+   let source=original;
+   if(parent){
+    const parentDirectory=resolve(original.root,'.coge/customer-vrc/layers',parent.id);await noLinks(original.root,parentDirectory);
+    const environment=await json(resolve(parentDirectory,'runtime/environment.json'));
+    const active=await json(resolve(parentDirectory,'runtime/active.json'));
+    if(active.releaseId!==parent.releaseId||active.imageId!==parent.imageId)throw Error('The pinned parent runtime is no longer active. Restore that exact parent before copying its data.');
+    source=await layerRuntimeBinding({...original,work:{...active.binding,selectedApps:[]},directory:parentDirectory});
+    if(environment.workId!==parent.id)throw Error('The parent runtime belongs to another layer.');
+   }
+   const release={id:input.id,baseImage:receipt.image,imageId:parent?.imageId??receipt.image,layerChain:work.ancestors??[]};
+   await mkdir(resolve(original.directory,'releases',input.id),{recursive:true});
+   const sourceCompose=await assertLiveOwnership(source,{pinListener:false}),sourceFile=resolve(original.directory,'releases',input.id,'source-compose.json');
+   await save(sourceFile,sourceCompose);source={...source,runtimeFile:sourceFile};let backup,site;
+   await freeze(source);
+   try{backup=await privateBackup(source,release);}finally{await compose(source,liveCompose(source),['up','-d',...writers,'frontend'],{timeout:180000});}
+   try{
+    site=await verificationSite(original,release,backup,{runTests:false});
+    const isolated={...original,plan:{...original.plan,key:site.prefix}};
+    await restoreOriginalFlags(isolated,site.file,backup);
+    // Preserve this clean restored copy as the layer's permanent environment.
+    for(const service of Object.values(site.document.services))service.restart='unless-stopped';
+    await mkdir(directory,{recursive:true});await save(resolve(directory,'compose.json'),site.document);
+    const environment={id:input.id,key:site.prefix,workId:work.id,installationId:project.id,runtimeId:work.runtimeId,parentReleaseId:work.parentReleaseId??null,imageId:release.imageId,backupVolume:backup.volume,createdAt:new Date().toISOString()};
+    await save(resolve(directory,'environment.json'),environment);
+   }catch(error){await cleanupVerification(original,release,site).catch(()=>{});throw error;}
+  }
+  const b=await layerRuntimeBinding(original);
+  if(await exists(rootActive(b)))await assertCustomerRuntime(project,work);
+  await compose(b,liveCompose(b),['up','-d','--wait','--wait-timeout','180','database','cache','queue'],{timeout:240000});
+  await compose(b,liveCompose(b),['up','-d',...writers,'frontend'],{timeout:180000});
+  // Pin the layer socket for subsequent starts and refreshes.
+  const health=await waitLayerHealth(b),document=await json(liveCompose(b));document.services.frontend.ports=['127.0.0.1:'+new URL(health.localUrl).port+':8080'];await save(liveCompose(b),document);
+  const active=await exists(rootActive(b))?await json(rootActive(b)):null;
+  if(active)await save(rootActive(b),{...active,composeDigest:hash(await readFile(liveCompose(b)))});
+  const address=await startLayerGateway(b);
+  const proof={status:'ready',projectId:project.id,runtimeId:work.runtimeId,customisationId:work.id,packId:work.packId,packVersion:work.packVersion,parentReleaseId:work.parentReleaseId??null,environmentId:b.environment.id,releaseId:active?.releaseId??null,imageId:active?.imageId??b.environment.imageId,isolated:true,healthVerified:true,resourceVerified:true,restoreVerified:true,credentialsPreserved:true,filesPreserved:true,businessRecordsPreserved:true,...health,...address,verifiedAt:new Date().toISOString()};
+  await save(resolve(directory,'ready.json'),proof);return proof;
+ });
 }
 async function verificationSite(b,release,backup,{runTests=true}={}){
  const prefix=b.plan.key+'-vrc-'+release.id.replaceAll('-','').slice(0,12)+'-'+randomUUID().slice(0,8),document=structuredClone(backup.compose),resources=[];
  for(const [role,definition]of Object.entries(document.volumes)){const name=prefix+'-'+role;await volume(b,name,release.id);definition.name=name;resources.push(name);}
- const labels={...baseLabels(b),'com.cogentspec.customer.release':release.id};
+ const labels={...baseLabels(b),'com.cogentspec.customer.release':release.id,'com.cogentspec.customer.work':b.work.id};
  for(const [role,service]of Object.entries(document.services)){service.labels=labels;service.restart='no';if(['backend','worker','scheduler','websocket','frontend'].includes(role))service.image=release.imageId;if(role==='frontend')service.ports=['127.0.0.1::8080'];}
  for(const [role,network]of Object.entries(document.networks)){network.name=prefix+'-'+role;network.labels=labels;}
  const file=resolve(b.directory,'releases',release.id,'verify-'+prefix.slice(-8)+'.json');await save(file,document);
@@ -237,14 +365,14 @@ async function cleanupVerification(b,release,site,{keepVolumes=false}={}){
  if(!site)return;await docker(['compose','--project-name',site.prefix,'-f',site.file,'down','--remove-orphans'],{timeout:180000});
  if(!keepVolumes)for(const name of site.resources){await assertResource(b,'volume',name,release.id);await docker(['volume','rm',name]);}
 }
-export async function verifyCustomerRelease(project,handoff,id){const b=await customerBinding(project,handoff);return locked(b,async()=>{
+export async function verifyCustomerRelease(project,handoff,id){const b=await layerRuntimeBinding(await customerBinding(project,handoff));return locked(b,async()=>{
  const release=await readRelease(b,id);if(release.workRevision!==b.work.updatedAt||(await sourceInventory(b.source)).digest!==release.sourceDigest)throw Error('Customer source or brief changed. Build a new release.');
  await assertLiveOwnership(b);let backup,site;await freeze(b);
  try{backup=await branchBackup(b,release);}finally{await compose(b,liveCompose(b),['up','-d',...writers,'frontend'],{timeout:180000});}
  try{site=await verificationSite(b,release,backup);const proof={...releaseEvidence(release),status:'verified',backupVolume:backup.volume,backupSnapshotDigest:backup.snapshotDigest,...site.receipt,verifiedAt:new Date().toISOString()};await save(resolve(b.directory,'releases',id,'verification.json'),proof);return proof;}
  finally{await cleanupVerification(b,release,site);}
  });}
-async function assertLiveOwnership(b){const previous=await readFile(liveCompose(b)),document=JSON.parse(previous);
+async function assertLiveOwnership(b,{pinListener=true}={}){const previous=await readFile(liveCompose(b)),document=JSON.parse(previous);
  for(const definition of Object.values(document.volumes))await assertResource(b,'volume',definition.name);
  for(const [role,service]of Object.entries(document.services))for(const [key,value]of Object.entries(baseLabels(b)))if(service.labels?.[key]!==value)throw Error('Live service '+role+' belongs to another installation.');
  // A legacy dynamic port can move even when verification merely stops and
@@ -253,17 +381,18 @@ async function assertLiveOwnership(b){const previous=await readFile(liveCompose(
  const frontend=await assertResource(b,'container',b.plan.key+'-frontend-1'),listener=frontend.NetworkSettings?.Ports?.['8080/tcp'];
  if(!Array.isArray(listener)||listener.length!==1||listener[0].HostIp!=='127.0.0.1'||!/^\d+$/.test(listener[0].HostPort))throw Error('The current private ERP listener could not be verified.');
  const ports=['127.0.0.1:'+listener[0].HostPort+':8080'];
+ if(!pinListener){document.services.frontend.ports=ports;return document;}
  if(JSON.stringify(document.services.frontend.ports)!==JSON.stringify(ports)){
-  const active=await assertCustomerRuntime(b.project);document.services.frontend.ports=ports;
+  const active=await assertCustomerRuntime(b.project,b.runtimeDirectory?b.work:undefined);document.services.frontend.ports=ports;
   try{await save(liveCompose(b),document);if(active)await save(rootActive(b),{...active,composeDigest:hash(await readFile(liveCompose(b)))});}
   catch(error){await writeFile(liveCompose(b),previous);if(active)await save(rootActive(b),active);throw error;}
  }
  return document;
 }
-async function waitNativeHealth(b){for(let attempt=0;attempt<90;attempt++){try{const value=await b.runtime.inspect();if(value.ready)return value;}catch{}await new Promise(done=>setTimeout(done,1000));}throw Error('The deployed ERP did not pass its exact installation health check.');}
+async function waitNativeHealth(b){if(b.runtimeDirectory)return waitLayerHealth(b);for(let attempt=0;attempt<90;attempt++){try{const value=await b.runtime.inspect();if(value.ready)return value;}catch{}await new Promise(done=>setTimeout(done,1000));}throw Error('The deployed ERP did not pass its exact installation health check.');}
 async function restoreOriginalFlags(b,file,backup){return python(b,file,siteSession+`original=json.loads((pathlib.Path('/backup')/json.loads(pathlib.Path('/backup/manifest.json').read_text())['roles']['config']).read_text())\npath=pathlib.Path('cogent.local/site_config.json');settings=json.loads(path.read_text())\nfor key,default in [('allow_tests',False),('pause_scheduler',False),('maintenance_mode',0)]:settings[key]=original.get(key,default)\npath.write_text(json.dumps(settings));path.chmod(0o600);frappe.destroy();print('COGENT_VRC='+json.dumps({'flagsRestored':True}))\n`,['--volume',backup.volume+':/backup:ro']);}
 async function rollbackDigest(b){return python(b,liveCompose(b),siteSession+snapshotCode+`value=protected_snapshot()\nfor name in ['User','Has Role','User Permission','Custom Field','Property Setter','Workflow','Workflow Document State','Workflow Transition','Print Format','Client Script','Server Script','Custom DocPerm','DocPerm']:\n table='tab'+name\n if table not in frappe.db.get_tables():continue\n columns=[c for c in frappe.db.get_table_columns(name) if name!='User' or c not in ['last_login','last_active','last_ip']]\n quoted=','.join(chr(96)+c.replace(chr(96),chr(96)*2)+chr(96) for c in columns)\n rows=frappe.db.sql('SELECT '+quoted+' FROM '+chr(96)+table+chr(96))\n value['tables'][table]={'columns':columns,'digest':hashlib.sha256('\\n'.join(sorted(json.dumps(r,default=str,separators=(',',':')) for r in rows)).encode()).hexdigest()}\nfor app in frappe.get_installed_apps():\n if not app.startswith('customer_'):continue\n for module in frappe.get_module_list(app):\n  for name in frappe.get_all('DocType',filters={'module':module,'issingle':0},pluck='name'):\n   table='tab'+name\n   if table not in frappe.db.get_tables():continue\n   rows=frappe.db.sql('SELECT * FROM '+chr(96)+table.replace(chr(96),chr(96)*2)+chr(96))\n   value['tables'][table]={'digest':hashlib.sha256('\\n'.join(sorted(json.dumps(r,default=str,separators=(',',':')) for r in rows)).encode()).hexdigest()}\nfrappe.destroy();print('COGENT_VRC='+json.dumps({'digest':hashlib.sha256(json.dumps(value,sort_keys=True).encode()).hexdigest()}))\n`);}
-export async function deployCustomerRelease(project,handoff,grant,authorize=async()=>{throw Error('Use the authorised customer release worker.');}){const b=await customerBinding(project,handoff);return locked(b,async()=>{
+export async function deployCustomerRelease(project,handoff,grant,authorize=async()=>{throw Error('Use the authorised customer release worker.');}){const b=await layerRuntimeBinding(await customerBinding(project,handoff));return locked(b,async()=>{
  await authorize();
  const release=await readRelease(b,grant.id),verification=await json(resolve(b.directory,'releases',release.id,'verification.json'));
  if(grant.state!=='deploying'||!uuid(grant.claim)||grant.work_revision!==b.work.updatedAt||grant.proof?.imageId!==release.imageId||grant.proof?.sourceDigest!==release.sourceDigest||verification.nativeTestsPassed!==true||(await sourceInventory(b.source)).digest!==release.sourceDigest)throw Error('An exact, current server-approved customer deployment is required.');
@@ -293,7 +422,7 @@ export async function deployCustomerRelease(project,handoff,grant,authorize=asyn
   const baseline=await rollbackDigest(b);
   const active={protocol:1,releaseId:release.id,imageId:release.imageId,composeDigest:hash(await readFile(liveCompose(b))),binding:b.work,rollbackDigest:baseline.digest,activatedAt:new Date().toISOString()};await save(activePath,active);
   await authorize();await compose(b,liveCompose(b),['up','-d','worker','scheduler','frontend'],{timeout:180000});opened=true;await waitNativeHealth(b);
-  const proof={...releaseEvidence(release),previousReleaseId:previousActive?.releaseId||null,deployed:true,healthVerified:true,restoreVerified:true,migrationVerified:true,businessRecordsPreserved:true,credentialsPreserved:true,filesPreserved:true,cleanProductionCopy:true,deployedAt:new Date().toISOString()};await save(resolve(b.directory,'releases',release.id,'deployment.json'),proof);return proof;
+  const proof={...releaseEvidence(release),previousReleaseId:previousActive?.releaseId||null,deployed:true,healthVerified:true,restoreVerified:true,migrationVerified:true,businessRecordsPreserved:true,credentialsPreserved:true,filesPreserved:true,cleanProductionCopy:true,isolated:true,environmentId:b.environment.id,deployedAt:new Date().toISOString()};await save(resolve(b.directory,'releases',release.id,'deployment.json'),proof);return proof;
  }catch(error){
   await compose(b,liveCompose(b),['stop','frontend',...writers],{timeout:180000}).catch(()=>{});
   if(opened){const active=await json(activePath),current=await rollbackDigest(b);if(current.digest!==active.rollbackDigest)throw Error('Deployment needs recovery review: post-release data changed. Both data copies and the recovery journal have been retained.');}
@@ -302,15 +431,19 @@ export async function deployCustomerRelease(project,handoff,grant,authorize=asyn
   await compose(b,liveCompose(b),['up','-d','database','cache','queue',...writers,'frontend'],{timeout:240000});throw error;
  }finally{await cleanupVerification(b,release,checked).catch(()=>{});if(clean&&!switched)await cleanupVerification(b,release,clean).catch(()=>{});}
  });}
-export async function rollbackCustomerRelease(project,handoff,grant,authorize=async()=>{throw Error('Use the authorised customer release worker.');}){const b=await customerBinding(project,handoff);return locked(b,async()=>{
+export async function rollbackCustomerRelease(project,handoff,grant,authorize=async()=>{throw Error('Use the authorised customer release worker.');}){const b=await layerRuntimeBinding(await customerBinding(project,handoff));return locked(b,async()=>{
  await authorize();
- const active=await assertCustomerRuntime(project),release=await readRelease(b,grant.id);if(!active||active.releaseId!==grant.id||grant.state!=='rolling_back'||!uuid(grant.claim))throw Error('Approve rollback of the currently installed customer release.');
+ const active=await assertCustomerRuntime(project,b.work),release=await readRelease(b,grant.id);if(!active||active.releaseId!==grant.id||grant.state!=='rolling_back'||!uuid(grant.claim))throw Error('Approve rollback of the currently installed customer release.');
  await assertLiveOwnership(b);await freeze(b);
  try{
   if((await rollbackDigest(b)).digest!==active.rollbackDigest)throw Object.assign(Error('Business or configuration records changed after deployment. Automatic rollback is blocked; review recovery to preserve those changes.'),{code:'rollback_data_changed'});
   const recovery=await json(resolve(b.directory,'releases',release.id,'recovery.json'));for(const volume of Object.values(recovery.previousCompose.volumes))await assertResource(b,'volume',volume.name);
   await save(liveCompose(b),recovery.previousCompose);if(recovery.previousActive)await save(rootActive(b),recovery.previousActive);else await unlink(rootActive(b));
   await compose(b,liveCompose(b),['up','-d','database','cache','queue',...writers,'frontend'],{timeout:240000});await waitNativeHealth(b);
-  return {...releaseEvidence(release),rolledBack:true,businessRecordsPreserved:true,credentialsPreserved:true,filesPreserved:true};
+  return {...releaseEvidence(release),rolledBack:true,isolated:true,environmentId:b.environment.id,businessRecordsPreserved:true,credentialsPreserved:true,filesPreserved:true};
  }catch(error){await compose(b,liveCompose(b),['up','-d',...writers,'frontend'],{timeout:180000});throw error;}
  });}
+
+if(process.argv[2]==='--layer-gateway'&&resolve(process.argv[1]??'')===fileURLToPath(import.meta.url)){
+ serveLayerGateway(process.argv[3]).catch(()=>{console.error('The layer browser gateway could not start. Its data has been preserved.');process.exitCode=1;});
+}

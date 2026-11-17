@@ -1,7 +1,7 @@
 import {readFile,lstat} from 'node:fs/promises';
 import {resolve,basename} from 'node:path';
 import {createHash} from 'node:crypto';
-import {initializeCustomerLayer,buildCustomerRelease,verifyCustomerRelease,deployCustomerRelease,rollbackCustomerRelease} from './erp-customer-runtime.mjs';
+import {prepareLayerEnvironment,initializeCustomerLayer,buildCustomerRelease,verifyCustomerRelease,deployCustomerRelease,rollbackCustomerRelease} from './erp-customer-runtime.mjs';
 let raw='';for await(const chunk of process.stdin){raw+=chunk;if(raw.length>8192)throw Error('Invalid computer authorisation.');}
 let credential=JSON.parse(raw);raw='';
 const api=async body=>{const response=await fetch('https://cogentspec.com/api/plugin/erp-customer-releases',{method:'POST',redirect:'error',headers:{authorization:'Bearer '+credential.token,'content-type':'application/json'},body:JSON.stringify(body),signal:AbortSignal.timeout(30000)});if(!response.ok)throw Error('Customer release authorisation is unavailable.');return response.json();};
@@ -13,12 +13,13 @@ async function localLease(){
 }
 let job,timer,failed=false;
 try{
- await localLease();job=(await api({action:'claim',protocol:3})).job;
+ await localLease();job=(await api({action:'claim',protocol:4})).job;
  if(job){
   const heartbeat=async()=>{await localLease();if(failed)throw Error('The customer release lease was lost.');await api({action:'heartbeat',id:job.id,claim:job.claim});};
   timer=setInterval(()=>heartbeat().catch(()=>{failed=true;}),30000);
   let proof;
-  if(job.kind==='initialize')proof=await initializeCustomerLayer(job.project,job.work);
+  if(job.kind==='environment')proof=await prepareLayerEnvironment(job.project,job.work,{id:job.id});
+  else if(job.kind==='initialize')proof=await initializeCustomerLayer(job.project,job.work);
   else if(job.kind==='build'||job.kind==='refresh'&&job.state==='building'){
    await buildCustomerRelease(job.project,job.work,{id:job.id,version:job.version,revision:job.revision,workRevision:job.work_revision});await heartbeat();
    proof=await verifyCustomerRelease(job.project,job.work,job.id);
