@@ -57,7 +57,7 @@ export async function execute(program,args,{input,timeout=120000,logPath,capture
   const timer=setTimeout(()=>{child.kill();finish(Error('Customer release operation timed out. Inspect its state before retrying.'));},timeout);
   child.on('error',()=>finish(Error('A required local build tool is unavailable.')));child.stdout.on('data',chunk=>{log?.write(chunk);size+=chunk.length;if(size>4*1024*1024){child.kill();finish(Error('Build output exceeded its limit.'));}else output+=chunk;});
   // Process output may contain customer data. Return only structured receipts.
-  child.stderr.on('data',chunk=>{log?.write(chunk);if(captureStderr){size+=chunk.length;if(size>4*1024*1024){child.kill();finish(Error('Build output exceeded its limit.'));}else output+=chunk;}});child.on('close',code=>finish(code===0?null:Error('Customer release operation failed ('+program+', exit '+code+').'+(logPath?' Inspect the private operation log.':''))));child.stdin.on('error',()=>{});child.stdin.end(input);
+  child.stderr.on('data',chunk=>{log?.write(chunk);if(captureStderr){size+=chunk.length;if(size>4*1024*1024){child.kill();finish(Error('Build output exceeded its limit.'));}else output+=chunk;}});child.on('close',code=>finish(code===0?null:Object.assign(Error('Customer release operation failed ('+program+', exit '+code+').'+(logPath?' Inspect the private operation log.':'')),{code:'local_operation_failed'})));child.stdin.on('error',()=>{});child.stdin.end(input);
  });
 }
 const docker=(args,options)=>execute('docker',args,options);
@@ -282,6 +282,7 @@ async function serveLayerGateway(inputFile){
 export async function prepareLayerEnvironment(project,work,input){
  const original=await customerBinding(project,work,{environmentOnly:true});
  return locked(original,async()=>{
+  await input.onProgress?.('checking');
   const directory=resolve(original.root,'.coge/customer-vrc/layers',work.id,'runtime');await noLinks(original.root,directory);
   if(!await exists(resolve(directory,'environment.json'))){
    if(!uuid(input.id))throw Error('Choose a current customer layer environment request.');
@@ -300,6 +301,7 @@ export async function prepareLayerEnvironment(project,work,input){
    await mkdir(resolve(original.directory,'releases',input.id),{recursive:true});
    const sourceCompose=await assertLiveOwnership(source,{pinListener:false}),sourceFile=resolve(original.directory,'releases',input.id,'source-compose.json');
    await save(sourceFile,sourceCompose);source={...source,runtimeFile:sourceFile};let backup,site;
+   await input.onProgress?.('copying');
    await freeze(source);
    try{backup=await privateBackup(source,release);}finally{await compose(source,liveCompose(source),['up','-d',...writers,'frontend'],{timeout:180000});}
    try{
@@ -311,13 +313,24 @@ export async function prepareLayerEnvironment(project,work,input){
     await mkdir(directory,{recursive:true});await save(resolve(directory,'compose.json'),site.document);
     const environment={id:input.id,key:site.prefix,workId:work.id,installationId:project.id,runtimeId:work.runtimeId,parentReleaseId:work.parentReleaseId??null,imageId:release.imageId,backupVolume:backup.volume,createdAt:new Date().toISOString()};
     await save(resolve(directory,'environment.json'),environment);
-   }catch(error){await cleanupVerification(original,release,site).catch(()=>{});throw error;}
+   }catch(error){
+    // Only retry a completed failing command after cleanup succeeded. A killed
+    // process, ownership mismatch or unknown state always needs a human review.
+    let cleaned=error.verificationCleanupVerified===true;
+    if(site)try{await cleanupVerification(original,release,site);cleaned=true;}catch{}
+    if(cleaned&&error.code==='local_operation_failed')error.layerPreparationRetryable=true;
+    throw error;
+   }
   }
   const b=await layerRuntimeBinding(original);
   if(await exists(rootActive(b)))await assertCustomerRuntime(project,work);
-  await compose(b,liveCompose(b),['up','-d','--wait','--wait-timeout','180','database','cache','queue'],{timeout:240000});
-  await compose(b,liveCompose(b),['up','-d',...writers,'frontend'],{timeout:180000});
+  await input.onProgress?.('starting');
+  try{
+   await compose(b,liveCompose(b),['up','-d','--wait','--wait-timeout','180','database','cache','queue'],{timeout:240000});
+   await compose(b,liveCompose(b),['up','-d',...writers,'frontend'],{timeout:180000});
+  }catch(error){if(error.code==='local_operation_failed')error.layerPreparationRetryable=true;throw error;}
   // Pin the layer socket for subsequent starts and refreshes.
+  await input.onProgress?.('verifying');
   const health=await waitLayerHealth(b),document=await json(liveCompose(b));document.services.frontend.ports=['127.0.0.1:'+new URL(health.localUrl).port+':8080'];await save(liveCompose(b),document);
   const active=await exists(rootActive(b))?await json(rootActive(b)):null;
   if(active)await save(rootActive(b),{...active,composeDigest:hash(await readFile(liveCompose(b)))});
@@ -359,7 +372,7 @@ async function verificationSite(b,release,backup,{runTests=true}={}){
  }
  const after=result(await run(['run','--rm','--no-deps','-T','--volume',backup.volume+':/backup:ro','--workdir','/home/frappe/frappe-bench/sites','backend','/home/frappe/frappe-bench/env/bin/python','-'],{input:siteSession+snapshotCode+`manifest=json.loads(pathlib.Path('/backup/manifest.json').read_text());assert_protected(manifest['snapshot'])\nconfig=pathlib.Path('cogent.local/site_config.json');settings=json.loads(config.read_text());settings['allow_tests']=False;config.write_text(json.dumps(settings));config.chmod(0o600)\nfrappe.db.commit();frappe.destroy();print('COGENT_VRC='+json.dumps({'migrationVerified':True,'nativeTestsPassed':${runTests?'True':'False'},'credentialsPreserved':True,'filesPreserved':True,'businessRecordsPreserved':True}))\n`}));
  return {...site,receipt:{...receipt,...after,nativeTestCount:testCount}};
- }catch(error){await cleanupVerification(b,release,site).catch(()=>{});throw error;}
+ }catch(error){try{await cleanupVerification(b,release,site);error.verificationCleanupVerified=true;}catch{}throw error;}
 }
 async function cleanupVerification(b,release,site,{keepVolumes=false}={}){
  if(!site)return;await docker(['compose','--project-name',site.prefix,'-f',site.file,'down','--remove-orphans'],{timeout:180000});

@@ -15,10 +15,10 @@ let job,timer,failed=false;
 try{
  await localLease();job=(await api({action:'claim',protocol:4})).job;
  if(job){
-  const heartbeat=async()=>{await localLease();if(failed)throw Error('The customer release lease was lost.');await api({action:'heartbeat',id:job.id,claim:job.claim});};
+  const heartbeat=async phase=>{await localLease();if(failed)throw Error('The customer release lease was lost.');await api({action:'heartbeat',id:job.id,claim:job.claim,...(phase?{phase}:{})});};
   timer=setInterval(()=>heartbeat().catch(()=>{failed=true;}),30000);
   let proof;
-  if(job.kind==='environment')proof=await prepareLayerEnvironment(job.project,job.work,{id:job.id});
+  if(job.kind==='environment')proof=await prepareLayerEnvironment(job.project,job.work,{id:job.id,onProgress:heartbeat});
   else if(job.kind==='initialize')proof=await initializeCustomerLayer(job.project,job.work);
   else if(job.kind==='build'||job.kind==='refresh'&&job.state==='building'){
    await buildCustomerRelease(job.project,job.work,{id:job.id,version:job.version,revision:job.revision,workRevision:job.work_revision});await heartbeat();
@@ -29,6 +29,6 @@ try{
   await heartbeat();await api({action:'complete',id:job.id,claim:job.claim,proof});console.log(JSON.stringify({status:'customer_release_reported',id:job.id}));
  }
 }catch(error){
- if(job)await api({action:'fail',id:job.id,claim:job.claim,failureCode:error.code==='rollback_data_changed'?'rollback_data_changed':null}).catch(()=>{});
+ if(job)await api({action:'fail',id:job.id,claim:job.claim,failureCode:error.code==='rollback_data_changed'?'rollback_data_changed':job.kind==='environment'&&error.layerPreparationRetryable===true?'layer_setup_retryable':null}).catch(()=>{});
  console.error('Customer release work did not complete. Inspect its private local operation journal.');process.exitCode=1;
 }finally{clearInterval(timer);credential=null;}
