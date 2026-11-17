@@ -13,7 +13,7 @@ async function localLease(){
 }
 let job,timer,failed=false;
 try{
- await localLease();job=(await api({action:'claim',protocol:4})).job;
+ await localLease();job=(await api({action:'claim',protocol:5})).job;
  if(job){
   const heartbeat=async phase=>{await localLease();if(failed)throw Error('The customer release lease was lost.');await api({action:'heartbeat',id:job.id,claim:job.claim,...(phase?{phase}:{})});};
   timer=setInterval(()=>heartbeat().catch(()=>{failed=true;}),30000);

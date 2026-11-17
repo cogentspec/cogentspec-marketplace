@@ -69,7 +69,9 @@ export async function customerBinding(project,handoff,{environmentOnly=false}={}
  if(project.projectType!=='erpnext_business_app'||!uuid(work.id)||work.installationId!==project.id||work.runtimeId!==project.contractRuntimeId||work.packVersion!==project.packVersion||work.packId!==project.packId||work.contextKey!==project.contextKey||plan.projectId!==project.id||plan.runtimeId!==project.contractRuntimeId||!Array.isArray(work.selectedApps)||!environmentOnly&&!work.selectedApps.length||work.selectedApps.some(app=>!plan.apps.includes(app)))throw Error('The customer work does not match this installed ERP and module scope.');
  const app='customer_'+work.id.replaceAll('-','').slice(0,20),directory=work.storageVersion===2?resolve(root,'.coge/customer-vrc/layers',work.id):resolve(root,'.coge/customer-vrc'),source=resolve(directory,'apps',app);
  const ancestors=work.ancestors??[];
- if(ancestors.length>32||new Set(ancestors.map(layer=>layer.id)).size!==ancestors.length||ancestors.some(layer=>!uuid(layer.id)||!uuid(layer.releaseId)||!/^sha256:[a-f0-9]{64}$/.test(layer.imageId)||!/^customer_[a-f0-9]{20}$/.test(layer.app))||work.parentId&&ancestors.at(-1)?.id!==work.parentId)throw Error('The pinned parent chain is invalid.');
+ const parent=work.parentRuntime;
+ if(parent&&(!uuid(parent.workId)||parent.workId!==work.parentId||!uuid(parent.environmentId)||!/^sha256:[a-f0-9]{64}$/.test(parent.imageId)||parent.activeReleaseId!==work.parentReleaseId||parent.activeReleaseId!==null&&!uuid(parent.activeReleaseId)||parent.parentReleaseId!==null&&!uuid(parent.parentReleaseId)))throw Error('The parent runtime copy binding is invalid.');
+ if(ancestors.length>32||new Set(ancestors.map(layer=>layer.id)).size!==ancestors.length||ancestors.some(layer=>!uuid(layer.id)||!uuid(layer.releaseId)||!/^sha256:[a-f0-9]{64}$/.test(layer.imageId)||!/^customer_[a-f0-9]{20}$/.test(layer.app))||work.parentId&&(!parent||parent.activeReleaseId)&&ancestors.at(-1)?.id!==work.parentId||parent?.activeReleaseId&&ancestors.at(-1)?.releaseId!==parent.activeReleaseId||parent&&ancestors.length&&ancestors.at(-1)?.imageId!==parent.imageId)throw Error('The pinned parent chain is invalid.');
  await noLinks(root,directory);return {root,runtime,plan,work,app,directory,source,project};
 }
 export async function sourceInventory(directory){
@@ -86,7 +88,7 @@ async function locked(binding,fn){await mkdir(binding.directory,{recursive:true}
  try{return await fn();}finally{await handle.close();await unlink(path);await baseHandle.close();await unlink(basePath);}
 }
 export async function initializeCustomerLayer(project,handoff){const b=await customerBinding(project,handoff);return locked(b,async()=>{
- const identity={protocol:1,projectId:project.id,runtimeId:project.contractRuntimeId,customisationId:b.work.id,packId:project.packId,packVersion:project.packVersion,app:b.app,...(b.work.storageVersion===2?{parentReleaseId:b.work.parentReleaseId??null}: {})};
+ const identity={protocol:1,projectId:project.id,runtimeId:project.contractRuntimeId,customisationId:b.work.id,packId:project.packId,packVersion:project.packVersion,app:b.app,...(b.work.storageVersion===2?{parentReleaseId:b.work.parentReleaseId??null}: {}),...(b.work.parentRuntime?{parentRuntime:b.work.parentRuntime}:{})};
  const manifest=resolve(b.directory,'identity.json');if(await exists(manifest)){if(JSON.stringify(await json(manifest))!==JSON.stringify(identity))throw Error('The customer layer identity changed.');return {status:'ready',...identity,sourceDirectory:b.source};}
  await mkdir(resolve(b.source,b.app,'public/js'),{recursive:true});await mkdir(resolve(b.source,b.app,'tests'),{recursive:true});
  const files={'pyproject.toml':`[build-system]\nrequires = ["flit_core>=3.4,<4"]\nbuild-backend = "flit_core.buildapi"\n[project]\nname = "${b.app}"\ndescription = "Installation-specific customer customisations"\nversion = "1.0.0"\ndependencies = []\n`,[b.app+'/__init__.py']:'__version__ = "1.0.0"\n',[b.app+'/hooks.py']:`app_name = "${b.app}"\napp_title = "Customer customisations"\napp_publisher = "Customer"\napp_description = "Installation-specific customer VRC layer"\napp_email = ""\napp_license = "GPL-3.0"\nrequired_apps = ["cogent_erp"]\napp_include_js = ["${b.app}.bundle.js"]\n`,[b.app+'/modules.txt']:'',[b.app+'/patches.txt']:'',[b.app+'/tests/__init__.py']:'',[b.app+'/public/js/'+b.app+'.bundle.js']:'// Add the approved customer interface changes here.\n', 'README.md':'Customer source only. Keep the ERPNext and Cogent foundations unchanged. Add meaningful Frappe application tests before building a release.\n'};
@@ -198,6 +200,7 @@ async function layerRuntimeBinding(b){
  const runtimeDirectory=resolve(b.root,'.coge/customer-vrc/layers',b.work.id,'runtime');await noLinks(b.root,runtimeDirectory);
  const environment=await json(resolve(runtimeDirectory,'environment.json'));
  if(environment.workId!==b.work.id||environment.installationId!==b.project.id||environment.runtimeId!==b.work.runtimeId||environment.parentReleaseId!==(b.work.parentReleaseId??null)||!uuid(environment.id)||!environment.key?.startsWith(b.plan.key+'-vrc-'))throw Error('Prepare this layer’s separate runtime and data copy first.');
+ if(JSON.stringify(environment.parentRuntime??null)!==JSON.stringify(b.work.parentRuntime??null))throw Error('The layer’s parent copy identity changed.');
  const runtimeFile=resolve(runtimeDirectory,'compose.json'),document=await json(runtimeFile),base=await json(resolve(b.root,'.coge/runtime/compose.json'));
  const baseVolumes=new Set(Object.values(base.volumes).map(value=>value.name));
  for(const definition of Object.values(document.volumes)){
@@ -260,8 +263,8 @@ async function startLayerGateway(b){
  await stopLayerGateway(b);
  const inputFile=resolve(b.runtimeDirectory,'gateway-input.json');
  const {id,targetPath,projectType,contractRuntimeId,packId,packVersion,contextKey}=b.project;
- const {installationId,runtimeId,parentId,parentReleaseId,ancestors,storageVersion,updatedAt}=b.work;
- const work={id:b.work.id,installationId,runtimeId,packId,packVersion,contextKey,parentId,parentReleaseId,ancestors,storageVersion,updatedAt,selectedApps:[]};
+ const {installationId,runtimeId,parentId,parentReleaseId,parentRuntime,ancestors,storageVersion,updatedAt}=b.work;
+ const work={id:b.work.id,installationId,runtimeId,packId,packVersion,contextKey,parentId,parentReleaseId,parentRuntime,ancestors,storageVersion,updatedAt,selectedApps:[]};
  await save(inputFile,{project:{id,targetPath,projectType,contractRuntimeId,packId,packVersion,contextKey},work});const log=await open(resolve(b.runtimeDirectory,'gateway.log'),'a',0o600);
  try{const child=spawn(process.execPath,[fileURLToPath(import.meta.url),'--layer-gateway',inputFile],{windowsHide:true,detached:true,stdio:['ignore',log.fd,log.fd]});await new Promise((done,fail)=>{child.once('spawn',done);child.once('error',fail);});child.unref();}finally{await log.close();}
  const deadline=Date.now()+120000;while(Date.now()<deadline){const ready=await check();if(ready)return ready;await new Promise(done=>setTimeout(done,1000));}
@@ -287,9 +290,20 @@ export async function prepareLayerEnvironment(project,work,input){
   if(!await exists(resolve(directory,'environment.json'))){
    if(!uuid(input.id))throw Error('Choose a current customer layer environment request.');
    if(await exists(rootActive(original)))throw Error('A legacy shared customer runtime needs a recovery review before independent layers can be prepared. Its data has been preserved.');
-   const {receipt}=await verifiedBase(original),parent=work.ancestors?.at(-1);
+   const {receipt}=await verifiedBase(original),parent=work.ancestors?.at(-1),dataParent=work.parentRuntime;
    let source=original;
-   if(parent){
+   if(dataParent){
+    const parentDirectory=resolve(original.root,'.coge/customer-vrc/layers',dataParent.workId);await noLinks(original.root,parentDirectory);
+    const parentEnvironment=await json(resolve(parentDirectory,'runtime/environment.json'));
+    const parentWork={...work,id:dataParent.workId,parentId:parentEnvironment.parentRuntime?.workId??null,parentReleaseId:dataParent.parentReleaseId,parentRuntime:parentEnvironment.parentRuntime,selectedApps:[]};
+    source=await layerRuntimeBinding({...original,work:parentWork,app:'customer_'+dataParent.workId.replaceAll('-','').slice(0,20),directory:parentDirectory});
+    const active=await exists(rootActive(source))?await json(rootActive(source)):null;
+    if(source.environment.id!==dataParent.environmentId||(active?.releaseId??null)!==dataParent.activeReleaseId||(active?.imageId??source.environment.imageId)!==dataParent.imageId)throw Error('The parent changed while this copy was being prepared. Your original layer has been kept.');
+    if(active)await assertCustomerRuntime(project,parentWork);
+    else if(dataParent.imageId!==(parent?.imageId??receipt.image))throw Error('The parent copy does not match its verified inherited image.');
+    await compose(source,liveCompose(source),['up','-d','--wait','--wait-timeout','180','database','cache','queue',...writers,'frontend'],{timeout:240000});
+    await waitLayerHealth(source);
+   }else if(parent){
     const parentDirectory=resolve(original.root,'.coge/customer-vrc/layers',parent.id);await noLinks(original.root,parentDirectory);
     const environment=await json(resolve(parentDirectory,'runtime/environment.json'));
     const active=await json(resolve(parentDirectory,'runtime/active.json'));
@@ -297,7 +311,7 @@ export async function prepareLayerEnvironment(project,work,input){
     source=await layerRuntimeBinding({...original,work:{...active.binding,selectedApps:[]},directory:parentDirectory});
     if(environment.workId!==parent.id)throw Error('The parent runtime belongs to another layer.');
    }
-   const release={id:input.id,baseImage:receipt.image,imageId:parent?.imageId??receipt.image,layerChain:work.ancestors??[]};
+   const release={id:input.id,baseImage:receipt.image,imageId:dataParent?.imageId??parent?.imageId??receipt.image,layerChain:work.ancestors??[]};
    await mkdir(resolve(original.directory,'releases',input.id),{recursive:true});
    const sourceCompose=await assertLiveOwnership(source,{pinListener:false}),sourceFile=resolve(original.directory,'releases',input.id,'source-compose.json');
    await save(sourceFile,sourceCompose);source={...source,runtimeFile:sourceFile};let backup,site;
@@ -311,7 +325,7 @@ export async function prepareLayerEnvironment(project,work,input){
     // Preserve this clean restored copy as the layer's permanent environment.
     for(const service of Object.values(site.document.services))service.restart='unless-stopped';
     await mkdir(directory,{recursive:true});await save(resolve(directory,'compose.json'),site.document);
-    const environment={id:input.id,key:site.prefix,workId:work.id,installationId:project.id,runtimeId:work.runtimeId,parentReleaseId:work.parentReleaseId??null,imageId:release.imageId,backupVolume:backup.volume,createdAt:new Date().toISOString()};
+    const environment={id:input.id,key:site.prefix,workId:work.id,installationId:project.id,runtimeId:work.runtimeId,parentReleaseId:work.parentReleaseId??null,...(dataParent?{parentRuntime:dataParent}:{}),imageId:release.imageId,backupVolume:backup.volume,createdAt:new Date().toISOString()};
     await save(resolve(directory,'environment.json'),environment);
    }catch(error){
     // Only retry a completed failing command after cleanup succeeded. A killed
@@ -335,7 +349,7 @@ export async function prepareLayerEnvironment(project,work,input){
   const active=await exists(rootActive(b))?await json(rootActive(b)):null;
   if(active)await save(rootActive(b),{...active,composeDigest:hash(await readFile(liveCompose(b)))});
   const address=await startLayerGateway(b);
-  const proof={status:'ready',projectId:project.id,runtimeId:work.runtimeId,customisationId:work.id,packId:work.packId,packVersion:work.packVersion,parentReleaseId:work.parentReleaseId??null,environmentId:b.environment.id,releaseId:active?.releaseId??null,imageId:active?.imageId??b.environment.imageId,isolated:true,healthVerified:true,resourceVerified:true,restoreVerified:true,credentialsPreserved:true,filesPreserved:true,businessRecordsPreserved:true,...health,...address,verifiedAt:new Date().toISOString()};
+  const proof={status:'ready',projectId:project.id,runtimeId:work.runtimeId,customisationId:work.id,packId:work.packId,packVersion:work.packVersion,parentReleaseId:work.parentReleaseId??null,...(work.parentRuntime?{parentRuntime:work.parentRuntime}:{}),environmentId:b.environment.id,releaseId:active?.releaseId??null,imageId:active?.imageId??b.environment.imageId,isolated:true,healthVerified:true,resourceVerified:true,restoreVerified:true,credentialsPreserved:true,filesPreserved:true,businessRecordsPreserved:true,...health,...address,verifiedAt:new Date().toISOString()};
   await save(resolve(directory,'ready.json'),proof);return proof;
  });
 }
