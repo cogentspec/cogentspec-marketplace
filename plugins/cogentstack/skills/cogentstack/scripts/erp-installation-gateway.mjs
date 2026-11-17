@@ -67,19 +67,38 @@ async function stopPrevious(project,listener){
   if(command){if(!command.includes(runtimeFile))throw Error('ERP listener ownership changed.');try{process.kill(listener.pid);}catch(error){if(error.code!=='ESRCH')throw error;}}
  }
 }
+// Docker reports a container as running before Frappe is accepting requests.
+// Keep the same data and containers while its private endpoint warms up.
+export async function waitForErpNativeReady(runtime,project,plan,{timeout=180000,now=Date.now,sleep=delay}={}){
+ const deadline=now()+timeout;
+ do{
+  let proof;
+  try{proof=await runtime.inspect();}
+  catch(error){
+   if(/identity|ownership|changed|linked|approved|reviewed/i.test(error.message||''))throw error;
+   if(now()>=deadline)break;
+   await sleep(Math.min(1000,deadline-now()));continue;
+  }
+  if(proof.projectId!==project.id||proof.runtimeId!==project.contractRuntimeId||proof.sourceDigest!==plan.sourceDigest||proof.planDigest!==plan.planDigest)throw Object.assign(Error('The ERP startup identity changed.'),{code:'ERP_IDENTITY_CHANGED'});
+  if(proof.ready)return proof;
+  if(now()>=deadline)break;
+  await sleep(Math.min(1000,deadline-now()));
+ }while(now()<=deadline);
+ throw Object.assign(Error('ERP is taking longer to start. Its prepared files and data have been kept.'),{code:'ERP_STARTUP_TIMEOUT'});
+}
 export async function startErpInstallationGateway(project){
  const root=await realpath(project.targetPath);if(root.toLowerCase()!==resolve(project.targetPath).toLowerCase())throw Error('Linked installation folders are not supported.');
  for(const name of ['scripts','.coge','scripts/erpnext-runtime.mjs','scripts/first-owner.mjs','scripts/owner-session.mjs','scripts/erpnext-session.mjs'])if((await lstat(resolve(root,name))).isSymbolicLink())throw Error('Linked ERP adapters are not supported.');
  const runtime=await import(pathToFileURL(resolve(root,'scripts/erpnext-runtime.mjs'))),plan=await runtime.validatePlan();
  if(plan.projectId!==project.id||plan.runtimeId!==project.contractRuntimeId||project.projectType!=='erpnext_business_app')throw Error('The ERP installation binding changed.');
- const state=resolve(root,'.coge/runtime');await mkdir(state,{recursive:true});const lock=await open(resolve(root,'.coge/operation.lock'),'wx',0o600);
+ const state=resolve(root,'.coge/runtime');await mkdir(state,{recursive:true});if((await lstat(state)).isSymbolicLink())throw Error('Linked ERP runtime state is not supported.');const lock=await open(resolve(root,'.coge/operation.lock'),'wx',0o600);
  let server;
  try{
   let previous;try{previous=JSON.parse(await readFile(resolve(state,'listener.json'),'utf8'));}catch(error){if(error.code!=='ENOENT')throw error;}
   try{const proof=await runtime.inspect();if(!proof.ready)throw Error('ERP is stopped.');}catch{
    await execute('docker',['compose','--project-name',plan.key,'-f',resolve(state,'compose.json'),'up','-d','--wait','--wait-timeout','180','database','cache','queue','backend','websocket','worker','scheduler','frontend'],{timeout:240000});
    await execute('docker',['compose','--project-name',plan.key,'-f',resolve(state,'compose.json'),'restart','frontend'],{timeout:60000});
-   const proof=await runtime.inspect();if(!proof.ready||proof.projectId!==project.id||proof.runtimeId!==project.contractRuntimeId)throw Error('The existing ERP has not become ready.');
+   await waitForErpNativeReady(runtime,project,plan);
   }
   const connection=()=>verifiedErpNativeConnection(project,plan);await connection();
   const session=await import(pathToFileURL(resolve(root,'scripts/erpnext-session.mjs'))),{firstOwnerHandler}=await import(pathToFileURL(resolve(root,'scripts/first-owner.mjs'))),{establishOwnerSession}=await import(pathToFileURL(resolve(root,'scripts/owner-session.mjs')));
@@ -98,5 +117,12 @@ export async function startErpInstallationGateway(project){
   }finally{await unlink(temporary).catch(error=>{if(error.code!=='ENOENT')throw error;});}
   console.log(JSON.stringify({status:'running',engine:'erpnext',projectId:project.id,localUrl:address.url,addressProtocol:1}));
   const close=()=>server.close();process.once('SIGINT',close);process.once('SIGTERM',close);return server;
- }catch(error){server?.close();throw error;}finally{await lock.close();await unlink(resolve(root,'.coge/operation.lock'));}
+ }catch(error){
+  server?.close();
+  // The project, source and state path have already passed binding checks.
+  // Store a bounded code only; never persist process output or credentials.
+  const diagnostic={projectId:project.id,stage:'startup',error:{code:error.code==='ERP_STARTUP_TIMEOUT'?'ERP_STARTUP_TIMEOUT':'ERP_STARTUP_FAILED'},updatedAt:new Date().toISOString()};
+  await writeFile(resolve(state,'installation-diagnostic.json'),JSON.stringify(diagnostic),{mode:0o600}).catch(()=>{});
+  throw error;
+ }finally{await lock.close();await unlink(resolve(root,'.coge/operation.lock'));}
 }

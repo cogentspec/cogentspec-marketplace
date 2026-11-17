@@ -260,7 +260,9 @@ export async function installErpProject(project, inspectOnly = false, reconnectO
   if(engine==='erpnext')child.stdin.end(JSON.stringify(project));
   const running = await new Promise((done, fail) => {
     let output = "", finished = false;
-    const timer = setTimeout(() => { if (!finished) { child.kill(); fail(Error("The ERP did not start in time.")); } }, 120_000);
+    // Includes Docker's dependency wait, Frappe warm-up and owner verification.
+    // The supervising worker keeps heartbeats and cancellation active throughout.
+    const timer = setTimeout(() => { if (!finished) { child.kill(); fail(Object.assign(Error("ERP is taking longer to start."),{code:'ERP_STARTUP_TIMEOUT'})); } }, 600_000);
     child.once("error", () => { clearTimeout(timer); fail(Error("The ERP could not start.")); });
     child.once("exit", () => { if (!finished) { clearTimeout(timer); fail(Error("The ERP stopped before verification.")); } });
     child.stdout.on("data", chunk => {
@@ -290,9 +292,12 @@ export async function installErpProject(project, inspectOnly = false, reconnectO
     sourceDigest: validated.sourceDigest, customerRelease: customer ? {id:customer.releaseId,imageId:customer.imageId} : null, localUrl: running.localUrl, processId: listener.pid };
 }
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  let input = "";
   try {
-    let input = ""; for await (const chunk of process.stdin) { input += chunk; if (input.length > 8192) throw Error("Invalid plan."); }
+    for await (const chunk of process.stdin) { input += chunk; if (input.length > 8192) throw Error("Invalid plan."); }
     if(process.argv.includes('--gateway'))await startErpInstallationGateway(JSON.parse(input));
     else console.log(JSON.stringify(process.argv.includes('--stop')?await stopErpInstallation(JSON.parse(input)):await installErpProject(JSON.parse(input), process.argv.includes("--inspect"), process.argv.includes('--reconnect'))));
-  } catch { console.error("The ERP installation could not be verified. Existing project data was kept."); process.exitCode = 1; }
+  } catch(error) {
+    console.error("The ERP installation could not be verified. Existing project data was kept."); process.exitCode = 1;
+  }
 }

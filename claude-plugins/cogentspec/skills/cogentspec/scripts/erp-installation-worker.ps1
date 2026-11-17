@@ -38,11 +38,13 @@ function Invoke-ErpInstallationWork([string]$Token) {
     }
     if (-not $claimed.job) { return }
     $job = $claimed.job
+    for($attempt=1;$attempt -le 3;$attempt++){
+    $attemptStarted=[DateTime]::UtcNow
     try {
         $contextQuery = "context=$([Uri]::EscapeDataString([string]$job.context_key))"
         if ($job.mode -in @('reconnect','check')) {
             $proof = Invoke-ErpProjectRunner -Project $job.project -InspectOnly:($job.mode -eq 'check') -ReconnectOnly
-            Invoke-BridgeApi -Method Post -Path '/api/plugin/erp-installations' -Token $Token -Body @{ action = 'complete'; id = $job.id; claim = $job.claim; proof = $proof } | Out-Null
+            Complete-ErpInstallationResult $job $Token $proof
             return
         }
         $project = $job.project
@@ -61,23 +63,68 @@ function Invoke-ErpInstallationWork([string]$Token) {
         }
         Assert-ErpInstallationActive $job $Token
         $proof = Invoke-ErpProjectRunner -Project $project -InstallationJob $job -Token $Token
-        Invoke-BridgeApi -Method Post -Path '/api/plugin/erp-installations' -Token $Token -Body @{ action = 'complete'; id = $job.id; claim = $job.claim; proof = $proof } | Out-Null
+        Complete-ErpInstallationResult $job $Token $proof
+        return
     } catch {
+        $failureCode=Read-ErpInstallationFailure $job $attemptStarted
         if($job.mode -eq 'install'){
             # A stopped CLI can leave server-side Docker work alive. Always stop
             # this unverified installation's own resources before reporting failure.
             $stopped=if($job.project){Invoke-ErpProjectRunner -Project $job.project -StopOnly}else{@{stopped=$true;dataKept=$true}}
             $status=Invoke-BridgeApi -Method Post -Path '/api/plugin/erp-installations' -Token $Token -Body @{action='status';id=$job.id;claim=$job.claim}
             if($status.cancelRequested){Invoke-BridgeApi -Method Post -Path '/api/plugin/erp-installations' -Token $Token -Body @{action='cancelled';id=$job.id;claim=$job.claim;proof=$stopped}|Out-Null;return}
+            if($failureCode -eq 'ERP_STARTUP_TIMEOUT' -and $attempt -lt 3){
+                $job|Add-Member -NotePropertyName progress -NotePropertyValue @{phase='recovering';attempt=($attempt+1)} -Force
+                Assert-ErpInstallationActive $job $Token
+                Start-Sleep -Seconds 3
+                Assert-ErpInstallationActive $job $Token
+                continue
+            }
         }
-        Invoke-BridgeApi -Method Post -Path '/api/plugin/erp-installations' -Token $Token -Body @{ action = 'fail'; id = $job.id; claim = $job.claim } | Out-Null
+        Invoke-BridgeApi -Method Post -Path '/api/plugin/erp-installations' -Token $Token -Body @{ action = 'fail'; id = $job.id; claim = $job.claim; failureCode=$failureCode } | Out-Null
+        return
+    }
     }
 }
 
+function Complete-ErpInstallationResult($Job,[string]$Token,$Proof){
+    for($report=0;;$report++){
+        try{Invoke-BridgeApi -Method Post -Path '/api/plugin/erp-installations' -Token $Token -Body @{action='complete';id=$Job.id;claim=$Job.claim;proof=$Proof}|Out-Null;return}
+        catch{
+            # The server may have saved completion before its response was lost.
+            $status=Invoke-BridgeApi -Method Post -Path '/api/plugin/erp-installations' -Token $Token -Body @{action='status';id=$Job.id;claim=$Job.claim}
+            if($status.state -eq 'installed'){return}
+            if($status.cancelRequested -or $report -ge 2){throw}
+            Start-Sleep -Milliseconds (500*[Math]::Pow(2,$report))
+        }
+    }
+}
+function Read-ErpInstallationFailure($Job,$Started){
+    if(-not $Job.project){return ''}
+    try{
+        $path=Join-Path $Job.project.targetPath '.coge\runtime\installation-diagnostic.json'
+        $file=Get-Item -LiteralPath $path -ErrorAction Stop
+        if($file.Length -gt 4096 -or ($file.Attributes -band [IO.FileAttributes]::ReparsePoint)){return ''}
+        $value=Get-Content -LiteralPath $path -Raw -ErrorAction Stop|ConvertFrom-Json
+        if($value.projectId -ne $Job.project.id -or ([DateTime]$value.updatedAt).ToUniversalTime() -lt $Started.ToUniversalTime()){return ''}
+        if($value.error.code -eq 'ERP_STARTUP_TIMEOUT'){return 'ERP_STARTUP_TIMEOUT'}
+    }catch{}
+    return ''
+}
 function Assert-ErpInstallationActive($Job,[string]$Token){
     if(-not $Job){return}
     $progress=if($Job.PSObject.Properties['progress']){$Job.progress}else{$null}
-    $status=Invoke-BridgeApi -Method Post -Path '/api/plugin/erp-installations' -Token $Token -Body @{action='status';id=$Job.id;claim=$Job.claim;progress=$progress}
+    for($poll=0;;$poll++){
+        try{$status=Invoke-BridgeApi -Method Post -Path '/api/plugin/erp-installations' -Token $Token -Body @{action='status';id=$Job.id;claim=$Job.claim;progress=$progress};break}
+        catch{
+            # A brief network interruption must not kill a healthy native setup.
+            # An explicit authorisation/claim rejection still stops immediately.
+            $response=$_.Exception.PSObject.Properties['Response']
+            $statusProperty=if($response -and $response.Value){$response.Value.PSObject.Properties['StatusCode']}else{$null}
+            if($poll -ge 2 -or ($statusProperty -and [int]$statusProperty.Value -in @(401,403,409))){throw}
+            Start-Sleep -Milliseconds (500*[Math]::Pow(2,$poll))
+        }
+    }
     if($status.cancelRequested -or $status.state -ne 'installing'){throw 'ERP installation cancelled.'}
 }
 function New-ErpInstallationProcessJob($Process){
