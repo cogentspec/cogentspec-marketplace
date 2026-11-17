@@ -163,6 +163,24 @@ export async function stopErpInstallation(project,{run=args=>execute('docker',ar
 }
 
 // Reconnection must never enter distribution download, build or site preparation.
+// Read-only native evidence. Opening a URL or creating an account is not a login.
+// Keep this in the helper so published foundation packs remain immutable.
+export async function readErpBaseSetup(project,plan,{run=execute}={}) {
+  const unavailable={checked:false,loggedIn:false,setupComplete:false};
+  try {
+    if(project.projectType!=='erpnext_business_app'||plan.projectId!==project.id||plan.runtimeId!==project.contractRuntimeId||!/^coge-erpnext-[a-f0-9]+$/.test(plan.key))return unavailable;
+    const file=resolve(project.targetPath,'.coge/runtime/compose.json');
+    if((await lstat(file)).isSymbolicLink())return unavailable;
+    const document=JSON.parse(await readFile(file,'utf8'));
+    if(document.services?.backend?.labels?.['com.cogentspec.erpnext.project']!==project.id)return unavailable;
+    const code=`import frappe,json\nfrappe.init(site='cogent.local');frappe.connect()\nidentity=frappe.conf.get('cogent_installation') or {}\nassert identity.get('project_id')==${JSON.stringify(project.id)} and identity.get('runtime_id')==${JSON.stringify(project.contractRuntimeId)}\nlogged_in=bool(frappe.db.exists('User',{'enabled':1,'user_type':'System User','name':['not in',['Administrator','Guest']],'last_login':['is','set']}))\nprint('COGENT_SETUP='+json.dumps({'checked':True,'loggedIn':logged_in,'setupComplete':bool(frappe.is_setup_complete())}))\nfrappe.destroy()\n`;
+    const output=await run('docker',['compose','-p',plan.key,'-f',file,'exec','-T','--workdir','/home/frappe/frappe-bench/sites','backend','/home/frappe/frappe-bench/env/bin/python','-'],{input:code,timeout:15000});
+    const line=output.split(/\r?\n/).find(row=>row.startsWith('COGENT_SETUP='));
+    const value=JSON.parse(line?.slice('COGENT_SETUP='.length)||'null');
+    return value?.checked===true&&typeof value.loggedIn==='boolean'&&typeof value.setupComplete==='boolean'?{checked:true,loggedIn:value.loggedIn,setupComplete:value.setupComplete}:unavailable;
+  } catch { return unavailable; }
+}
+
 export async function installErpProject(project, inspectOnly = false, reconnectOnly = false, {run = execute,launch=spawn,addressStore} = {}) {
   const engine = project?.projectType === "erpnext_business_app" && project?.packId === "coge.erpnext-business-app.foundation" ? "erpnext"
     : project?.projectType === "odoo_business_app" && project?.packId === "coge.odoo-business-app.foundation" ? "odoo" : null;
@@ -197,7 +215,7 @@ export async function installErpProject(project, inspectOnly = false, reconnectO
         throw Object.assign(Error('Reconnect this ERP to give it its own saved installation address.'),{code:'ERP_ADDRESS_MIGRATION_REQUIRED'});
     }
     return { engine, projectId: project.id, targetPath: project.targetPath, runtimeId: project.contractRuntimeId,
-      foundationVersion: project.packVersion, modules: inspection.modules, ready: true,
+      foundationVersion: project.packVersion, modules: inspection.modules, ready: true,baseSetup:engine==='erpnext'&&!customer?await readErpBaseSetup(project,validated,{run}):undefined,
       sourceDigest: validated.sourceDigest, customerRelease: customer ? {id:customer.releaseId,imageId:customer.imageId} : null, localUrl: listener.url, processId: listener.pid };
   }
   let delivery;
@@ -268,7 +286,7 @@ export async function installErpProject(project, inspectOnly = false, reconnectO
   }
   if(delivery?.archive){try{await unlink(delivery.archive);}catch{/* A retained verified archive is safe to reuse. */}}
   return { engine, projectId: project.id, targetPath: project.targetPath, runtimeId: project.contractRuntimeId,
-    foundationVersion: project.packVersion, modules: inspected.modules, ready: true,
+    foundationVersion: project.packVersion, modules: inspected.modules, ready: true,baseSetup:engine==='erpnext'&&!customer?await readErpBaseSetup(project,validated,{run}):undefined,
     sourceDigest: validated.sourceDigest, customerRelease: customer ? {id:customer.releaseId,imageId:customer.imageId} : null, localUrl: running.localUrl, processId: listener.pid };
 }
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

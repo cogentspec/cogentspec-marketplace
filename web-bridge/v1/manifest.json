@@ -8,7 +8,7 @@
   "bridgeCompatibilityVersion": "0.6.175",
   "sourceSnapshot": "2fe075a1b10e000a573cc0fbc808d9f3cbc2bf7f",
   "files": {
-    "runtime/bridge-manager-core.ps1": "8ca49fbb7bfad877cc37da461201eee2291ec597103eec1d15246653af3f955c",
+    "runtime/bridge-manager-core.ps1": "d28a2d1933de1a6141e8bec82f5a545b57b975603154392fa48f3c93c7297349",
     "runtime/bridge-manager.ps1": "3d0be0f23559b3e96366b74a56cb2d962e4573f4623a5d3c39ebf4ecf3425c66",
     "runtime/connect-cogentstack.ps1": "8199400c7bcb848de420820a7e411a039a9e5364fd9f4d6c32b5a53f2aa064aa",
     "runtime/connect-web.ps1": "9589e4aee2bf9fcfa027be81989feee6217b6e0a7dc910405e169a7fbe3264e6",
@@ -29,7 +29,7 @@
     "runtime/fulfil-project.ps1": "7664878db2ef4f683b2f6458f4e25eac8038c34eddde6120b9ad7d1094ffbb7d",
     "runtime/generate-project-preview.ps1": "c748c1d2c5e8a4e54639ea266d73583104c605d1ec140c91d19446a7a8146983",
     "runtime/inspect-project-git.ps1": "06977654c4e7315b40adf89453c892d031c0de2fac11afaa48abed6a2b3193c4",
-    "runtime/install-erp-project.mjs": "49e622e4c6645de2d5afb0043dd8f7a07376b7c0bbc6647ef2879d845ddac78f",
+    "runtime/install-erp-project.mjs": "a20a6c39c0aa8d8d680cb8b683b83a0be5b1e21b1552d047b62b44542ac8e832",
     "runtime/native-command.ps1": "92ce65af94ce17a3f0ba263af835a20d8274dde2787472f5c609a7b656ada4d9",
     "runtime/prepare-development-handoff.ps1": "82c23415e291a3d9bf0cfe8ff2c02e035b693ecdeabc5181d032556b3b74f111",
     "runtime/project-build-handoff.ps1": "cef53104080aef5524742c2b3b617c501afcad250b3023e2279c45fae36bf56f",
